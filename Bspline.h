@@ -3,7 +3,7 @@
 
 #include "gridp_t.h"
 
-template <typename T, typename T3> class Bspline {
+template <typename T> class Bspline {
 
 private:
 
@@ -23,8 +23,8 @@ private:
 public:
 
   // B-spline data
-  T3 *theta;
-  T3 *dtheta;
+  T *theta;
+  T *dtheta;
 
   // Grid positions and charge (int x, int y, int z, float q)
   gridp_t *gridp;
@@ -32,6 +32,7 @@ public:
 private:
 
   void init(const int ncoord);
+
   template <typename B>
   void set_recip(const B *recip);
 

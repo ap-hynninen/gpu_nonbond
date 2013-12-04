@@ -3,10 +3,10 @@
 #include "gpu_utils.h"
 #include "Bspline.h"
 
-template <typename T3>
+template <typename T>
 __global__ void fill_bspline_4(const float4 *xyzq, const int ncoord, const float *recip,
 			       const int nfftx, const int nffty, const int nfftz,
-			       gridp_t *gridp, T3 *theta, T3 *dtheta) {
+			       gridp_t *gridp, float3 *theta, float3 *dtheta) {
 
   // Position to xyzq and atomgrid
   unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
@@ -124,43 +124,41 @@ __global__ void fill_bspline_4(const float4 *xyzq, const int ncoord, const float
 //
 // (c) Antti-Pekka Hynninen, 2013, aphynninen@hotmail.com
 //
-// NOTE: T3 must be a 3-extension of T. For example: T=float => T3=float3
-//
 
-template <typename T, typename T3>
-void Bspline<T, T3>::init(const int ncoord) {
-  reallocate<T3>(&theta, &theta_len, ncoord*order, 1.2f);
-  reallocate<T3>(&dtheta, &dtheta_len, ncoord*order, 1.2f);
+template <typename T>
+void Bspline<T>::init(const int ncoord) {
+  reallocate<T>(&theta, &theta_len, 3*ncoord*order, 1.2f);
+  reallocate<T>(&dtheta, &dtheta_len, 3*ncoord*order, 1.2f);
   reallocate<gridp_t>(&gridp, &gridp_len, ncoord, 1.2f);  
 }
 
-template <typename T, typename T3>
-Bspline<T, T3>::Bspline(const int ncoord, const int order, const double *h_recip) :
+template <typename T>
+Bspline<T>::Bspline(const int ncoord, const int order, const double *h_recip) :
   theta(NULL), dtheta(NULL), gridp(NULL), order(order) {
   init(ncoord);
   allocate<T>(&recip, 9);
   set_recip(h_recip);
 }
   
-template <typename T, typename T3>
-Bspline<T, T3>::~Bspline() {
-  deallocate<T3>(&theta);
-  deallocate<T3>(&dtheta);
+template <typename T>
+Bspline<T>::~Bspline() {
+  deallocate<T>(&theta);
+  deallocate<T>(&dtheta);
   deallocate<gridp_t>(&gridp);
   deallocate<T>(&recip);
 }
 
-template <typename T, typename T3>
+template <typename T>
 template <typename B>
-void Bspline<T, T3>::set_recip(const B *h_recip) {
+void Bspline<T>::set_recip(const B *h_recip) {
   T h_recip_T[9];
   for (int i=0;i < 9;i++) h_recip_T[i] = (T)h_recip[i];
   copy_HtoD<T>(h_recip_T, recip, 9);
 }
 
-template <typename T, typename T3>
-void Bspline<T, T3>::fill_bspline(const float4 *xyzq, const int ncoord,
-				  const int nfftx, const int nffty, const int nfftz) {
+template <typename T>
+void Bspline<T>::fill_bspline(const float4 *xyzq, const int ncoord,
+			      const int nfftx, const int nffty, const int nfftz) {
   int nthread = 64;
   int nblock = (ncoord-1)/nthread + 1;
 
@@ -170,9 +168,9 @@ void Bspline<T, T3>::fill_bspline(const float4 *xyzq, const int ncoord,
   
   switch(order) {
   case 4:
-    fill_bspline_4<T3> <<< nblock, nthread >>>(xyzq, ncoord, recip, 
-					       nfftx, nffty, nfftz, gridp, 
-					       theta, dtheta);
+    fill_bspline_4<T> <<< nblock, nthread >>>(xyzq, ncoord, recip, 
+					      nfftx, nffty, nfftz, gridp, 
+					      (float3 *)theta, (float3 *)dtheta);
     break;
   default:
     exit(1);
@@ -184,4 +182,4 @@ void Bspline<T, T3>::fill_bspline(const float4 *xyzq, const int ncoord,
 //
 // Explicit instances of Bspline
 //
-template class Bspline<float, float3>;
+template class Bspline<float>;

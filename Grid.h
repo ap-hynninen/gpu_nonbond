@@ -3,15 +3,22 @@
 
 #include <cufft.h>
 #include "Bspline.h"
+#include "Matrix3d.h"
 
-template <typename T>
+//
+// AT = Accumulation Type
+// CT = Calculation Type
+//
+template <typename AT, typename CT>
 class Grid {
 
-private:
+public:
 
   // Grid data arrays
-  T* data_T;
-  float* data_float;
+  Matrix3d<CT> mat1;
+  Matrix3d<CT> mat2;
+
+private:
 
   // Order of interpolation
   int order;
@@ -50,12 +57,15 @@ private:
 
   void print_info();
 
-  template <typename B, typename B3>
-  void spread_charge(const int ncoord, const Bspline<B, B3> &bspline);
+  void spread_charge(const int ncoord, const Bspline<CT> &bspline);
 
   void make_fft_plans();
 
+  void x_fft_r2c();
   void real2complex_fft();
+
+  void test_copy();
+  void test_transpose();
 
 };
 

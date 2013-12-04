@@ -3,6 +3,7 @@
 #include <cuda.h>
 #include <math.h>
 #include "gpu_utils.h"
+#include "Matrix3d.h"
 #include "Grid.h"
 
 //
@@ -30,18 +31,18 @@ __forceinline__ __device__ void write_grid <long long int> (const float val,
   atomicAdd((unsigned long long int *)&data[ind], qintp);
 }
 
-template <typename T>
+template <typename AT, typename CT>
 __global__ void reduce_charge_data(const int nfft_tot,
-				   const long long int *data_in,
-				   float *data_out) {
+				   const AT *data_in,
+				   CT *data_out) {
   // The generic version can not be used
 }
 
 // Convert "long long int" -> "float"
 template <>
-__global__ void reduce_charge_data<long long int>(const int nfft_tot,
-						  const long long int *data_in,
-						  float *data_out) {
+__global__ void reduce_charge_data<long long int, float>(const int nfft_tot,
+							 const long long int *data_in,
+							 float *data_out) {
   unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
   
   while (pos < nfft_tot) {
@@ -148,9 +149,9 @@ __launch_bounds__(64, 1)
 
 }
 
-template <typename T>
-void Grid<T>::init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
-		   bool y_land_locked, bool z_land_locked) {
+template <typename AT, typename CT>
+void Grid<AT, CT>::init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
+			bool y_land_locked, bool z_land_locked) {
   
   this->x0 = x0;
   this->x1 = x1;
@@ -186,19 +187,21 @@ void Grid<T>::init(int x0, int x1, int y0, int y1, int z0, int z1, int order,
   ysize = yhi - ylo + 1;
   zsize = zhi - zlo + 1;
   
-  data_size = xsize*ysize*zsize;
-  
-  allocate<T>(&data_T, data_size);
-  allocate<float>(&data_float, data_size);
+  data_size = ((xsize/2+1)*2)*ysize*zsize;
+
+  // mat1 is used for accumulation, make sure it has enough space
+  mat1.init(data_size*sizeof(AT)/sizeof(CT));
+  mat2.init(data_size);
 }
 
-template <typename T>
-Grid<T>::Grid(int nfftx, int nffty, int nfftz, int order,
-	      int nnode=1,
-	      int mynode=0) : nfftx(nfftx), nffty(nffty), nfftz(nfftz) {
+template <typename AT, typename CT>
+Grid<AT, CT>::Grid(int nfftx, int nffty, int nfftz, int order,
+		   int nnode=1,
+		   int mynode=0) : nfftx(nfftx), nffty(nffty), nfftz(nfftz) {
 
     assert(nnode >= 1);
     assert(mynode >= 0 && mynode < nnode);
+    assert(sizeof(AT) >= sizeof(CT));
 
     int nnode_y = max(1,(int)ceil( sqrt( (double)(nnode*nffty) / (double)(nfftz) )));
     int nnode_z = nnode/nnode_y;
@@ -230,14 +233,11 @@ Grid<T>::Grid(int nfftx, int nffty, int nfftz, int order,
     init(x0, x1, y0, y1, z0, z1, order, y_land_locked, z_land_locked);
   }
 
-template <typename T>
-Grid<T>::~Grid() {
-  deallocate<T>(&data_T);
-  deallocate<float>(&data_float);
-}
+template <typename AT, typename CT>
+Grid<AT, CT>::~Grid() {}
 
-template <typename T>
-void Grid<T>::print_info() {
+template <typename AT, typename CT>
+void Grid<AT, CT>::print_info() {
   std::cout << "order = " << order << std::endl;
   std::cout << "x0...x1   = " << x0 << " ... " << x1 << std::endl;
   std::cout << "y0...y1   = " << y0 << " ... " << y1 << std::endl;
@@ -249,11 +249,10 @@ void Grid<T>::print_info() {
   std::cout << "data_size = " << data_size << std::endl;
 }
 
-template <typename T>
-template <typename B, typename B3>
-void Grid<T>::spread_charge(const int ncoord, const Bspline<B, B3> &bspline) {
+template <typename AT, typename CT>
+void Grid<AT, CT>::spread_charge(const int ncoord, const Bspline<CT> &bspline) {
 
-  clear_gpu_array<T>(data_T, nfftx*nffty*nfftz);
+  clear_gpu_array<AT>((AT *)mat1.data, nfftx*nffty*nfftz);
 
   int nthread=64;
   int nblock=(ncoord-1)/nthread+1;
@@ -262,8 +261,10 @@ void Grid<T>::spread_charge(const int ncoord, const Bspline<B, B3> &bspline) {
 
   switch(order) {
   case 4:
-    spread_charge_4<T> <<< nblock, nthread >>>(ncoord, bspline.gridp, bspline.theta,
-					       nfftx, nffty, nfftz, data_T);
+    spread_charge_4<AT> <<< nblock, nthread >>>(ncoord, bspline.gridp,
+						(float3 *) bspline.theta,
+						nfftx, nffty, nfftz,
+						(AT *)mat1.data);
     break;
 
   default:
@@ -275,13 +276,17 @@ void Grid<T>::spread_charge(const int ncoord, const Bspline<B, B3> &bspline) {
   // Reduce charge data back to a float/double value
   nthread = 512;
   nblock = (nfftx*nffty*nfftz-1)/nthread + 1;
-  reduce_charge_data<T> <<< nblock, nthread >>>(nfftx*nffty*nfftz, data_T, data_float);
+  reduce_charge_data<AT, CT> <<< nblock, nthread >>>(nfftx*nffty*nfftz,
+						     (AT *)mat1.data,
+						     mat2.data);
   cudaCheck(cudaGetLastError());
 
+  mat1.set_nx_ny_nz(nfftx, nffty, nfftz);
+  mat2.set_nx_ny_nz(nfftx, nffty, nfftz);
 }
 
-template <typename T>
-void Grid<T>::make_fft_plans() {
+template <typename AT, typename CT>
+void Grid<AT, CT>::make_fft_plans() {
   cufftResult error;
 
   int n = nfftx;
@@ -293,7 +298,8 @@ void Grid<T>::make_fft_plans() {
   int odist = xsize/2;
   int batch = (y1-y0+1)*(z1-z0+1);
 
-  error = cufftPlanMany(&xf_plan, 1, &n, &inembed, istride, idist, &onembed, ostride, odist, 
+  error = cufftPlanMany(&xf_plan, 1, &n, &inembed, istride, idist,
+			&onembed, ostride, odist, 
 			CUFFT_R2C, batch);
   if (error != CUFFT_SUCCESS) {
     std::cerr<< "xf_plan failed" <<std::endl;
@@ -302,28 +308,75 @@ void Grid<T>::make_fft_plans() {
 
 }
 
-template <typename T>
-void Grid<T>::real2complex_fft() {
-  cufftResult error;
+template <typename AT, typename CT>
+void Grid<AT, CT>::test_copy() {
 
-  std::cout<<"-----------------"<<std::endl;
-  print_gpu_float(data_float, 10);
+  // Copy mat2 -> mat1
+  mat2.copy(mat1);
 
-  error = cufftExecR2C(xf_plan, (cufftReal *)data_float, (cufftComplex *)data_float);
+  // Compare mat2 vs. mat1
+  if (!mat2.compare(mat1, 0.0f)) {
+    std::cout << "test_copy FAILED" << std::endl;
+    exit(1);
+  }
+
+  std::cout << "test_copy OK" << std::endl;
+}
+
+template <typename AT, typename CT>
+void Grid<AT, CT>::test_transpose() {
+
+  // Transpose using GPU: mat2(x, y, z) -> mat1(y, z, x)
+  mat2.transpose_xyz_yzx(mat1);
+
+  // Transpose using CPU: mat2(x, y, z) -> mat3(y, z, x)
+  Matrix3d<CT> mat3(xsize, ysize, zsize);
+  mat2.transpose_xyz_yzx_host(mat3);
+
+  // Compare mat1 vs. mat3
+  if (!mat1.compare(mat3, 0.0f)) {
+    std::cout << "test_transpose FAILED" << std::endl;
+    exit(1);
+  }
+
+  std::cout << "test_transpose OK" << std::endl;
+}
+
+//
+// FFT x coordinate Real -> Complex
+//
+template <typename AT, typename CT>
+void Grid<AT, CT>::x_fft_r2c() {
+
+  cufftResult error = cufftExecR2C(xf_plan,
+				   (cufftReal *)mat2.data,
+				   (cufftComplex *)mat2.data);
   if (error != CUFFT_SUCCESS) {
     std::cerr<< "x_fft R2C failed" <<std::endl;
     exit(1);
   }
 
+  mat2.set_nx_ny_nz((nfftx/2+1)*2, nffty, nfftz);
+
+}
+
+template <typename AT, typename CT>
+void Grid<AT, CT>::real2complex_fft() {
+
+  std::cout<<"-----------------"<<std::endl;
+  print_gpu_float(mat2.data, 10);
+
+  x_fft_r2c();
+
   std::cout<<"-----------------"<<std::endl;
 
-  print_gpu_float(data_float, 10);
+  print_gpu_float(mat2.data, 10);
 
 }
 
 //
 // Explicit instances of Grid
 //
-template class Grid<long long int>;
-template void Grid<long long int>::spread_charge<float, float3>(const int,
-								const Bspline<float, float3> &);
+template class Grid<long long int, float>;
+//template void Grid<long long int>::spread_charge<float>(const int,
+//							const Bspline<float> &);
