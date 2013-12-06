@@ -42,6 +42,7 @@ public:
   ~Bspline();
   void fill_bspline(const float4 *xyzq, const int ncoord, 
 		    const int nfftx, const int nffty, const int nfftz);
+  void calc_prefac();
 };
 
 #endif // BSPLINE_H

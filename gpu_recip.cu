@@ -50,12 +50,13 @@ void test() {
 
   // Load comparison data
   Matrix3d<float> q(nfftx, nffty, nfftz, "test_data/q_real_double.txt");
-  Matrix3d<float> q_xfft((nfftx/2+1)*2, nffty, nfftz, "test_data/q_comp1_double.txt");
+  Matrix3d<float2> q_xfft(nfftx/2+1, nffty, nfftz, "test_data/q_comp1_double.txt");
+  Matrix3d<float2> q_zfft(nfftz, nfftx/2+1, nffty, "test_data/q_comp5_double.txt");
 
   XYZQ xyzq("test_data/xyzq.txt");
 
   Bspline<float> bspline(23558, order, recip);
-  Grid<long long int, float> grid(nfftx, nffty, nfftz, order, nnode, mynode);
+  Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, nnode, mynode);
 
   grid.make_fft_plans();
   grid.print_info();
@@ -64,22 +65,37 @@ void test() {
 
   grid.spread_charge(xyzq.ncoord, bspline);
 
-  float tol = 1.0e-5f;
+  double tol = 1.0e-5;
+  double max_diff;
 
-  if (!q.compare(grid.mat2, tol)) {
+  if (!q.compare(grid.charge_grid, tol, max_diff)) {
     std::cout<< "q comparison FAILED" << std::endl;
     return;
   } else {
-    std::cout<< "q comparison OK (tolerance " << tol << ")" << std::endl;
+    std::cout<< "q comparison OK (tolerance " << tol << " max difference "<< max_diff << ")" << std::endl;
   }
 
+  tol = 1.0e-2;
+  grid.r2c_fft();
+  if (!q_zfft.compare(grid.zfft_grid, tol, max_diff)) {
+    std::cout<< "q_zfft comparison FAILED" << std::endl;
+    return;
+  } else {
+    std::cout<< "q_zfft comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+  }
+
+  grid.scalar_sum(recip);
+
+  /*
+  tol = 1.0e-4;
   grid.x_fft_r2c();
-  if (!q_xfft.compare(grid.mat2, tol)) {
+  if (!q_xfft.compare(grid.xfft_grid, tol, max_diff)) {
     std::cout<< "q_xfft comparison FAILED" << std::endl;
     return;
   } else {
-    std::cout<< "q_xfft comparison OK (tolerance " << tol << ")" << std::endl;
+    std::cout<< "q_xfft comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
+  */
 
   //  grid.test_copy();
   //  grid.test_transpose();

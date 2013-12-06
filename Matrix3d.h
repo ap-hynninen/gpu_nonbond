@@ -9,10 +9,16 @@ private:
   // Size of the matrix
   int nx, ny, nz;
 
-  // Size of the matrix data buffer
-  int data_len;
+  // Size of the matrix in storage. Allows for padding.
+  int xsize, ysize, zsize;
 
-  void assert_size(Matrix3d<T>& mat);
+  // True if we are using an external storage for the data
+  bool external_storage;
+
+  // Initializes (allocates) data
+  void init(const int size, T* ext_data = NULL);
+
+  double norm(T a, T b);
 
 public:
 
@@ -20,23 +26,25 @@ public:
   T *data;
 
   Matrix3d();
-  Matrix3d(const int nx, const int ny, const int nz);
-  Matrix3d(const int nx, const int ny, const int nz, const char *filename);
+  Matrix3d(const int nx, const int ny, const int nz, T* ext_data = NULL);
+  Matrix3d(const int nx, const int ny, const int nz,
+	   const int xsize, const int ysize, const int zsize, T* ext_data = NULL);
+  Matrix3d(const int nx, const int ny, const int nz, const char *filename, T* ext_data = NULL);
   ~Matrix3d();
 
   void print_info();
 
-  void init(const int size);
+  bool compare(Matrix3d<T>* mat, const double tol, double& max_diff);
 
-  void set_nx_ny_nz(const int nx, const int ny, const int nz);
+  void transpose_xyz_yzx_host(Matrix3d<T>* mat);
+  void transpose_xyz_yzx(Matrix3d<T>* mat);
 
-  bool compare(Matrix3d<T>& mat, const T tol);
+  void copy(Matrix3d<T>* mat);
 
-  void transpose_xyz_yzx_host(Matrix3d<T>& mat_out);
-  void transpose_xyz_yzx(Matrix3d<T>& mat_out);
-
-  void copy(Matrix3d<T>& mat_out);
-
+  void print(const int x0, const int x1, 
+	     const int y0, const int y1,
+	     const int z0, const int z1);
+  
   void load(const int nx, const int ny, const int nz,
 	    const char *filename);
 };

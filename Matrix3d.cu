@@ -17,6 +17,7 @@ __global__ void transpose_xyz_yzx_kernel() {
 //
 template <typename T>
 __global__ void copy_kernel(const int nx, const int ny, const int nz,
+			    const int xsize, const int ysize, const int zsize,
 			    const T* data_in, T* data_out) {
 
   const int x = blockIdx.x * TILEDIM + threadIdx.x;
@@ -24,7 +25,7 @@ __global__ void copy_kernel(const int nx, const int ny, const int nz,
   const int z = blockIdx.z + threadIdx.z;
 
   for (int j=0;j < TILEDIM;j += TILEROWS)
-    data_out[x + (y + j + z*ny)*nx] = data_in[x + (y + j + z*ny)*nx];
+    data_out[x + (y + j + z*ysize)*xsize] = data_in[x + (y + j + z*ysize)*xsize];
 
 }
 
@@ -34,6 +35,7 @@ __global__ void copy_kernel(const int nx, const int ny, const int nz,
 //
 template <typename T>
 __global__ void transpose_xyz_yzx_kernel(const int nx, const int ny, const int nz,
+					 const int xsize, const int ysize, const int zsize,
 					 const T* data_in, T* data_out) {
 
   // Shared memory
@@ -45,7 +47,7 @@ __global__ void transpose_xyz_yzx_kernel(const int nx, const int ny, const int n
 
   // Read (x,y) data_in into tile (shared memory)
   for (int j=0;j < TILEDIM;j += TILEROWS)
-    tile[threadIdx.y + j][threadIdx.x] = data_in[x + (y + j + z*ny)*nx];
+    tile[threadIdx.y + j][threadIdx.x] = data_in[x + (y + j + z*ysize)*xsize];
 
   __syncthreads();
 
@@ -53,50 +55,52 @@ __global__ void transpose_xyz_yzx_kernel(const int nx, const int ny, const int n
   y = blockIdx.y * TILEDIM + threadIdx.x;
   x = blockIdx.x * TILEDIM + threadIdx.y;
   for (int j=0;j < TILEDIM;j += TILEROWS)
-    data_out[y + (z + (x+j)*nz)*ny] = tile[threadIdx.x][threadIdx.y + j];
+    data_out[y + (z + (x+j)*zsize)*ysize] = tile[threadIdx.x][threadIdx.y + j];
 
 }
 
 template <typename T>
-Matrix3d<T>::Matrix3d() {
-  nx = 0;
-  ny = 0;
-  nz = 0;
+Matrix3d<T>::Matrix3d() : nx(0), ny(0), nz(0), xsize(0), ysize(0), zsize(0) {
   data = NULL;
-  data_len = 0;
+  external_storage = false;
 }
 
 template <typename T>
-Matrix3d<T>::Matrix3d(const int nx, const int ny, const int nz) {
-  set_nx_ny_nz(nx, ny, nz);
-  data = NULL;
-  init(nx*ny*nz);
+Matrix3d<T>::Matrix3d(const int nx, const int ny, const int nz, T* ext_data) : 
+  nx(nx), ny(ny), nz(nz), xsize(nx), ysize(ny), zsize(nz) {
+  init(xsize*ysize*zsize, ext_data);
 }
 
 template <typename T>
 Matrix3d<T>::Matrix3d(const int nx, const int ny, const int nz,
-		      const char *filename) {
-  set_nx_ny_nz(nx, ny, nz);
-  data = NULL;
-  init(nx*ny*nz);
+		      const int xsize, const int ysize, const int zsize, T* ext_data) : 
+  nx(nx), ny(ny), nz(nz), xsize(xsize), ysize(ysize), zsize(zsize) {
+  init(xsize*ysize*zsize, ext_data);
+}
+
+template <typename T>
+Matrix3d<T>::Matrix3d(const int nx, const int ny, const int nz,
+		      const char *filename, T* ext_data) : 
+  nx(nx), ny(ny), nz(nz), xsize(nx), ysize(ny), zsize(nz) {
+  init(xsize*ysize*zsize, ext_data);
   load(nx, ny, nz, filename);
 }
 
 template <typename T>
 Matrix3d<T>::~Matrix3d() {
-  deallocate<T>(&data);
+  if (!external_storage)
+    deallocate<T>(&data);
 }
 
 template <typename T>
-void Matrix3d<T>::init(const int size) {
-  reallocate<T>(&data, &data_len, size);
-}
-
-template <typename T>
-void Matrix3d<T>::set_nx_ny_nz(const int nx, const int ny, const int nz) {
-  this->nx = nx;
-  this->ny = ny;
-  this->nz = nz;
+void Matrix3d<T>::init(const int size, T* ext_data) {
+  if (ext_data == NULL) {
+    allocate<T>(&data, size);
+    external_storage = false;
+  } else {
+    data = ext_data;
+    external_storage = true;
+  }
 }
 
 //
@@ -104,16 +108,33 @@ void Matrix3d<T>::set_nx_ny_nz(const int nx, const int ny, const int nz) {
 //
 template <typename T>
 void Matrix3d<T>::print_info() {
-  std::cout << "nx ny nz = " << nx << " "<< ny << " "<< nz << std::endl;
-  std::cout << "data_len = " << data_len << std::endl;
+  std::cout << "nx ny nz          = " << nx << " "<< ny << " "<< nz << std::endl;
+  std::cout << "xsize ysize zsize = " << xsize << " "<< ysize << " "<< zsize << std::endl;
 }
 
-//
-// Makes sure Matrix "mat" is has at least enough storage as this matrix
-//
-template <typename T>
-void Matrix3d<T>::assert_size(Matrix3d<T>& mat) {
-  assert(mat.data_len >= data_len);
+template <>
+inline double Matrix3d<long long int>::norm(long long int a, long long int b) {
+  return (double)llabs(a-b);
+}
+
+template <>
+inline double Matrix3d<float>::norm(float a, float b) {
+  return (double)fabsf(a-b);
+}
+
+template <>
+inline double Matrix3d<float2>::norm(float2 a, float2 b) {
+  return (double)max(fabsf(a.x-b.x), fabsf(a.y-b.y) );
+}
+
+std::ostream& operator<<(std::ostream& os, float2& a) {
+  os << a.x << " " << a.y;
+  return os;
+}
+
+std::istream& operator>>(std::istream& is, float2& a) {
+  is >> a.x >> a.y;
+  return is;
 }
 
 //
@@ -121,35 +142,40 @@ void Matrix3d<T>::assert_size(Matrix3d<T>& mat) {
 // NOTE: Comparison is done in double precision
 //
 template <typename T>
-bool Matrix3d<T>::compare(Matrix3d<T>& mat, const T tol) {
+bool Matrix3d<T>::compare(Matrix3d<T>* mat, const double tol, double& max_diff) {
 
-  assert(mat.data_len >= nx*ny*nz);
-  assert(mat.nx == nx);
-  assert(mat.ny == ny);
-  assert(mat.nz == nz);
+  assert(mat->nx == nx);
+  assert(mat->ny == ny);
+  assert(mat->nz == nz);
 
-  T *h_data1 = new T[nx*ny*nz];
-  T *h_data2 = new T[nx*ny*nz];
+  T *h_data1 = new T[xsize*ysize*zsize];
+  T *h_data2 = new T[xsize*ysize*zsize];
 
-  copy_DtoH<T>(data,     h_data1, nx*ny*nz);
-  copy_DtoH<T>(mat.data, h_data2, nx*ny*nz);
-
-  double toldbl = (double)tol;
+  copy_DtoH<T>(data,      h_data1, xsize*ysize*zsize);
+  copy_DtoH<T>(mat->data, h_data2, xsize*ysize*zsize);
 
   bool ok = true;
 
-  for (int z=0;z < nz;z++)
-    for (int y=0;y < ny;y++)
-      for (int x=0;x < nx;x++) {
-	double diff = fabs(h_data1[x + (y + z*ny)*nx] - h_data2[x + (y + z*ny)*nx]);
-	if (ok && diff > toldbl) {
-	  std::cout << "x y z = " << x << " "<< y << " "<< z << std::endl;
-	  std::cout << "this: " << h_data1[x + (y + z*ny)*nx] << std::endl;
-	  std::cout << "mat:  " << h_data2[x + (y + z*ny)*nx] << std::endl;
-	  std::cout << "difference: " << diff << std::endl;
-	  ok = false;
+  max_diff = 0.0;
+
+  int x, y, z;
+  double diff;
+  try {
+    for (z=0;z < nz;z++)
+      for (y=0;y < ny;y++)
+	for (x=0;x < nx;x++) {
+	  diff = norm(h_data1[x + (y + z*ysize)*xsize], h_data2[x + (y + z*ysize)*xsize]);
+	  max_diff = (diff > max_diff) ? diff : max_diff;
+	  if (diff > tol) throw 1;
 	}
-      }
+  }
+  catch (int a) {
+    std::cout << "x y z = " << x << " "<< y << " "<< z << std::endl;
+    std::cout << "this: " << h_data1[x + (y + z*ysize)*xsize] << std::endl;
+    std::cout << "mat:  " << h_data2[x + (y + z*ysize)*xsize] << std::endl;
+    std::cout << "difference: " << diff << std::endl;
+    ok = false;
+  }
 
   delete [] h_data1;
   delete [] h_data2;
@@ -162,28 +188,28 @@ bool Matrix3d<T>::compare(Matrix3d<T>& mat, const T tol) {
 // NOTE: this is a slow reference calculation performed on the host
 //
 template <typename T>
-void Matrix3d<T>::transpose_xyz_yzx_host(Matrix3d<T>& mat_out) {
+void Matrix3d<T>::transpose_xyz_yzx_host(Matrix3d<T>* mat) {
 
-  assert_size(mat_out);
+  assert(mat->nx == ny);
+  assert(mat->ny == nz);
+  assert(mat->nz == nx);
 
-  T *h_data1 = new T[nx*ny*nz];
-  T *h_data2 = new T[nx*ny*nz];
+  T *h_data1 = new T[xsize*ysize*zsize];
+  T *h_data2 = new T[xsize*ysize*zsize];
 
-  copy_DtoH<T>(data,         h_data1, nx*ny*nz);
-  copy_DtoH<T>(mat_out.data, h_data2, nx*ny*nz);
+  copy_DtoH<T>(data,      h_data1, xsize*ysize*zsize);
+  copy_DtoH<T>(mat->data, h_data2, xsize*ysize*zsize);
 
   for (int z=0;z < nz;z++)
     for (int y=0;y < ny;y++)
       for (int x=0;x < nx;x++)
-	h_data2[y + (z + x*nz)*ny] = h_data1[x + (y + z*ny)*nx];
+	h_data2[y + (z + x*zsize)*ysize] = h_data1[x + (y + z*ysize)*xsize];
 
-  copy_HtoD<T>(h_data1, data,         nx*ny*nz);
-  copy_HtoD<T>(h_data2, mat_out.data, nx*ny*nz);
+  copy_HtoD<T>(h_data1, data,      xsize*ysize*zsize);
+  copy_HtoD<T>(h_data2, mat->data, xsize*ysize*zsize);
 
   delete [] h_data1;
   delete [] h_data2;
-
-  mat_out.set_nx_ny_nz(ny, nz, nx);
 
 }
 
@@ -191,36 +217,59 @@ void Matrix3d<T>::transpose_xyz_yzx_host(Matrix3d<T>& mat_out) {
 // Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
 //
 template <typename T>
-void Matrix3d<T>::transpose_xyz_yzx(Matrix3d<T>& mat_out) {
+void Matrix3d<T>::transpose_xyz_yzx(Matrix3d<T>* mat) {
 
-  assert_size(mat_out);
+  assert(mat->nx == ny);
+  assert(mat->ny == nz);
+  assert(mat->nz == nx);
 
   dim3 nthread(TILEDIM, TILEROWS, 1);
   dim3 nblock((nx-1)/TILEDIM+1, (ny-1)/TILEDIM+1, nz);
 
-  transpose_xyz_yzx_kernel<<< nblock, nthread >>>(nx, ny, nz, data, mat_out.data);
+  transpose_xyz_yzx_kernel<<< nblock, nthread >>>(nx, ny, nz, xsize, ysize, zsize,
+						  data, mat->data);
 
   cudaCheck(cudaGetLastError());
 
-  mat_out.set_nx_ny_nz(ny, nz, nx);
 }
 
 //
 // Copies a 3d matrix data(x, y, z) -> data(x, y, z)
 //
 template <typename T>
-void Matrix3d<T>::copy(Matrix3d<T>& mat_out) {
+void Matrix3d<T>::copy(Matrix3d<T>* mat) {
 
-  assert_size(mat_out);
+  assert(mat->nx == nx);
+  assert(mat->ny == ny);
+  assert(mat->nz == nz);
 
   dim3 nthread(TILEDIM, TILEROWS, 1);
   dim3 nblock((nx-1)/TILEDIM+1, (ny-1)/TILEDIM+1, nz);
 
-  copy_kernel<<< nblock, nthread >>>(nx, ny, nz, data, mat_out.data);
+  copy_kernel<<< nblock, nthread >>>(nx, ny, nz, xsize, ysize, zsize,
+				     data, mat->data);
 
   cudaCheck(cudaGetLastError());
 
-  mat_out.set_nx_ny_nz(nx, ny, nz);
+}
+
+//
+// Prints part of matrix (x0:x1, y0:y1, z0:z1) on screen
+//
+template <typename T>
+void Matrix3d<T>::print(const int x0, const int x1, 
+			const int y0, const int y1,
+			const int z0, const int z1) {
+  T *h_data = new T[xsize*ysize*zsize];
+
+  copy_DtoH<T>(data, h_data, xsize*ysize*zsize);
+
+  for (int z=z0;z <= z1;z++)
+    for (int y=y0;y <= y1;y++)
+      for (int x=x0;x <= x1;x++)
+	std::cout << h_data[x + (y + z*ysize)*xsize] << std::endl;
+
+  delete [] h_data;
 }
 
 //
@@ -230,28 +279,36 @@ template <typename T>
 void Matrix3d<T>::load(const int nx, const int ny, const int nz,
 		       const char *filename) {
 
-  assert(data_len >= nx*ny*nz);
+  assert(this->nx == nx);
+  assert(this->ny == ny);
+  assert(this->nz == nz);
 
-  set_nx_ny_nz(nx, ny, nz);
+  std::ifstream file;
+  file.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+  try {
+    // Open file
+    file.open(filename);
 
-  std::ifstream file(filename);
-  if (file.is_open()) {
-    
     // Allocate CPU memory
-    T *h_data = new T[nx*ny*nz];
+    T *h_data = new T[xsize*ysize*zsize];
     
     // Read data
-    for (int i=0;i < nx*ny*nz;i++)
-      file >> h_data[i];
+    for (int z=0;z < nz;z++)
+      for (int y=0;y < ny;y++)
+	for (int x=0;x < nx;x++)
+	  file >> h_data[x + (y + z*ysize)*xsize];
 
     // Copy data from CPU to GPU
-    copy_HtoD<T>(h_data, data, nx*ny*nz);
+    copy_HtoD<T>(h_data, data, xsize*ysize*zsize);
 
     // Deallocate CPU memory
     delete [] h_data;
 
-  } else {
-    std::cerr<<"Error opening file "<<filename<<std::endl;
+    // Close file
+    file.close();
+  }
+  catch(std::ifstream::failure e) {
+    std::cerr << "Error opening/reading/closing file " << filename << std::endl;
     exit(1);
   }
 
@@ -261,4 +318,5 @@ void Matrix3d<T>::load(const int nx, const int ny, const int nz,
 // Explicit instances of Matrix3d
 //
 template class Matrix3d<float>;
-//template class Matrix3d<long long int>;
+template class Matrix3d<float2>;
+template class Matrix3d<long long int>;

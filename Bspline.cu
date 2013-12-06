@@ -1,4 +1,5 @@
 #include <iostream>
+#include <math.h>
 #include <cuda.h>
 #include "gpu_utils.h"
 #include "Bspline.h"
@@ -177,6 +178,54 @@ void Bspline<T>::fill_bspline(const float4 *xyzq, const int ncoord,
   }
   
   cudaCheck(cudaGetLastError());
+}
+
+void dftmod(double *bsp_mod, const double *bsp_arr, const int nfft) {
+
+  const double rsmall = 1.0e-10;
+  double nfftr = (2.0*3.14159265358979323846)/(double)nfft;
+
+  for (int k=1;k <= nfft;k++) {
+    double sum1 = 0.0;
+    double sum2 = 0.0;
+    double arg1 = (k-1)*nfftr;
+    for (int j=1;j < nfft;j++) {
+      double arg = arg1*(j-1);
+      sum1 += bsp_arr[j-1]*cos(arg);
+      sum2 += bsp_arr[j-1]*sin(arg);
+    }
+    bsp_mod[k-1] = sum1*sum1 + sum2*sum2;
+  }
+
+  for (int k=1;k <= nfft;k++)
+    if (bsp_mod[k-1] < rsmall)
+      bsp_mod[k-1] = 0.5*(bsp_mod[k-1-1] + bsp_mod[k+1-1]);
+
+  for (int k=1;k <= nfft;k++)
+    bsp_mod[k-1] = 1.0/bsp_mod[k-1];
+
+}
+
+//
+// Calculates (prefac_x, prefac_y, prefac_z)
+// NOTE: This calculation is done on the CPU since it is only done very infrequently
+//
+template <typename T>
+void Bspline<T>::calc_prefac() {
+  
+  int max_nfft = max(nfftx, nffty, nfftz);
+  double *bsp_arr = new double[max_nfft];
+  double *bsp_mod = new double[max_nfft];
+
+  for (int i=0;i < max_nfft;i++) bsp_arr[i] = 0.0;
+
+  fill_bspline_host(w, order, array, darray);
+
+  dftmod(bsp_mod, bsp_arr, nfftx);
+  for (int i=0;i < nfftx;i++) h_prefac_x[i] = (T)bsp_mod[i];
+
+  delete [] bsp_arr;
+  delete [] bsp_mod;
 }
 
 //

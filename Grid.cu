@@ -31,7 +31,7 @@ __forceinline__ __device__ void write_grid <long long int> (const float val,
   atomicAdd((unsigned long long int *)&data[ind], qintp);
 }
 
-template <typename AT, typename CT>
+template <typename AT, typename CT, typename CT2>
 __global__ void reduce_charge_data(const int nfft_tot,
 				   const AT *data_in,
 				   CT *data_out) {
@@ -40,9 +40,9 @@ __global__ void reduce_charge_data(const int nfft_tot,
 
 // Convert "long long int" -> "float"
 template <>
-__global__ void reduce_charge_data<long long int, float>(const int nfft_tot,
-							 const long long int *data_in,
-							 float *data_out) {
+__global__ void reduce_charge_data<long long int, float, float2>(const int nfft_tot,
+								 const long long int *data_in,
+								 float *data_out) {
   unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
   
   while (pos < nfft_tot) {
@@ -149,9 +149,90 @@ __launch_bounds__(64, 1)
 
 }
 
-template <typename AT, typename CT>
-void Grid<AT, CT>::init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
-			bool y_land_locked, bool z_land_locked) {
+//
+// Performs scalar sum on data(nfft1, nfft2, nfft3)
+// T = {float, double}
+// T2 = {float2, double2}
+//
+template <typename T, typename T2>
+__global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const int nfft3,
+					const int nf1, const int nf2, const int nf3,
+					const T recip11, const T recip22, const T recip33,
+					const T* prefac1, const T* prefac2, const T* prefac3,
+					const bool global_base, T2* data) {
+  extern __shared__ T sh_buf[];
+
+  // Create pointers to shared memory
+  T* sh_prefac1 = (T *)&sh_buf[0];
+  T* sh_prefac2 = (T *)&sh_buf[nfft1];
+  T* sh_prefac3 = (T *)&sh_buf[nfft1+nfft2];
+
+  // Calculate start position (k1, k2, k3) for each thread
+  unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
+  int k3 = tid/(nfft1*nfft2);
+  tid -= k3*nfft1*nfft2;
+  int k2 = tid/nfft1;
+  int k1 = tid - k2*nfft1;
+
+  // Calculate increments (k1_inc, k2_inc, k3_inc)
+  int tot_inc = blockDim.x*gridDim.x;
+  int k3_inc = tot_inc/(nfft1*nfft2);
+  tot_inc -= k3_inc*nfft1*nfft2;
+  int k2_inc = tot_inc/nfft1;
+  int k1_inc = tot_inc - k2_inc*nfft1;
+
+  // Set data[0] = 0 for the global (0,0,0)
+  if (global_base && (blockIdx.x + threadIdx.x == 0)) {
+    data[0] = T2(0.0, 0.0);
+  }
+
+  // Load prefac data into shared memory
+
+  while (k3 < nfft3) {
+
+    int pos = k1 + (k2 + k3*nfft2)*nfft1;
+    T2 q = data[pos];
+
+    int m1 = k1;
+    int m2 = k2;
+    int m3 = k3;
+    if (k1 >= nf1) m1 -= nfft1;
+    if (k2 >= nf2) m2 -= nfft2;
+    if (k3 >= nf3) m3 -= nfft3;
+
+    T mhat1 = recip11*m1;
+    T mhat2 = recip22*m2;
+    T mhat3 = recip33*m3;
+
+    T msq = mhat1*mhat1 + mhat2*mhat2 + mhat3*mhat3;
+    T msq_inv = (T)1.0/msq;
+
+    // NOTE: check if it's faster to pre-calculate exp()
+    T eterm = exp(-fac*msq)*piv_inv*sh_prefac1[k1]*sh_prefac2[k2]*sh_prefac3[k3]*msq_inv;
+
+    q.x *= eterm;
+    q.y *= eterm;
+    data[pos] = q;
+    
+    // Increment position
+    k1 += k1_inc;
+    if (k1 >= nfft1) {
+      k1 -= nfft1;
+      k2++;
+    }
+    k2 += k2_inc;
+    if (k2 >= nfft2) {
+      k2 -= nfft2;
+      k3++;
+    }
+    k3 += k3_inc;
+  }
+
+}
+
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
+			     bool y_land_locked, bool z_land_locked) {
   
   this->x0 = x0;
   this->x1 = x1;
@@ -186,18 +267,37 @@ void Grid<AT, CT>::init(int x0, int x1, int y0, int y1, int z0, int z1, int orde
   xsize = xhi - xlo + 1;
   ysize = yhi - ylo + 1;
   zsize = zhi - zlo + 1;
-  
-  data_size = ((xsize/2+1)*2)*ysize*zsize;
 
-  // mat1 is used for accumulation, make sure it has enough space
-  mat1.init(data_size*sizeof(AT)/sizeof(CT));
-  mat2.init(data_size);
+  data_size = (2*(xsize/2+1))*ysize*zsize;
+
+  // data1 is used for accumulation, make sure it has enough space
+  allocate<CT>(&data1, data_size*sizeof(AT)/sizeof(CT));
+  allocate<CT>(&data2, data_size);
+
+  data1_len = data_size*sizeof(AT)/sizeof(CT);
+  data2_len = data_size;
+
+  accum_grid  = new Matrix3d<AT>(xsize,         ysize, zsize, xsize,         ysize, zsize,
+				 (AT *)data1);
+
+  charge_grid = new Matrix3d<CT>(xsize,         ysize, zsize, 2*(xsize/2+1), ysize, zsize,
+				 (CT *)data2);
+
+  xfft_grid   = new Matrix3d<CT2>(xsize/2+1, ysize, zsize, xsize/2+1, ysize, zsize,
+				  (CT2 *)data2);
+
+  yfft_grid   = new Matrix3d<CT2>(ysize, zsize, xsize/2+1, ysize, zsize, xsize/2+1,
+				  (CT2 *)data1);
+
+  zfft_grid   = new Matrix3d<CT2>(zsize, xsize/2+1, ysize, zsize, xsize/2+1, ysize,
+				  (CT2 *)data2);
+
 }
 
-template <typename AT, typename CT>
-Grid<AT, CT>::Grid(int nfftx, int nffty, int nfftz, int order,
-		   int nnode=1,
-		   int mynode=0) : nfftx(nfftx), nffty(nffty), nfftz(nfftz) {
+template <typename AT, typename CT, typename CT2>
+Grid<AT, CT, CT2>::Grid(int nfftx, int nffty, int nfftz, int order,
+			int nnode=1,
+			int mynode=0) : nfftx(nfftx), nffty(nffty), nfftz(nfftz) {
 
     assert(nnode >= 1);
     assert(mynode >= 0 && mynode < nnode);
@@ -233,11 +333,17 @@ Grid<AT, CT>::Grid(int nfftx, int nffty, int nfftz, int order,
     init(x0, x1, y0, y1, z0, z1, order, y_land_locked, z_land_locked);
   }
 
-template <typename AT, typename CT>
-Grid<AT, CT>::~Grid() {}
+template <typename AT, typename CT, typename CT2>
+Grid<AT, CT, CT2>::~Grid() {
+  delete accum_grid;
+  delete charge_grid;
+  delete xfft_grid;
+  deallocate<CT>(&data1);
+  deallocate<CT>(&data2);
+}
 
-template <typename AT, typename CT>
-void Grid<AT, CT>::print_info() {
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::print_info() {
   std::cout << "order = " << order << std::endl;
   std::cout << "x0...x1   = " << x0 << " ... " << x1 << std::endl;
   std::cout << "y0...y1   = " << y0 << " ... " << y1 << std::endl;
@@ -249,10 +355,13 @@ void Grid<AT, CT>::print_info() {
   std::cout << "data_size = " << data_size << std::endl;
 }
 
-template <typename AT, typename CT>
-void Grid<AT, CT>::spread_charge(const int ncoord, const Bspline<CT> &bspline) {
+//
+// Spread the charge on grid
+//
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspline) {
 
-  clear_gpu_array<AT>((AT *)mat1.data, nfftx*nffty*nfftz);
+  clear_gpu_array<AT>((AT *)accum_grid->data, xsize*ysize*zsize);
 
   int nthread=64;
   int nblock=(ncoord-1)/nthread+1;
@@ -264,7 +373,7 @@ void Grid<AT, CT>::spread_charge(const int ncoord, const Bspline<CT> &bspline) {
     spread_charge_4<AT> <<< nblock, nthread >>>(ncoord, bspline.gridp,
 						(float3 *) bspline.theta,
 						nfftx, nffty, nfftz,
-						(AT *)mat1.data);
+						(AT *)accum_grid->data);
     break;
 
   default:
@@ -276,38 +385,74 @@ void Grid<AT, CT>::spread_charge(const int ncoord, const Bspline<CT> &bspline) {
   // Reduce charge data back to a float/double value
   nthread = 512;
   nblock = (nfftx*nffty*nfftz-1)/nthread + 1;
-  reduce_charge_data<AT, CT> <<< nblock, nthread >>>(nfftx*nffty*nfftz,
-						     (AT *)mat1.data,
-						     mat2.data);
+  reduce_charge_data<AT, CT, CT2> <<< nblock, nthread >>>(xsize*ysize*zsize,
+							  (AT *)accum_grid->data,
+							  charge_grid->data);
   cudaCheck(cudaGetLastError());
 
-  mat1.set_nx_ny_nz(nfftx, nffty, nfftz);
-  mat2.set_nx_ny_nz(nfftx, nffty, nfftz);
 }
 
-template <typename AT, typename CT>
-void Grid<AT, CT>::make_fft_plans() {
-  cufftResult error;
+//
+// Perform scalar sum without calculating virial or energy (faster)
+//
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::scalar_sum(const CT* recip,
+				   const CT* prefac_x, const CT* prefac_y, const CT* prefac_z) {
 
-  int n = nfftx;
-  int inembed = xsize;
-  int istride = 1;
-  int idist = xsize;
-  int onembed = xsize/2;
-  int ostride = 1;
-  int odist = xsize/2;
-  int batch = (y1-y0+1)*(z1-z0+1);
+  int nthread = 512;
+  int nblock = 10;
+  int shmem_size = sizeof(CT)*(nfftx + nffty + nfftz);
 
-  error = cufftPlanMany(&xf_plan, 1, &n, &inembed, istride, idist,
-			&onembed, ostride, odist, 
-			CUFFT_R2C, batch);
-  if (error != CUFFT_SUCCESS) {
-    std::cerr<< "xf_plan failed" <<std::endl;
-    exit(1);
-  }
+  int nfx = nfftx/2 + (nfftx % 2);
+  int nfy = nffty/2 + (nffty % 2);
+  int nfz = nfftz/2 + (nfftz % 2);
+
+  scalar_sum_ortho_kernel<CT, CT2>
+    <<< nblock, nthread, shmem_size >>> (nfftz, nfftx/2+1, nffty,
+					 nfz, nfx, nfy,
+					 recip[2], recip[0], recip[1],
+					 prefac_z, prefac_x, prefac_y,
+					 true, zfft_grid->data);
+  
+  cudaCheck(cudaGetLastError());
 
 }
 
+#define cufftCheck(stmt) do {						\
+    cufftResult err = stmt;						\
+    if (err != CUFFT_SUCCESS) {						\
+      printf("Error running %s in file %s, function %s\n", #stmt,__FILE__,__FUNCTION__); \
+      exit(1);								\
+    }									\
+  } while(0)
+
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::make_fft_plans() {
+  int batch;
+
+  batch = (y1-y0+1)*(z1-z0+1);
+  cufftCheck(cufftPlanMany(&x_r2c_plan, 1, &nfftx,
+			   NULL, 0, 0,
+			   NULL, 0, 0, 
+			   CUFFT_R2C, batch));
+  cufftCheck(cufftSetCompatibilityMode(x_r2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+
+  batch = (z1-z0+1)*(x1-x0+1);
+  cufftCheck(cufftPlanMany(&y_c2c_plan, 1, &nffty,
+			   NULL, 0, 0,
+			   NULL, 0, 0, 
+			   CUFFT_C2C, batch));
+  cufftCheck(cufftSetCompatibilityMode(y_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+
+  batch = (x1-x0+1)*(y1-y0+1);
+  cufftCheck(cufftPlanMany(&z_c2c_plan, 1, &nfftz,
+			   NULL, 0, 0,
+			   NULL, 0, 0, 
+			   CUFFT_C2C, batch));
+  cufftCheck(cufftSetCompatibilityMode(z_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+}
+
+/*
 template <typename AT, typename CT>
 void Grid<AT, CT>::test_copy() {
 
@@ -341,42 +486,64 @@ void Grid<AT, CT>::test_transpose() {
 
   std::cout << "test_transpose OK" << std::endl;
 }
+*/
 
 //
 // FFT x coordinate Real -> Complex
 //
-template <typename AT, typename CT>
-void Grid<AT, CT>::x_fft_r2c() {
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::x_fft_r2c() {
 
-  cufftResult error = cufftExecR2C(xf_plan,
-				   (cufftReal *)mat2.data,
-				   (cufftComplex *)mat2.data);
-  if (error != CUFFT_SUCCESS) {
-    std::cerr<< "x_fft R2C failed" <<std::endl;
-    exit(1);
-  }
-
-  mat2.set_nx_ny_nz((nfftx/2+1)*2, nffty, nfftz);
+  cufftCheck(cufftExecR2C(x_r2c_plan,
+			  (cufftReal *)xfft_grid->data,
+			  (cufftComplex *)xfft_grid->data));
 
 }
 
-template <typename AT, typename CT>
-void Grid<AT, CT>::real2complex_fft() {
+//
+// FFT y coordinate Complex -> Complex
+//
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::y_fft_c2c() {
 
-  std::cout<<"-----------------"<<std::endl;
-  print_gpu_float(mat2.data, 10);
+  cufftCheck(cufftExecC2C(y_c2c_plan,
+			  (cufftComplex *)yfft_grid->data,
+			  (cufftComplex *)yfft_grid->data,
+			  CUFFT_FORWARD));
 
+}
+
+//
+// FFT z coordinate Complex -> Complex
+//
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::z_fft_c2c() {
+
+  cufftCheck(cufftExecC2C(z_c2c_plan,
+			  (cufftComplex *)zfft_grid->data,
+			  (cufftComplex *)zfft_grid->data,
+			  CUFFT_FORWARD));
+
+}
+
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::r2c_fft() {
+
+  // data2(x, y, z)
   x_fft_r2c();
+  xfft_grid->transpose_xyz_yzx(yfft_grid);
 
-  std::cout<<"-----------------"<<std::endl;
+  // data1(y, z, x)
+  y_fft_c2c();
+  yfft_grid->transpose_xyz_yzx(zfft_grid);
 
-  print_gpu_float(mat2.data, 10);
-
+  // data2(z, x, y)
+  z_fft_c2c();
 }
 
 //
 // Explicit instances of Grid
 //
-template class Grid<long long int, float>;
+template class Grid<long long int, float, float2>;
 //template void Grid<long long int>::spread_charge<float>(const int,
 //							const Bspline<float> &);

@@ -6,17 +6,27 @@
 #include "Matrix3d.h"
 
 //
-// AT = Accumulation Type
-// CT = Calculation Type
+// AT  = Accumulation Type
+// CT  = Calculation Type (real)
+// CT2 = Calculation Type (complex)
 //
-template <typename AT, typename CT>
+template <typename AT, typename CT, typename CT2>
 class Grid {
 
 public:
 
   // Grid data arrays
-  Matrix3d<CT> mat1;
-  Matrix3d<CT> mat2;
+  CT *data1;
+  CT *data2;
+
+  int data1_len;
+  int data2_len;
+
+  Matrix3d<AT> *accum_grid;    // data1
+  Matrix3d<CT> *charge_grid;   // data2
+  Matrix3d<CT2> *xfft_grid;    // data2
+  Matrix3d<CT2> *yfft_grid;    // data1
+  Matrix3d<CT2> *zfft_grid;    // data2
 
 private:
 
@@ -46,7 +56,11 @@ private:
   // Total size of the data array
   int data_size;
 
-  cufftHandle xf_plan;
+  // Plans for FFT
+  cufftHandle x_r2c_plan;
+  cufftHandle y_c2c_plan;
+  cufftHandle z_c2c_plan;
+  cufftHandle x_c2r_plan;
 
   void init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 	  bool y_land_locked, bool z_land_locked);
@@ -62,10 +76,12 @@ private:
   void make_fft_plans();
 
   void x_fft_r2c();
-  void real2complex_fft();
+  void y_fft_c2c();
+  void z_fft_c2c();
+  void r2c_fft();
 
-  void test_copy();
-  void test_transpose();
+  //  void test_copy();
+  //  void test_transpose();
 
 };
 
