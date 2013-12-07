@@ -73,12 +73,19 @@ private:
 
   void spread_charge(const int ncoord, const Bspline<CT> &bspline);
 
+  void scalar_sum(const double* recip, const double kappa,
+		  const CT* prefac_x, const CT* prefac_y, const CT* prefac_z);
+
+  void gather_force(const int ncoord, const Bspline<CT> &bspline, AT* force);
+
   void make_fft_plans();
 
   void x_fft_r2c();
-  void y_fft_c2c();
-  void z_fft_c2c();
+  void x_fft_c2r();
+  void y_fft_c2c(int direction);
+  void z_fft_c2c(int direction);
   void r2c_fft();
+  void c2r_fft();
 
   //  void test_copy();
   //  void test_transpose();

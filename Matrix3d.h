@@ -19,6 +19,7 @@ private:
   void init(const int size, T* ext_data = NULL);
 
   double norm(T a, T b);
+  bool is_nan(T a);
 
 public:
 
@@ -37,7 +38,10 @@ public:
   bool compare(Matrix3d<T>* mat, const double tol, double& max_diff);
 
   void transpose_xyz_yzx_host(Matrix3d<T>* mat);
+  void transpose_xyz_zxy_host(Matrix3d<T>* mat);
+
   void transpose_xyz_yzx(Matrix3d<T>* mat);
+  void transpose_xyz_zxy(Matrix3d<T>* mat);
 
   void copy(Matrix3d<T>* mat);
 

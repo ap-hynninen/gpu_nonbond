@@ -127,18 +127,23 @@ __global__ void fill_bspline_4(const float4 *xyzq, const int ncoord, const float
 //
 
 template <typename T>
-void Bspline<T>::init(const int ncoord) {
+void Bspline<T>::set_ncoord(const int ncoord) {
   reallocate<T>(&theta, &theta_len, 3*ncoord*order, 1.2f);
   reallocate<T>(&dtheta, &dtheta_len, 3*ncoord*order, 1.2f);
   reallocate<gridp_t>(&gridp, &gridp_len, ncoord, 1.2f);  
 }
 
 template <typename T>
-Bspline<T>::Bspline(const int ncoord, const int order, const double *h_recip) :
-  theta(NULL), dtheta(NULL), gridp(NULL), order(order) {
-  init(ncoord);
+Bspline<T>::Bspline(const int ncoord, const int order, const int nfftx, const int nffty, const int nfftz) :
+  theta(NULL), dtheta(NULL), gridp(NULL), order(order), nfftx(nfftx), nffty(nffty), nfftz(nfftz) {
+
+  set_ncoord(ncoord);
+
   allocate<T>(&recip, 9);
-  set_recip(h_recip);
+  allocate<T>(&prefac_x, nfftx);
+  allocate<T>(&prefac_y, nffty);
+  allocate<T>(&prefac_z, nfftz);
+
 }
   
 template <typename T>
@@ -147,6 +152,9 @@ Bspline<T>::~Bspline() {
   deallocate<T>(&dtheta);
   deallocate<gridp_t>(&gridp);
   deallocate<T>(&recip);
+  deallocate<T>(&prefac_x);
+  deallocate<T>(&prefac_y);
+  deallocate<T>(&prefac_z);
 }
 
 template <typename T>
@@ -158,12 +166,16 @@ void Bspline<T>::set_recip(const B *h_recip) {
 }
 
 template <typename T>
-void Bspline<T>::fill_bspline(const float4 *xyzq, const int ncoord,
-			      const int nfftx, const int nffty, const int nfftz) {
+void Bspline<T>::fill_bspline(const float4 *xyzq, const int ncoord) {
+
+  // Re-allocates (theta, dtheta, gridp) if needed
+  set_ncoord(ncoord);
+
   int nthread = 64;
   int nblock = (ncoord-1)/nthread + 1;
 
   std::cout << "nblock=" << nblock << std::endl;
+  std::cout << nfftx << " "<< nffty << " "<< nfftz << std::endl;
 
   //bool ortho = (recip[1] == recip[2] == recip[3] == recip[5] == recip[6] == recip[7] == 0.0f);
   
@@ -180,7 +192,8 @@ void Bspline<T>::fill_bspline(const float4 *xyzq, const int ncoord,
   cudaCheck(cudaGetLastError());
 }
 
-void dftmod(double *bsp_mod, const double *bsp_arr, const int nfft) {
+template <typename T>
+void Bspline<T>::dftmod(double *bsp_mod, const double *bsp_arr, const int nfft) {
 
   const double rsmall = 1.0e-10;
   double nfftr = (2.0*3.14159265358979323846)/(double)nfft;
@@ -206,29 +219,86 @@ void dftmod(double *bsp_mod, const double *bsp_arr, const int nfft) {
 
 }
 
+template <typename T>
+void Bspline<T>::fill_bspline_host(const double w, double *array, double *darray) {
+
+  //--- do linear case
+  array[order-1] = 0.0;
+  array[2-1] = w;
+  array[1-1] = 1.0 - w;
+
+  //--- compute standard b-spline recursion
+  for (int k=3;k <= order-1;k++) {
+    double div = 1.0 / (double)(k-1);
+    array[k-1] = div*w*array[k-1-1];
+    for (int j=1;j <= k-2;j++)
+      array[k-j-1] = div*((w+j)*array[k-j-1-1] + (k-j-w)*array[k-j-1]);
+    array[1-1] = div*(1.0-w)*array[1-1];
+  }
+
+  //--- perform standard b-spline differentiation
+  darray[1-1] = -array[1-1];
+  for (int j=2;j <= order;j++)
+    darray[j-1] = array[j-1-1] - array[j-1];
+
+  //--- one more recursion
+  int k = order;
+  double div = 1.0 / (double)(k-1);
+  array[k-1] = div*w*array[k-1-1];
+  for (int j=1;j <= k-2;j++)
+    array[k-j-1] = div*((w+j)*array[k-j-1-1] + (k-j-w)*array[k-j-1]);
+
+  array[1-1] = div*(1.0-w)*array[1-1];
+
+}
+
 //
 // Calculates (prefac_x, prefac_y, prefac_z)
-// NOTE: This calculation is done on the CPU since it is only done very infrequently
+// NOTE: This calculation is done on the CPU since it is only done infrequently
 //
 template <typename T>
 void Bspline<T>::calc_prefac() {
   
-  int max_nfft = max(nfftx, nffty, nfftz);
+  int max_nfft = max(nfftx, max(nffty, nfftz));
   double *bsp_arr = new double[max_nfft];
   double *bsp_mod = new double[max_nfft];
+  double *array = new double[order];
+  double *darray = new double[order];
+  T *h_prefac_x = new T[nfftx];
+  T *h_prefac_y = new T[nffty];
+  T *h_prefac_z = new T[nfftz];
 
+  fill_bspline_host(0.0, array, darray);
   for (int i=0;i < max_nfft;i++) bsp_arr[i] = 0.0;
-
-  fill_bspline_host(w, order, array, darray);
+  for (int i=2;i <= order+1;i++) bsp_arr[i-1] = array[i-1-1];
 
   dftmod(bsp_mod, bsp_arr, nfftx);
   for (int i=0;i < nfftx;i++) h_prefac_x[i] = (T)bsp_mod[i];
 
+  dftmod(bsp_mod, bsp_arr, nffty);
+  for (int i=0;i < nffty;i++) h_prefac_y[i] = (T)bsp_mod[i];
+
+  dftmod(bsp_mod, bsp_arr, nfftz);
+  for (int i=0;i < nfftz;i++) h_prefac_z[i] = (T)bsp_mod[i];
+
+  //  std::cout<< "h_prefac_x = "<<std::endl;
+  //  for (int i=0;i < 10;i++) std::cout<<h_prefac_x[i]<<std::endl;
+
+  copy_HtoD<T>(h_prefac_x, prefac_x, nfftx);
+  copy_HtoD<T>(h_prefac_y, prefac_y, nfftx);
+  copy_HtoD<T>(h_prefac_z, prefac_z, nfftx);
+
   delete [] bsp_arr;
   delete [] bsp_mod;
+  delete [] array;
+  delete [] darray;
+  delete [] h_prefac_x;
+  delete [] h_prefac_y;
+  delete [] h_prefac_z;
 }
 
 //
 // Explicit instances of Bspline
 //
 template class Bspline<float>;
+template void Bspline<float>::set_recip<double>(const double *h_recip);

@@ -29,14 +29,13 @@ __global__ void copy_kernel(const int nx, const int ny, const int nz,
 
 }
 
-
 //
 // Transposes a 3d matrix out-of-place: data_in(x, y, z) -> data_out(y, z, x)
 //
 template <typename T>
 __global__ void transpose_xyz_yzx_kernel(const int nx, const int ny, const int nz,
-					 const int xsize, const int ysize, const int zsize,
-					 const T* data_in, T* data_out) {
+					  const int xsize, const int ysize, const int zsize,
+					  const T* data_in, T* data_out) {
 
   // Shared memory
   __shared__ T tile[TILEDIM][TILEDIM+1];
@@ -47,15 +46,48 @@ __global__ void transpose_xyz_yzx_kernel(const int nx, const int ny, const int n
 
   // Read (x,y) data_in into tile (shared memory)
   for (int j=0;j < TILEDIM;j += TILEROWS)
-    tile[threadIdx.y + j][threadIdx.x] = data_in[x + (y + j + z*ysize)*xsize];
+    if ((x < nx) && (y + j < ny) && (z < nz))
+      tile[threadIdx.y + j][threadIdx.x] = data_in[x + (y + j + z*ysize)*xsize];
 
   __syncthreads();
 
   // Write (y,x) tile into data_out
-  y = blockIdx.y * TILEDIM + threadIdx.x;
   x = blockIdx.x * TILEDIM + threadIdx.y;
+  y = blockIdx.y * TILEDIM + threadIdx.x;
   for (int j=0;j < TILEDIM;j += TILEROWS)
-    data_out[y + (z + (x+j)*zsize)*ysize] = tile[threadIdx.x][threadIdx.y + j];
+    if ((x + j < nx) && (y < ny) && (z < nz))
+      data_out[y + (z + (x+j)*zsize)*ysize] = tile[threadIdx.x][threadIdx.y + j];
+
+}
+
+//
+// Transposes a 3d matrix out-of-place: data_in(x, y, z) -> data_out(z, x, y)
+//
+template <typename T>
+__global__ void transpose_xyz_zxy_kernel(const int nx, const int ny, const int nz,
+					 const int xsize, const int ysize, const int zsize,
+					 const T* data_in, T* data_out) {
+
+  // Shared memory
+  __shared__ T tile[TILEDIM][TILEDIM+1];
+
+  int x = blockIdx.x * TILEDIM + threadIdx.x;
+  int y = blockIdx.z           + threadIdx.z;
+  int z = blockIdx.y * TILEDIM + threadIdx.y;
+
+  // Read (x,z) data_in into tile (shared memory)
+  for (int k=0;k < TILEDIM;k += TILEROWS)
+    if ((x < nx) && (y < ny) && (z + k < nz))
+      tile[threadIdx.y + k][threadIdx.x] = data_in[x + (y + (z + k)*ysize)*xsize];
+
+  __syncthreads();
+
+  // Write (z,x) tile into data_out
+  x = blockIdx.x * TILEDIM + threadIdx.y;
+  z = blockIdx.y * TILEDIM + threadIdx.x;
+  for (int k=0;k < TILEDIM;k += TILEROWS)
+    if ((x + k < nx) && (y < ny) && (z < nz))
+      data_out[z + (x + k + y*xsize)*zsize] = tile[threadIdx.x][threadIdx.y + k];
 
 }
 
@@ -127,6 +159,19 @@ inline double Matrix3d<float2>::norm(float2 a, float2 b) {
   return (double)max(fabsf(a.x-b.x), fabsf(a.y-b.y) );
 }
 
+template<>
+inline bool Matrix3d<long long int>::is_nan(long long int a) {return false;};
+
+template<>
+inline bool Matrix3d<float>::is_nan(float a) {
+  return isnan(a);
+}
+
+template<>
+inline bool Matrix3d<float2>::is_nan(float2 a) {
+  return (isnan(a.x) || isnan(a.y));
+}
+
 std::ostream& operator<<(std::ostream& os, float2& a) {
   os << a.x << " " << a.y;
   return os;
@@ -164,16 +209,18 @@ bool Matrix3d<T>::compare(Matrix3d<T>* mat, const double tol, double& max_diff) 
     for (z=0;z < nz;z++)
       for (y=0;y < ny;y++)
 	for (x=0;x < nx;x++) {
+	  if (is_nan(h_data1[x + (y + z*ysize)*xsize]) || 
+	      is_nan(h_data2[x + (y + z*ysize)*xsize])) throw 1;
 	  diff = norm(h_data1[x + (y + z*ysize)*xsize], h_data2[x + (y + z*ysize)*xsize]);
 	  max_diff = (diff > max_diff) ? diff : max_diff;
-	  if (diff > tol) throw 1;
+	  if (diff > tol) throw 2;
 	}
   }
   catch (int a) {
     std::cout << "x y z = " << x << " "<< y << " "<< z << std::endl;
     std::cout << "this: " << h_data1[x + (y + z*ysize)*xsize] << std::endl;
     std::cout << "mat:  " << h_data2[x + (y + z*ysize)*xsize] << std::endl;
-    std::cout << "difference: " << diff << std::endl;
+    if (a == 2) std::cout << "difference: " << diff << std::endl;
     ok = false;
   }
 
@@ -215,6 +262,36 @@ void Matrix3d<T>::transpose_xyz_yzx_host(Matrix3d<T>* mat) {
 
 //
 // Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
+// NOTE: this is a slow reference calculation performed on the host
+//
+template <typename T>
+void Matrix3d<T>::transpose_xyz_zxy_host(Matrix3d<T>* mat) {
+
+  assert(mat->nx == nz);
+  assert(mat->ny == nx);
+  assert(mat->nz == ny);
+
+  T *h_data1 = new T[xsize*ysize*zsize];
+  T *h_data2 = new T[xsize*ysize*zsize];
+
+  copy_DtoH<T>(data,      h_data1, xsize*ysize*zsize);
+  copy_DtoH<T>(mat->data, h_data2, xsize*ysize*zsize);
+
+  for (int z=0;z < nz;z++)
+    for (int y=0;y < ny;y++)
+      for (int x=0;x < nx;x++)
+	h_data2[z + (x + y*xsize)*zsize] = h_data1[x + (y + z*ysize)*xsize];
+
+  copy_HtoD<T>(h_data1, data,      xsize*ysize*zsize);
+  copy_HtoD<T>(h_data2, mat->data, xsize*ysize*zsize);
+
+  delete [] h_data1;
+  delete [] h_data2;
+
+}
+
+//
+// Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
 //
 template <typename T>
 void Matrix3d<T>::transpose_xyz_yzx(Matrix3d<T>* mat) {
@@ -223,10 +300,36 @@ void Matrix3d<T>::transpose_xyz_yzx(Matrix3d<T>* mat) {
   assert(mat->ny == nz);
   assert(mat->nz == nx);
 
+  //  assert(nx % TILEDIM == 0);
+  //  assert(nz % TILEDIM == 0);
+
+  dim3 nthread(TILEDIM, TILEROWS, 1);
+  dim3 nblock((nx-1)/TILEDIM+1, (nz-1)/TILEDIM+1, ny);
+
+  transpose_xyz_yzx_kernel<<< nblock, nthread >>>(nx, ny, nz, xsize, ysize, zsize,
+						  data, mat->data);
+
+  cudaCheck(cudaGetLastError());
+
+}
+
+//
+// Transposes a 3d matrix out-of-place: data(x, y, z) -> data(z, x, y)
+//
+template <typename T>
+void Matrix3d<T>::transpose_xyz_zxy(Matrix3d<T>* mat) {
+
+  assert(mat->nx == nz);
+  assert(mat->ny == nx);
+  assert(mat->nz == ny);
+
+  //  assert(nx % TILEDIM == 0);
+  //  assert(ny % TILEDIM == 0);
+
   dim3 nthread(TILEDIM, TILEROWS, 1);
   dim3 nblock((nx-1)/TILEDIM+1, (ny-1)/TILEDIM+1, nz);
 
-  transpose_xyz_yzx_kernel<<< nblock, nthread >>>(nx, ny, nz, xsize, ysize, zsize,
+  transpose_xyz_zxy_kernel<<< nblock, nthread >>>(nx, ny, nz, xsize, ysize, zsize,
 						  data, mat->data);
 
   cudaCheck(cudaGetLastError());
