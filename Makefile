@@ -4,11 +4,11 @@ OS := $(shell uname -s)
 
 LFLAGS = 
 
-SRCS = Grid.cu Bspline.cu XYZQ.cu Matrix3d.cu gpu_recip.cu
-OBJS = Grid.o Bspline.o XYZQ.o Matrix3d.o gpu_recip.o
+SRCS = Grid.cu Bspline.cu XYZQ.cu Matrix3d.cu Force.cu gpu_recip.cu
+OBJS = Grid.o Bspline.o XYZQ.o Matrix3d.o Force.o gpu_recip.o
 
 ifeq ($(OS),Linux)
-LFLAGS += -L /usr/local/cuda-6.0/lib64 -I /usr/local/cuda-6.0/include -lcudart -lnvToolsExt -lcufft
+LFLAGS += -lcudart -lnvToolsExt -lcufft
 else
 LFLAGS += -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcuda -lstdc++.6 -lnvToolsExt
 endif

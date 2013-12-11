@@ -1,15 +1,17 @@
 #ifndef BSPLINE_H
 #define BSPLINE_H
 
-#include "gridp_t.h"
-
 template <typename T> class Bspline {
 
 private:
 
   // Length of the B-spline data arrays
-  int theta_len;
-  int dtheta_len;
+  int thetax_len;
+  int thetay_len;
+  int thetaz_len;
+  int dthetax_len;
+  int dthetay_len;
+  int dthetaz_len;
 
   // Size of the FFT
   int nfftx;
@@ -19,25 +21,35 @@ private:
   // B-spline order
   int order;
 
-  // Length of gridp
-  int gridp_len;
+  // Length of the data arrays
+  int gix_len;
+  int giy_len;
+  int giz_len;
+  int charge_len;
 
   // Reciprocal vectors
-  T *recip;
+  T* recip;
 
 public:
 
   // B-spline data
-  T *theta;
-  T *dtheta;
+  T *thetax;
+  T *thetay;
+  T *thetaz;
+  T *dthetax;
+  T *dthetay;
+  T *dthetaz;
 
   // prefac arrays
   T* prefac_x;
   T* prefac_y;
   T* prefac_z;
 
-  // Grid positions and charge (int x, int y, int z, float q)
-  gridp_t *gridp;
+  // Grid positions and charge of the atoms
+  int *gix;
+  int *giy;
+  int *giz;
+  T *charge;
 
 private:
 

@@ -13,6 +13,15 @@ static __constant__ const double INV_FORCE_SCALE = (double)1.0/(double)(1ll << 4
         }                                                  \
     } while(0)
 
+#define cufftCheck(stmt) do {						\
+    cufftResult err = stmt;						\
+    if (err != CUFFT_SUCCESS) {						\
+      printf("Error running %s in file %s, function %s\n", #stmt,__FILE__,__FUNCTION__); \
+      exit(1);								\
+    }									\
+  } while(0)
+
+
 //----------------------------------------------------------------------------------------
 //
 // Deallocate gpu memory

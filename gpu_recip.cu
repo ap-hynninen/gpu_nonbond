@@ -1,16 +1,18 @@
 #include <iostream>
 #include <cuda.h>
+#include <cufft.h>
 #include "gpu_utils.h"
 #include "XYZQ.h"
 #include "Bspline.h"
 #include "Grid.h"
+#include "Force.h"
 
 void time_transpose();
 void test();
 
 int main(int argc, char *argv[]) {
 
-  int gpu_ind = 3;
+  int gpu_ind = 0;
   cudaCheck(cudaSetDevice(gpu_ind));
 
   cudaCheck(cudaThreadSynchronize());
@@ -18,7 +20,15 @@ int main(int argc, char *argv[]) {
   cudaDeviceProp gpu_prop;
   cudaCheck(cudaGetDeviceProperties(&gpu_prop, gpu_ind));
 
+  int cuda_driver_version;
+  cudaCheck(cudaDriverGetVersion(&cuda_driver_version));
+
+  int cuda_rt_version;
+  cudaCheck(cudaRuntimeGetVersion(&cuda_rt_version));
+
   printf("Using CUDA device (%d) %s\n",gpu_ind,gpu_prop.name);
+  printf("Using CUDA driver version %d\n",cuda_driver_version);
+  printf("Using CUDA runtime version %d\n",cuda_rt_version);
 
   //  time_transpose();
 
@@ -116,7 +126,7 @@ void test() {
 
   // Setup reciprocal vectors
   double recip[9];
-  for (int i=0;i < 9;i++) recip[i] = 0.0;
+  for (int i=0;i < 9;i++) recip[i] = 0;
   recip[0] = 1.0/boxx;
   recip[4] = 1.0/boxy;
   recip[8] = 1.0/boxz;
@@ -126,6 +136,14 @@ void test() {
   Matrix3d<float2> q_xfft(nfftx/2+1, nffty, nfftz, "test_data/q_comp1_double.txt");
   Matrix3d<float2> q_zfft(nfftz, nfftx/2+1, nffty, "test_data/q_comp5_double.txt");
   Matrix3d<float2> q_zfft_summed(nfftz, nfftx/2+1, nffty, "test_data/q_comp6_double.txt");
+  Matrix3d<float2> q_comp7(nfftz, nfftx/2+1, nffty, "test_data/q_comp7_double.txt");
+  Matrix3d<float2> q_comp9(nffty, nfftz, nfftx/2+1, "test_data/q_comp9_double.txt");
+  Matrix3d<float2> q_comp10(nfftx/2+1, nffty, nfftz, "test_data/q_comp10_double.txt");
+  Matrix3d<float> q_solved(nfftx, nffty, nfftz, "test_data/q_real2_double.txt");
+
+  Force<double> force_comp("test_data/force.txt");
+  Force<double> force(ncoord);
+  force.setzero();
 
   // Load coordinates
   XYZQ xyzq("test_data/xyzq.txt");
@@ -134,37 +152,42 @@ void test() {
   Bspline<float> bspline(ncoord, order, nfftx, nffty, nfftz);
   Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, nnode, mynode);
 
-  bspline.set_recip<double>(recip);
-
-  grid.make_fft_plans();
-  grid.print_info();
-
-  bspline.fill_bspline(xyzq.xyzq, xyzq.ncoord);
-  bspline.calc_prefac();
-
-  grid.spread_charge(xyzq.ncoord, bspline);
-
   double tol = 1.0e-5;
   double max_diff;
 
+  bspline.set_recip<double>(recip);
+  bspline.calc_prefac();
+
+  grid.print_info();
+
+  bspline.fill_bspline(xyzq.xyzq, xyzq.ncoord);
+
+  grid.spread_charge(xyzq.ncoord, bspline);
+
+  /*
   if (!q.compare(grid.charge_grid, tol, max_diff)) {
     std::cout<< "q comparison FAILED" << std::endl;
     return;
   } else {
     std::cout<< "q comparison OK (tolerance " << tol << " max difference "<< max_diff << ")" << std::endl;
   }
+  */
 
   tol = 0.002;
   grid.r2c_fft();
+
+  /*
   if (!q_zfft.compare(grid.zfft_grid, tol, max_diff)) {
     std::cout<< "q_zfft comparison FAILED" << std::endl;
     return;
   } else {
     std::cout<< "q_zfft comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
+  */
 
   tol = 1.0e-6;
   grid.scalar_sum(recip, kappa, bspline.prefac_x, bspline.prefac_y, bspline.prefac_z);
+  /*
   if (!q_zfft_summed.compare(grid.zfft_grid, tol, max_diff)) {
     std::cout<< "q_zfft_summed comparison FAILED" << std::endl;
     q_zfft_summed.print(0,10,0,0,0,0);
@@ -174,13 +197,56 @@ void test() {
   } else {
     std::cout<< "q_zfft_summed comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
+  */
 
-  // Allocate GPU memory for forces
-  long long int *force;
-  allocate<long long int>(&force, 3*ncoord);
+  /*
+  tol = 1.0e-6;
+  grid.z_fft_c2c(grid.zfft_grid->data, CUFFT_INVERSE);
+  if (!q_comp7.compare(grid.zfft_grid, tol, max_diff)) {
+    std::cout<< "q_comp7 comparison FAILED" << std::endl;
+    return;
+  } else {
+    std::cout<< "q_comp7 comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+  }
 
-  grid.gather_force(ncoord, bspline, force);
+  tol = 3.0e-6;
+  grid.zfft_grid->transpose_xyz_zxy(grid.yfft_grid);
+  grid.y_fft_c2c(grid.yfft_grid->data, CUFFT_INVERSE);
+  if (!q_comp9.compare(grid.yfft_grid, tol, max_diff)) {
+    std::cout<< "q_comp9 comparison FAILED" << std::endl;
+    return;
+  } else {
+    std::cout<< "q_comp9 comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+  }
 
-  // Deallocate GPU memory
-  deallocate<long long int>(&force);
+  tol = 3.0e-6;
+  grid.yfft_grid->transpose_xyz_zxy(grid.xfft_grid);
+  if (!q_comp10.compare(grid.xfft_grid, tol, max_diff)) {
+    std::cout<< "q_comp10 comparison FAILED" << std::endl;
+    return;
+  } else {
+    std::cout<< "q_comp10 comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+  }
+  */
+
+  tol = 1.0e-5;
+  grid.c2r_fft();
+  /*
+  if (!q_solved.compare(grid.charge_grid, tol, max_diff)) {
+    std::cout<< "q_solved comparison FAILED" << std::endl;
+    return;
+  } else {
+    std::cout<< "q_solved comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+  }
+  */
+
+  // Calculate forces
+  grid.gather_force(ncoord, recip, bspline, ncoord, (long long int *)force.data);
+
+  tol = 3.2e-4;
+  if (!force_comp.compare(&force, tol, max_diff)) {
+  } else {
+    std::cout<< "force comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+  }
+
 }

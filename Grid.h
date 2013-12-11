@@ -65,6 +65,8 @@ private:
   void init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 	  bool y_land_locked, bool z_land_locked);
 
+  void make_fft_plans();
+
  public:
   Grid(int nfftx, int nffty, int nfftz, int order, int nnode, int mynode);
   ~Grid();
@@ -76,14 +78,13 @@ private:
   void scalar_sum(const double* recip, const double kappa,
 		  const CT* prefac_x, const CT* prefac_y, const CT* prefac_z);
 
-  void gather_force(const int ncoord, const Bspline<CT> &bspline, AT* force);
+  void gather_force(const int ncoord, const double* recip, const Bspline<CT> &bspline,
+		    const int stride, AT* force);
 
-  void make_fft_plans();
-
-  void x_fft_r2c();
-  void x_fft_c2r();
-  void y_fft_c2c(int direction);
-  void z_fft_c2c(int direction);
+  void x_fft_r2c(CT2 *data);
+  void x_fft_c2r(CT2 *data);
+  void y_fft_c2c(CT2 *data, const int direction);
+  void z_fft_c2c(CT2 *data, const int direction);
   void r2c_fft();
   void c2r_fft();
 

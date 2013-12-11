@@ -194,10 +194,10 @@ bool Matrix3d<T>::compare(Matrix3d<T>* mat, const double tol, double& max_diff) 
   assert(mat->nz == nz);
 
   T *h_data1 = new T[xsize*ysize*zsize];
-  T *h_data2 = new T[xsize*ysize*zsize];
+  T *h_data2 = new T[mat->xsize*mat->ysize*mat->zsize];
 
   copy_DtoH<T>(data,      h_data1, xsize*ysize*zsize);
-  copy_DtoH<T>(mat->data, h_data2, xsize*ysize*zsize);
+  copy_DtoH<T>(mat->data, h_data2, mat->xsize*mat->ysize*mat->zsize);
 
   bool ok = true;
 
@@ -210,8 +210,8 @@ bool Matrix3d<T>::compare(Matrix3d<T>* mat, const double tol, double& max_diff) 
       for (y=0;y < ny;y++)
 	for (x=0;x < nx;x++) {
 	  if (is_nan(h_data1[x + (y + z*ysize)*xsize]) || 
-	      is_nan(h_data2[x + (y + z*ysize)*xsize])) throw 1;
-	  diff = norm(h_data1[x + (y + z*ysize)*xsize], h_data2[x + (y + z*ysize)*xsize]);
+	      is_nan(h_data2[x + (y + z*mat->ysize)*mat->xsize])) throw 1;
+	  diff = norm(h_data1[x + (y + z*ysize)*xsize], h_data2[x + (y + z*mat->ysize)*mat->xsize]);
 	  max_diff = (diff > max_diff) ? diff : max_diff;
 	  if (diff > tol) throw 2;
 	}
@@ -219,7 +219,7 @@ bool Matrix3d<T>::compare(Matrix3d<T>* mat, const double tol, double& max_diff) 
   catch (int a) {
     std::cout << "x y z = " << x << " "<< y << " "<< z << std::endl;
     std::cout << "this: " << h_data1[x + (y + z*ysize)*xsize] << std::endl;
-    std::cout << "mat:  " << h_data2[x + (y + z*ysize)*xsize] << std::endl;
+    std::cout << "mat:  " << h_data2[x + (y + z*mat->ysize)*mat->xsize] << std::endl;
     if (a == 2) std::cout << "difference: " << diff << std::endl;
     ok = false;
   }
@@ -240,6 +240,9 @@ void Matrix3d<T>::transpose_xyz_yzx_host(Matrix3d<T>* mat) {
   assert(mat->nx == ny);
   assert(mat->ny == nz);
   assert(mat->nz == nx);
+  assert(mat->xsize == ysize);
+  assert(mat->ysize == zsize);
+  assert(mat->zsize == xsize);
 
   T *h_data1 = new T[xsize*ysize*zsize];
   T *h_data2 = new T[xsize*ysize*zsize];
@@ -270,6 +273,9 @@ void Matrix3d<T>::transpose_xyz_zxy_host(Matrix3d<T>* mat) {
   assert(mat->nx == nz);
   assert(mat->ny == nx);
   assert(mat->nz == ny);
+  assert(mat->xsize == zsize);
+  assert(mat->ysize == xsize);
+  assert(mat->zsize == ysize);
 
   T *h_data1 = new T[xsize*ysize*zsize];
   T *h_data2 = new T[xsize*ysize*zsize];
@@ -299,12 +305,12 @@ void Matrix3d<T>::transpose_xyz_yzx(Matrix3d<T>* mat) {
   assert(mat->nx == ny);
   assert(mat->ny == nz);
   assert(mat->nz == nx);
-
-  //  assert(nx % TILEDIM == 0);
-  //  assert(nz % TILEDIM == 0);
+  assert(mat->xsize == ysize);
+  assert(mat->ysize == zsize);
+  assert(mat->zsize == xsize);
 
   dim3 nthread(TILEDIM, TILEROWS, 1);
-  dim3 nblock((nx-1)/TILEDIM+1, (nz-1)/TILEDIM+1, ny);
+  dim3 nblock((nx-1)/TILEDIM+1, (ny-1)/TILEDIM+1, nz);
 
   transpose_xyz_yzx_kernel<<< nblock, nthread >>>(nx, ny, nz, xsize, ysize, zsize,
 						  data, mat->data);
@@ -322,12 +328,12 @@ void Matrix3d<T>::transpose_xyz_zxy(Matrix3d<T>* mat) {
   assert(mat->nx == nz);
   assert(mat->ny == nx);
   assert(mat->nz == ny);
-
-  //  assert(nx % TILEDIM == 0);
-  //  assert(ny % TILEDIM == 0);
+  assert(mat->xsize == zsize);
+  assert(mat->ysize == xsize);
+  assert(mat->zsize == ysize);
 
   dim3 nthread(TILEDIM, TILEROWS, 1);
-  dim3 nblock((nx-1)/TILEDIM+1, (ny-1)/TILEDIM+1, nz);
+  dim3 nblock((nx-1)/TILEDIM+1, (nz-1)/TILEDIM+1, ny);
 
   transpose_xyz_zxy_kernel<<< nblock, nthread >>>(nx, ny, nz, xsize, ysize, zsize,
 						  data, mat->data);
@@ -345,6 +351,9 @@ void Matrix3d<T>::copy(Matrix3d<T>* mat) {
   assert(mat->nx == nx);
   assert(mat->ny == ny);
   assert(mat->nz == nz);
+  assert(mat->xsize == xsize);
+  assert(mat->ysize == ysize);
+  assert(mat->zsize == zsize);
 
   dim3 nthread(TILEDIM, TILEROWS, 1);
   dim3 nblock((nx-1)/TILEDIM+1, (ny-1)/TILEDIM+1, nz);

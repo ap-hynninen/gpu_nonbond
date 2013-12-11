@@ -7,7 +7,9 @@
 template <typename T>
 __global__ void fill_bspline_4(const float4 *xyzq, const int ncoord, const float *recip,
 			       const int nfftx, const int nffty, const int nfftz,
-			       gridp_t *gridp, float3 *theta, float3 *dtheta) {
+			       int *gix, int *giy, int *giz, float *charge,
+			       float *thetax, float *thetay, float *thetaz,
+			       float *dthetax, float *dthetay, float *dthetaz) {
 
   // Position to xyzq and atomgrid
   unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
@@ -38,10 +40,10 @@ __global__ void fill_bspline_4(const float4 *xyzq, const int ncoord, const float
     float wy = fry - (float)fryi;
     float wz = frz - (float)frzi;
 
-    gridp[pos].x = frxi;
-    gridp[pos].y = fryi;
-    gridp[pos].z = frzi;
-    gridp[pos].q = q;
+    gix[pos] = frxi;
+    giy[pos] = fryi;
+    giz[pos] = frzi;
+    charge[pos] = q;
 
     float3 theta_tmp[4];
     float3 dtheta_tmp[4];
@@ -105,15 +107,35 @@ __global__ void fill_bspline_4(const float4 *xyzq, const int ncoord, const float
 
     // Store theta_tmp and dtheta_tmp into global memory
     int pos4 = pos*4;
-    theta[pos4]   = theta_tmp[0];
-    theta[pos4+1] = theta_tmp[1];
-    theta[pos4+2] = theta_tmp[2];
-    theta[pos4+3] = theta_tmp[3];
+    thetax[pos4]   = theta_tmp[0].x;
+    thetax[pos4+1] = theta_tmp[1].x;
+    thetax[pos4+2] = theta_tmp[2].x;
+    thetax[pos4+3] = theta_tmp[3].x;
 
-    dtheta[pos4]   = dtheta_tmp[0];
-    dtheta[pos4+1] = dtheta_tmp[1];
-    dtheta[pos4+2] = dtheta_tmp[2];
-    dtheta[pos4+3] = dtheta_tmp[3];
+    thetay[pos4]   = theta_tmp[0].y;
+    thetay[pos4+1] = theta_tmp[1].y;
+    thetay[pos4+2] = theta_tmp[2].y;
+    thetay[pos4+3] = theta_tmp[3].y;
+
+    thetaz[pos4]   = theta_tmp[0].z;
+    thetaz[pos4+1] = theta_tmp[1].z;
+    thetaz[pos4+2] = theta_tmp[2].z;
+    thetaz[pos4+3] = theta_tmp[3].z;
+
+    dthetax[pos4]   = dtheta_tmp[0].x;
+    dthetax[pos4+1] = dtheta_tmp[1].x;
+    dthetax[pos4+2] = dtheta_tmp[2].x;
+    dthetax[pos4+3] = dtheta_tmp[3].x;
+
+    dthetay[pos4]   = dtheta_tmp[0].y;
+    dthetay[pos4+1] = dtheta_tmp[1].y;
+    dthetay[pos4+2] = dtheta_tmp[2].y;
+    dthetay[pos4+3] = dtheta_tmp[3].y;
+
+    dthetaz[pos4]   = dtheta_tmp[0].z;
+    dthetaz[pos4+1] = dtheta_tmp[1].z;
+    dthetaz[pos4+2] = dtheta_tmp[2].z;
+    dthetaz[pos4+3] = dtheta_tmp[3].z;
 
     pos += blockDim.x*gridDim.x;
   }
@@ -128,33 +150,50 @@ __global__ void fill_bspline_4(const float4 *xyzq, const int ncoord, const float
 
 template <typename T>
 void Bspline<T>::set_ncoord(const int ncoord) {
-  reallocate<T>(&theta, &theta_len, 3*ncoord*order, 1.2f);
-  reallocate<T>(&dtheta, &dtheta_len, 3*ncoord*order, 1.2f);
-  reallocate<gridp_t>(&gridp, &gridp_len, ncoord, 1.2f);  
+  reallocate<T>(&thetax, &thetax_len, ncoord*order, 1.2f);
+  reallocate<T>(&thetay, &thetay_len, ncoord*order, 1.2f);
+  reallocate<T>(&thetaz, &thetaz_len, ncoord*order, 1.2f);
+  reallocate<T>(&dthetax, &dthetax_len, ncoord*order, 1.2f);
+  reallocate<T>(&dthetay, &dthetay_len, ncoord*order, 1.2f);
+  reallocate<T>(&dthetaz, &dthetaz_len, ncoord*order, 1.2f);
+  reallocate<int>(&gix, &gix_len, ncoord, 1.2f);
+  reallocate<int>(&giy, &giy_len, ncoord, 1.2f);
+  reallocate<int>(&giz, &giz_len, ncoord, 1.2f);
+  reallocate<T>(&charge, &charge_len, ncoord, 1.2f);
 }
 
 template <typename T>
-Bspline<T>::Bspline(const int ncoord, const int order, const int nfftx, const int nffty, const int nfftz) :
-  theta(NULL), dtheta(NULL), gridp(NULL), order(order), nfftx(nfftx), nffty(nffty), nfftz(nfftz) {
+Bspline<T>::Bspline(const int ncoord, const int order,
+		    const int nfftx, const int nffty, const int nfftz) :
+  thetax(NULL), thetay(NULL), thetaz(NULL),
+  dthetax(NULL), dthetay(NULL), dthetaz(NULL),
+  gix(NULL), giy(NULL), giz(NULL), charge(NULL),
+  order(order), nfftx(nfftx), nffty(nffty), nfftz(nfftz) {
 
   set_ncoord(ncoord);
 
-  allocate<T>(&recip, 9);
   allocate<T>(&prefac_x, nfftx);
   allocate<T>(&prefac_y, nffty);
   allocate<T>(&prefac_z, nfftz);
-
+  allocate<T>(&recip, 9);
 }
   
 template <typename T>
 Bspline<T>::~Bspline() {
-  deallocate<T>(&theta);
-  deallocate<T>(&dtheta);
-  deallocate<gridp_t>(&gridp);
-  deallocate<T>(&recip);
+  deallocate<T>(&thetax);
+  deallocate<T>(&thetay);
+  deallocate<T>(&thetaz);
+  deallocate<T>(&dthetax);
+  deallocate<T>(&dthetay);
+  deallocate<T>(&dthetaz);
+  deallocate<int>(&gix);
+  deallocate<int>(&giy);
+  deallocate<int>(&giz);
+  deallocate<T>(&charge);
   deallocate<T>(&prefac_x);
   deallocate<T>(&prefac_y);
   deallocate<T>(&prefac_z);
+  deallocate<T>(&recip);
 }
 
 template <typename T>
@@ -174,16 +213,18 @@ void Bspline<T>::fill_bspline(const float4 *xyzq, const int ncoord) {
   int nthread = 64;
   int nblock = (ncoord-1)/nthread + 1;
 
-  std::cout << "nblock=" << nblock << std::endl;
-  std::cout << nfftx << " "<< nffty << " "<< nfftz << std::endl;
+  /*
+  bool ortho = (recip[1] == 0.0 && recip[2] == 0.0 && recip[3] == 0.0 &&
+		recip[5] == 0.0 && recip[6] == 0.0 && recip[7] == 0.0);
+  */
 
-  //bool ortho = (recip[1] == recip[2] == recip[3] == recip[5] == recip[6] == recip[7] == 0.0f);
-  
   switch(order) {
   case 4:
     fill_bspline_4<T> <<< nblock, nthread >>>(xyzq, ncoord, recip, 
-					      nfftx, nffty, nfftz, gridp, 
-					      (float3 *)theta, (float3 *)dtheta);
+					      nfftx, nffty, nfftz,
+					      gix, giy, giz, charge,
+					      thetax, thetay, thetaz,
+					      dthetax, dthetay, dthetaz);
     break;
   default:
     exit(1);
