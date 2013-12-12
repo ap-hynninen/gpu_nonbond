@@ -119,6 +119,7 @@ void test() {
   const int nffty = 64;
   const int nfftz = 64;
   const int order = 4;
+  const FFTtype fft_type = BOX;
 
   // Number of MPI nodes & current node index
   int nnode = 1;
@@ -150,7 +151,7 @@ void test() {
 
   // Create Bspline and Grid objects
   Bspline<float> bspline(ncoord, order, nfftx, nffty, nfftz);
-  Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, nnode, mynode);
+  Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, nnode, mynode);
 
   double tol = 1.0e-5;
   double max_diff;
@@ -162,8 +163,14 @@ void test() {
 
   bspline.fill_bspline(xyzq.xyzq, xyzq.ncoord);
 
+  // Warm up
   grid.spread_charge(xyzq.ncoord, bspline);
+  grid.r2c_fft();
+  grid.scalar_sum(recip, kappa, bspline.prefac_x, bspline.prefac_y, bspline.prefac_z);
+  grid.c2r_fft();
+  grid.gather_force(ncoord, recip, bspline, force.stride, (long long int *)force.data);
 
+  grid.spread_charge(xyzq.ncoord, bspline);
   /*
   if (!q.compare(grid.charge_grid, tol, max_diff)) {
     std::cout<< "q comparison FAILED" << std::endl;
@@ -175,18 +182,29 @@ void test() {
 
   tol = 0.002;
   grid.r2c_fft();
-
   /*
-  if (!q_zfft.compare(grid.zfft_grid, tol, max_diff)) {
-    std::cout<< "q_zfft comparison FAILED" << std::endl;
-    return;
+  if (fft_type == BOX) {
+    Matrix3d<float2> q_zfft_t(nfftx/2+1, nffty, nfftz);
+    q_zfft.transpose_xyz_yzx(&q_zfft_t);
+    if (!q_zfft_t.compare(grid.fft_grid, tol, max_diff)) {
+      std::cout<< "q_zfft_t comparison FAILED" << std::endl;
+      return;
+    } else {
+      std::cout<< "q_zfft_t comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+    }
   } else {
-    std::cout<< "q_zfft comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+    if (!q_zfft.compare(grid.zfft_grid, tol, max_diff)) {
+      std::cout<< "q_zfft comparison FAILED" << std::endl;
+      return;
+    } else {
+      std::cout<< "q_zfft comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+    }
   }
   */
 
   tol = 1.0e-6;
   grid.scalar_sum(recip, kappa, bspline.prefac_x, bspline.prefac_y, bspline.prefac_z);
+
   /*
   if (!q_zfft_summed.compare(grid.zfft_grid, tol, max_diff)) {
     std::cout<< "q_zfft_summed comparison FAILED" << std::endl;
@@ -231,8 +249,20 @@ void test() {
 
   tol = 1.0e-5;
   grid.c2r_fft();
+
   /*
-  if (!q_solved.compare(grid.charge_grid, tol, max_diff)) {
+  grid.solved_grid->scale(1.0f/(float)(nfftx*nffty*nfftz));
+  if (!q.compare(grid.solved_grid, tol, max_diff)) {
+    std::cout<< "q comparison FAILED" << std::endl;
+    return;
+  } else {
+    std::cout<< "q comparison OK (tolerance " << tol << " max difference "<< max_diff << ")" << std::endl;
+  }
+  return;
+  */
+
+  /*
+  if (!q_solved.compare(grid.solved_grid, tol, max_diff)) {
     std::cout<< "q_solved comparison FAILED" << std::endl;
     return;
   } else {
@@ -241,7 +271,7 @@ void test() {
   */
 
   // Calculate forces
-  grid.gather_force(ncoord, recip, bspline, ncoord, (long long int *)force.data);
+  grid.gather_force(ncoord, recip, bspline, force.stride, (long long int *)force.data);
 
   tol = 3.2e-4;
   if (!force_comp.compare(&force, tol, max_diff)) {

@@ -5,6 +5,8 @@
 #include "Bspline.h"
 #include "Matrix3d.h"
 
+enum FFTtype {COLUMN, SLAB, BOX};
+
 //
 // AT  = Accumulation Type
 // CT  = Calculation Type (real)
@@ -22,11 +24,20 @@ public:
   int data1_len;
   int data2_len;
 
+  // Type of FFT
+  FFTtype fft_type;
+
   Matrix3d<AT> *accum_grid;    // data1
   Matrix3d<CT> *charge_grid;   // data2
+  Matrix3d<CT> *solved_grid;   // data2
+
+  // For COLUMN FFT
   Matrix3d<CT2> *xfft_grid;    // data2
   Matrix3d<CT2> *yfft_grid;    // data1
   Matrix3d<CT2> *zfft_grid;    // data2
+
+  // For BOX FFT
+  Matrix3d<CT2> *fft_grid;     // data2
 
 private:
 
@@ -56,11 +67,15 @@ private:
   // Total size of the data array
   int data_size;
 
-  // Plans for FFT
+  // Plans for "COLUMN" FFT
   cufftHandle x_r2c_plan;
   cufftHandle y_c2c_plan;
   cufftHandle z_c2c_plan;
   cufftHandle x_c2r_plan;
+
+  // Plans for "BOX" FFT
+  cufftHandle r2c_plan;
+  cufftHandle c2r_plan;
 
   void init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 	  bool y_land_locked, bool z_land_locked);
@@ -68,7 +83,7 @@ private:
   void make_fft_plans();
 
  public:
-  Grid(int nfftx, int nffty, int nfftz, int order, int nnode, int mynode);
+  Grid(int nfftx, int nffty, int nfftz, int order, FFTtype fft_type, int nnode, int mynode);
   ~Grid();
 
   void print_info();
@@ -76,7 +91,7 @@ private:
   void spread_charge(const int ncoord, const Bspline<CT> &bspline);
 
   void scalar_sum(const double* recip, const double kappa,
-		  const CT* prefac_x, const CT* prefac_y, const CT* prefac_z);
+		  CT* prefac_x, CT* prefac_y, CT* prefac_z);
 
   void gather_force(const int ncoord, const double* recip, const Bspline<CT> &bspline,
 		    const int stride, AT* force);

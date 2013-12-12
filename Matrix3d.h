@@ -51,6 +51,8 @@ public:
   
   void load(const int nx, const int ny, const int nz,
 	    const char *filename);
+
+  void scale(const T fac);
 };
 
 #endif // MATRIX3D_H

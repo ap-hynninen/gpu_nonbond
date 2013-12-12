@@ -25,7 +25,8 @@ __global__ void copy_kernel(const int nx, const int ny, const int nz,
   const int z = blockIdx.z + threadIdx.z;
 
   for (int j=0;j < TILEDIM;j += TILEROWS)
-    data_out[x + (y + j + z*ysize)*xsize] = data_in[x + (y + j + z*ysize)*xsize];
+    if ((x < nx) && (y < ny) && (z < nz))
+      data_out[x + (y + j + z*ysize)*xsize] = data_in[x + (y + j + z*ysize)*xsize];
 
 }
 
@@ -88,6 +89,32 @@ __global__ void transpose_xyz_zxy_kernel(const int nx, const int ny, const int n
   for (int k=0;k < TILEDIM;k += TILEROWS)
     if ((x + k < nx) && (y < ny) && (z < nz))
       data_out[z + (x + k + y*xsize)*zsize] = tile[threadIdx.x][threadIdx.y + k];
+
+}
+
+__device__ inline float2 operator*(float2 lhs, const float2& rhs) {
+  lhs.x *= rhs.x;
+  lhs.y *= rhs.y;
+  return lhs;
+}
+
+//
+// Scales matrix
+//
+template <typename T>
+__global__ void scale_kernel(const int nx, const int ny, const int nz,
+			     const int xsize, const int ysize, const int zsize,
+			     const T fac, T* data) {
+
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  int z = tid/(nx*ny);
+  tid -= z*nx*ny;
+  int y = tid/nx;
+  tid -= y*nx;
+  int x = tid;
+
+  if ((x < nx) && (y < ny) && (z < nz))
+    data[x + (y + z*ysize)*xsize] = data[x + (y + z*ysize)*xsize]*fac;
 
 }
 
@@ -423,6 +450,21 @@ void Matrix3d<T>::load(const int nx, const int ny, const int nz,
     std::cerr << "Error opening/reading/closing file " << filename << std::endl;
     exit(1);
   }
+
+}
+
+//
+// Scales the matrix by a factor "fac"
+//
+template <typename T>
+void Matrix3d<T>::scale(const T fac) {
+
+  int nthread = 512;
+  int nblock = (nx*ny*nz-1)/512 + 1;
+
+  scale_kernel<<< nblock, nthread >>>(nx, ny, nz, xsize, ysize, zsize, fac, data);
+
+  cudaCheck(cudaGetLastError());
 
 }
 

@@ -6,7 +6,8 @@
 #include "Force.h"
 
 template <typename T>
-Force<T>::Force(const int ncoord) : ncoord(ncoord), stride(ncoord) {
+Force<T>::Force(const int ncoord) : ncoord(ncoord) {
+  stride = ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
   allocate<T>(&data, 3*stride);
 }
 
@@ -21,7 +22,7 @@ Force<T>::Force(const char *filename) {
     ncoord = 0;
     while (file >> fx >> fy >> fz) ncoord++;
 
-    stride = ncoord;
+    stride = ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
 
     // Rewind
     file.clear();
