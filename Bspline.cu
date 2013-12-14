@@ -2,6 +2,7 @@
 #include <math.h>
 #include <cuda.h>
 #include "gpu_utils.h"
+#include "cuda_utils.h"
 #include "Bspline.h"
 
 template <typename T>

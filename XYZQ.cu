@@ -1,7 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <cuda.h>
-#include "gpu_utils.h"
+#include "cuda_utils.h"
 #include "XYZQ.h"
 
 //

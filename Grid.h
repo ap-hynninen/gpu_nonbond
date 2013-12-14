@@ -36,6 +36,9 @@ public:
   Matrix3d<CT2> *yfft_grid;    // data1
   Matrix3d<CT2> *zfft_grid;    // data2
 
+  // For SLAB FFT. Also uses "zfft_grid" from above
+  Matrix3d<CT2> *xyfft_grid;   // data2
+
   // For BOX FFT
   Matrix3d<CT2> *fft_grid;     // data2
 
@@ -73,9 +76,21 @@ private:
   cufftHandle z_c2c_plan;
   cufftHandle x_c2r_plan;
 
+  // Plans for "SLAB" FFT. Also uses "z_c2c_plan" form above
+  cufftHandle xy_r2c_plan;
+  cufftHandle xy_c2r_plan;
+
   // Plans for "BOX" FFT
   cufftHandle r2c_plan;
   cufftHandle c2r_plan;
+
+  // true for using multiple GPUs for the FFTs
+  bool multi_gpu;
+
+  // data for multi-gpus
+  cudaLibXtDesc *multi_data;
+  CT2 *host_data;
+  CT *host_tmp;
 
   void init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 	  bool y_land_locked, bool z_land_locked);
@@ -94,7 +109,7 @@ private:
 		  CT* prefac_x, CT* prefac_y, CT* prefac_z);
 
   void gather_force(const int ncoord, const double* recip, const Bspline<CT> &bspline,
-		    const int stride, AT* force);
+		    const int stride, CT* force);
 
   void x_fft_r2c(CT2 *data);
   void x_fft_c2r(CT2 *data);

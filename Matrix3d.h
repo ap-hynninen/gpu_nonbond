@@ -9,9 +9,6 @@ private:
   // Size of the matrix
   int nx, ny, nz;
 
-  // Size of the matrix in storage. Allows for padding.
-  int xsize, ysize, zsize;
-
   // True if we are using an external storage for the data
   bool external_storage;
 
@@ -21,12 +18,16 @@ private:
   double norm(T a, T b);
   bool is_nan(T a);
 
+protected:
+  // Size of the matrix in storage. Allows for padding.
+  int xsize, ysize, zsize;
+
 public:
 
   // Matrix data
   T *data;
 
-  Matrix3d();
+  //  Matrix3d();
   Matrix3d(const int nx, const int ny, const int nz, T* ext_data = NULL);
   Matrix3d(const int nx, const int ny, const int nz,
 	   const int xsize, const int ysize, const int zsize, T* ext_data = NULL);

@@ -2,7 +2,7 @@
 #include <fstream>
 #include <cassert>
 #include <cuda.h>
-#include "gpu_utils.h"
+#include "cuda_utils.h"
 #include "Force.h"
 
 template <typename T>
@@ -116,3 +116,4 @@ bool Force<T>::compare(Force<T>* force, const double tol, double& max_diff) {
 }
 
 template class Force<double>;
+template class Force<float>;

@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cuda.h>
 #include "gpu_utils.h"
+#include "cuda_utils.h"
 #include "Matrix3d.h"
 
 const int TILEDIM = 32;
@@ -118,11 +119,11 @@ __global__ void scale_kernel(const int nx, const int ny, const int nz,
 
 }
 
-template <typename T>
-Matrix3d<T>::Matrix3d() : nx(0), ny(0), nz(0), xsize(0), ysize(0), zsize(0) {
-  data = NULL;
-  external_storage = false;
-}
+//template <typename T>
+//Matrix3d<T>::Matrix3d() : nx(0), ny(0), nz(0), xsize(0), ysize(0), zsize(0) {
+//  data = NULL;
+//  external_storage = false;
+//}
 
 template <typename T>
 Matrix3d<T>::Matrix3d(const int nx, const int ny, const int nz, T* ext_data) : 

@@ -3,7 +3,9 @@
 #include <cuda.h>
 #include <math.h>
 #include "gpu_utils.h"
+#include "cuda_utils.h"
 #include "Matrix3d.h"
+#include "MultiNodeMatrix3d.h"
 #include "Grid.h"
 
 //
@@ -420,7 +422,7 @@ __global__ void gather_force_4_ortho_kernel(const int ncoord,
 					    const float4 *dthetax, const float4 *dthetay,
 					    const float4 *dthetaz,
 					    const int stride,
-					    AT *force) {
+					    CT *force) {
   // Shared memory
   extern __shared__ gather_t<CT> shbuf[];
 
@@ -612,11 +614,9 @@ __global__ void gather_force_4_ortho_kernel(const int ncoord,
     float fx = q*recip1*f1;
     float fy = q*recip2*f2;
     float fz = q*recip3*f3;
-    double *forcep = (double *)force;
-    forcep[pos]         = (double)fx;
-    forcep[pos+stride]  = (double)fy;
-    forcep[pos+stride2] = (double)fz;
-    //    write_force<AT>(fx,fy,fz,pos,stride,stride2,force);
+    force[pos]         = fx;
+    force[pos+stride]  = fy;
+    force[pos+stride2] = fz;
   }
 
 }
@@ -640,6 +640,9 @@ void bind_grid_texture<float>(const float *data, const int data_len) {
   cudaCheck(cudaBindTexture(NULL, grid_texref, data, data_len*sizeof(float)));  
 }
 
+//
+// Initializer
+//
 template <typename AT, typename CT, typename CT2>
 void Grid<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 			     bool y_land_locked, bool z_land_locked) {
@@ -680,9 +683,17 @@ void Grid<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int
 
   data_size = (2*(xsize/2+1))*ysize*zsize;
 
+  make_fft_plans();
+
   // data1 is used for accumulation, make sure it has enough space
   allocate<CT>(&data1, data_size*sizeof(AT)/sizeof(CT));
   allocate<CT>(&data2, data_size);
+
+  if (multi_gpu) {
+    cufftCheck(cufftXtMalloc(r2c_plan, &multi_data, CUFFT_XT_FORMAT_INPLACE));
+    host_data = new CT2[xsize*ysize*zsize];
+    host_tmp = new CT[2*(xsize/2+1)*ysize*zsize];
+  }
 
   data1_len = data_size*sizeof(AT)/sizeof(CT);
   data2_len = data_size;
@@ -695,6 +706,10 @@ void Grid<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int
     yfft_grid   = new Matrix3d<CT2>(ysize, zsize, xsize/2+1, ysize, zsize, xsize/2+1, (CT2 *)data1);
     zfft_grid   = new Matrix3d<CT2>(zsize, xsize/2+1, ysize, zsize, xsize/2+1, ysize, (CT2 *)data2);
     solved_grid = new Matrix3d<CT>(xsize, ysize, zsize, xsize, ysize, zsize, (CT *)data2);
+  } else if (fft_type == SLAB) {
+    xyfft_grid = new Matrix3d<CT2>(xsize/2+1, ysize, zsize, xsize/2+1, ysize, zsize, (CT2 *)data2);
+    zfft_grid   = new Matrix3d<CT2>(zsize, xsize/2+1, ysize, zsize, xsize/2+1, ysize, (CT2 *)data1);
+    solved_grid = new Matrix3d<CT>(xsize, ysize, zsize, xsize, ysize, zsize, (CT *)data2);
   } else if (fft_type == BOX) {
     fft_grid = new Matrix3d<CT2>(xsize/2+1, ysize, zsize, xsize/2+1, ysize, zsize, (CT2 *)data2);
     solved_grid = new Matrix3d<CT>(xsize, ysize, zsize, xsize, ysize, zsize, (CT *)data2);
@@ -705,6 +720,9 @@ void Grid<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int
 
 }
 
+//
+// Class creator 
+//
 template <typename AT, typename CT, typename CT2>
 Grid<AT, CT, CT2>::Grid(int nfftx, int nffty, int nfftz, int order,
 			FFTtype fft_type=COLUMN,
@@ -728,8 +746,6 @@ Grid<AT, CT, CT2>::Grid(int nfftx, int nffty, int nfftz, int order,
       nnode_y = 1;
       nnode_z = nnode;
       assert(nfftz/nnode_z >= 1);
-      std::cerr<<"Grid::fft_type = SLAB, not implemented yet"<<std::endl;
-      exit(1);
     } else if (fft_type == BOX) {
       assert(nnode == 1);
       nnode_y = 1;
@@ -758,10 +774,110 @@ Grid<AT, CT, CT2>::Grid(int nfftx, int nffty, int nfftz, int order,
     bool y_land_locked = (inode_y-1 >= 0) && (inode_y+1 < nnode_y);
     bool z_land_locked = (inode_z-1 >= 0) && (inode_z+1 < nnode_z);
 
+    multi_gpu = true;
+
+    assert((multi_gpu && fft_type==BOX) || !multi_gpu);
+
     init(x0, x1, y0, y1, z0, z1, order, y_land_locked, z_land_locked);
-    make_fft_plans();
 }
 
+//
+// Create FFT plans
+//
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::make_fft_plans() {
+
+  if (fft_type == COLUMN) {
+    // Set the size of the local FFT transforms
+    int batch;
+    int nfftx_local = x1 - x0 + 1;
+    int nffty_local = y1 - y0 + 1;
+    int nfftz_local = z1 - z0 + 1;
+    
+    batch = nffty_local * nfftz_local;
+    cufftCheck(cufftPlanMany(&x_r2c_plan, 1, &nfftx_local,
+			     NULL, 0, 0,
+			     NULL, 0, 0, 
+			     CUFFT_R2C, batch));
+    cufftCheck(cufftSetCompatibilityMode(x_r2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+    
+    batch = nfftz_local*(nfftx_local/2+1);
+    cufftCheck(cufftPlanMany(&y_c2c_plan, 1, &nffty_local,
+			     NULL, 0, 0,
+			     NULL, 0, 0, 
+			     CUFFT_C2C, batch));
+    cufftCheck(cufftSetCompatibilityMode(y_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+    
+    batch = (nfftx_local/2+1)*nffty_local;
+    cufftCheck(cufftPlanMany(&z_c2c_plan, 1, &nfftz_local,
+			     NULL, 0, 0,
+			     NULL, 0, 0, 
+			     CUFFT_C2C, batch));
+    cufftCheck(cufftSetCompatibilityMode(z_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+    
+    batch = nffty_local*nfftz_local;
+    cufftCheck(cufftPlanMany(&x_c2r_plan, 1, &nfftx_local,
+			     NULL, 0, 0,
+			     NULL, 0, 0, 
+			     CUFFT_C2R, batch));
+    cufftCheck(cufftSetCompatibilityMode(x_c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
+  } else if (fft_type == SLAB) {
+    int batch;
+    int nfftx_local = x1 - x0 + 1;
+    int nffty_local = y1 - y0 + 1;
+    int nfftz_local = z1 - z0 + 1;
+
+    int n[2] = {nffty_local, nfftx_local};
+
+    batch = nfftz_local;
+    cufftCheck(cufftPlanMany(&xy_r2c_plan, 2, n,
+			     NULL, 0, 0,
+			     NULL, 0, 0, 
+			     CUFFT_R2C, batch));
+    cufftCheck(cufftSetCompatibilityMode(xy_r2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+
+    batch = (nfftx_local/2+1)*nffty_local;
+    cufftCheck(cufftPlanMany(&z_c2c_plan, 1, &nfftz_local,
+			     NULL, 0, 0,
+			     NULL, 0, 0, 
+			     CUFFT_C2C, batch));
+    cufftCheck(cufftSetCompatibilityMode(z_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+
+    batch = nfftz_local;
+    cufftCheck(cufftPlanMany(&xy_c2r_plan, 2, n,
+			     NULL, 0, 0,
+			     NULL, 0, 0, 
+			     CUFFT_C2R, batch));
+    cufftCheck(cufftSetCompatibilityMode(xy_c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
+    
+  } else if (fft_type == BOX) {
+    if (multi_gpu) {
+      cufftCheck(cufftCreate(&r2c_plan));
+      cufftCheck(cufftCreate(&c2r_plan));
+      int ngpu = 2;
+      int gpu[2] = {2, 3};
+      cufftCheck(cufftXtSetGPUs(r2c_plan, ngpu, gpu));
+      cufftCheck(cufftXtSetGPUs(c2r_plan, ngpu, gpu));
+
+      size_t worksize_r2c[2];
+      size_t worksize_c2r[2];
+
+      cufftCheck(cufftMakePlan3d(r2c_plan, nfftz, nffty, nfftx, CUFFT_C2C, worksize_r2c));
+      cufftCheck(cufftMakePlan3d(c2r_plan, nfftz, nffty, nfftx, CUFFT_C2C, worksize_c2r));
+    } else {
+      cufftCheck(cufftPlan3d(&r2c_plan, nfftz, nffty, nfftx, CUFFT_R2C));
+      cufftCheck(cufftSetCompatibilityMode(r2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+
+      cufftCheck(cufftPlan3d(&c2r_plan, nfftz, nffty, nfftx, CUFFT_C2R));
+      cufftCheck(cufftSetCompatibilityMode(c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
+    }
+  }
+
+}
+
+//
+// Class destructor
+//
 template <typename AT, typename CT, typename CT2>
 Grid<AT, CT, CT2>::~Grid() {
 
@@ -774,6 +890,12 @@ Grid<AT, CT, CT2>::~Grid() {
   deallocate<CT>(&data1);
   deallocate<CT>(&data2);
 
+  if (multi_gpu) {
+    delete [] host_data;
+    delete [] host_tmp;
+    cufftCheck(cufftXtFree(multi_data));
+  }
+
   if (fft_type == COLUMN) {
     delete xfft_grid;
     delete yfft_grid;
@@ -782,6 +904,12 @@ Grid<AT, CT, CT2>::~Grid() {
     cufftCheck(cufftDestroy(y_c2c_plan));
     cufftCheck(cufftDestroy(z_c2c_plan));
     cufftCheck(cufftDestroy(x_c2r_plan));
+  } else if (fft_type == SLAB) {
+    delete xyfft_grid;
+    delete zfft_grid;
+    cufftCheck(cufftDestroy(xy_r2c_plan));
+    cufftCheck(cufftDestroy(z_c2c_plan));
+    cufftCheck(cufftDestroy(xy_c2r_plan));
   } else if (fft_type == BOX) {
     delete fft_grid;
     cufftCheck(cufftDestroy(r2c_plan));
@@ -877,7 +1005,7 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
   CT recip1, recip2, recip3;
   CT2 *datap;
 
-  if (fft_type == COLUMN) {
+  if (fft_type == COLUMN || fft_type == SLAB) {
     nfft1 = nfftz;
     nfft2 = nfftx;
     nfft3 = nffty;
@@ -941,8 +1069,9 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
 // Gathers forces from the grid
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::gather_force(const int ncoord, const double* recip, const Bspline<CT> &bspline,
-				     const int stride, AT* force) {
+void Grid<AT, CT, CT2>::gather_force(const int ncoord, const double* recip,
+				     const Bspline<CT> &bspline,
+				     const int stride, CT* force) {
 
   dim3 nthread(32, 2, 1);
   dim3 nblock((ncoord - 1)/nthread.x + 1, 1, 1);
@@ -1009,63 +1138,6 @@ void Grid<AT, CT, CT2>::gather_force(const int ncoord, const double* recip, cons
   }
 
   cudaCheck(cudaGetLastError());
-
-   // Reduce data back to a float/double value
-  nthread.x = 512;
-  nthread.y = 1;
-  nthread.z = 1;
-  nblock.x = (3*stride-1)/nthread.x + 1;
-  nblock.y = 1;
-  nblock.z = 1;
-  //  reduce_data<AT, double> <<< nblock, nthread >>>(3*stride, force, (double *)force);
-  //  cudaCheck(cudaGetLastError());
-}
-
-template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::make_fft_plans() {
-
-  if (fft_type == COLUMN) {
-    // Set the size of the local FFT transforms
-    int batch;
-    int nfftx_local = x1 - x0 + 1;
-    int nffty_local = y1 - y0 + 1;
-    int nfftz_local = z1 - z0 + 1;
-    
-    batch = nffty_local * nfftz_local;
-    cufftCheck(cufftPlanMany(&x_r2c_plan, 1, &nfftx_local,
-			     NULL, 0, 0,
-			     NULL, 0, 0, 
-			     CUFFT_R2C, batch));
-    cufftCheck(cufftSetCompatibilityMode(x_r2c_plan, CUFFT_COMPATIBILITY_NATIVE));
-    
-    batch = nfftz_local*(nfftx_local/2+1);
-    cufftCheck(cufftPlanMany(&y_c2c_plan, 1, &nffty_local,
-			     NULL, 0, 0,
-			     NULL, 0, 0, 
-			     CUFFT_C2C, batch));
-    cufftCheck(cufftSetCompatibilityMode(y_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
-    
-    batch = (nfftx_local/2+1)*nffty_local;
-    cufftCheck(cufftPlanMany(&z_c2c_plan, 1, &nfftz_local,
-			     NULL, 0, 0,
-			     NULL, 0, 0, 
-			     CUFFT_C2C, batch));
-    cufftCheck(cufftSetCompatibilityMode(z_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
-    
-    batch = nffty_local*nfftz_local;
-    cufftCheck(cufftPlanMany(&x_c2r_plan, 1, &nfftx_local,
-			     NULL, 0, 0,
-			     NULL, 0, 0, 
-			     CUFFT_C2R, batch));
-    cufftCheck(cufftSetCompatibilityMode(x_c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
-  } else if (fft_type == BOX) {
-    cufftCheck(cufftPlan3d(&r2c_plan, nfftx, nffty, nfftz, CUFFT_R2C));
-    cufftCheck(cufftSetCompatibilityMode(r2c_plan, CUFFT_COMPATIBILITY_NATIVE));
-
-    cufftCheck(cufftPlan3d(&c2r_plan, nfftx, nffty, nfftz, CUFFT_C2R));
-    cufftCheck(cufftSetCompatibilityMode(c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
-  }
-
 }
 
 //
@@ -1155,10 +1227,50 @@ void Grid<AT, CT, CT2>::r2c_fft() {
 
     // data2(z, x, y)
     z_fft_c2c(zfft_grid->data, CUFFT_FORWARD);
-  } else if (fft_type == BOX) {
-    cufftCheck(cufftExecR2C(r2c_plan,
+  } else if (fft_type == SLAB) {
+    cufftCheck(cufftExecR2C(xy_r2c_plan,
 			    (cufftReal *)charge_grid->data,
-			    (cufftComplex *)fft_grid->data));
+			    (cufftComplex *)xyfft_grid->data));
+    xyfft_grid->transpose_xyz_zxy(zfft_grid);
+    cufftCheck(cufftExecC2C(z_c2c_plan,
+			    (cufftComplex *)zfft_grid->data,
+			    (cufftComplex *)zfft_grid->data, CUFFT_FORWARD));
+  } else if (fft_type == BOX) {
+    if (multi_gpu) {
+      // Transform from Real -> Complex
+      cudaCheck(cudaMemcpy(host_tmp, charge_grid->data, sizeof(CT)*xsize*ysize*zsize,
+			   cudaMemcpyDeviceToHost));
+      for (int z=0;z < zsize;z++)
+	for (int y=0;y < ysize;y++)
+	  for (int x=0;x < xsize;x++) {
+	    host_data[x + (y + z*ysize)*xsize].x = host_tmp[x + (y + z*ysize)*xsize];
+	    host_data[x + (y + z*ysize)*xsize].y = 0;
+	  }
+
+
+      cufftCheck(cufftXtMemcpy(r2c_plan, multi_data, host_data, CUFFT_COPY_HOST_TO_DEVICE));
+      cufftCheck(cufftXtExecDescriptorC2C(r2c_plan,
+					  multi_data,
+					  multi_data, CUFFT_FORWARD));
+
+      // Copy data back to a single GPU buffer in fft_grid->data
+      cufftCheck(cufftXtMemcpy(r2c_plan, host_data, multi_data, CUFFT_COPY_DEVICE_TO_HOST));
+
+      CT2 *tmp = (CT2 *)host_tmp;
+      for (int z=0;z < zsize;z++)
+	for (int y=0;y < ysize;y++)
+	  for (int x=0;x < xsize;x++) {
+	    tmp[x + (y + z*ysize)*(xsize/2+1)].x = host_data[x + (y + z*ysize)*xsize].x;
+	    tmp[x + (y + z*ysize)*(xsize/2+1)].y = host_data[x + (y + z*ysize)*xsize].y;
+	  }
+
+      cudaCheck(cudaMemcpy(fft_grid->data, tmp, sizeof(CT2)*(xsize/2+1)*ysize*zsize,
+			   cudaMemcpyHostToDevice));
+    } else {
+      cufftCheck(cufftExecR2C(r2c_plan,
+			      (cufftReal *)charge_grid->data,
+			      (cufftComplex *)fft_grid->data));
+    }
   }
 
 }
@@ -1180,6 +1292,14 @@ void Grid<AT, CT, CT2>::c2r_fft() {
 
     // data2(x, y, z)
     x_fft_c2r(xfft_grid->data);
+  } else if (fft_type == SLAB) {
+    cufftCheck(cufftExecC2C(z_c2c_plan,
+			    (cufftComplex *)zfft_grid->data,
+			    (cufftComplex *)zfft_grid->data, CUFFT_INVERSE));
+    zfft_grid->transpose_xyz_yzx(xyfft_grid);
+    cufftCheck(cufftExecC2R(xy_c2r_plan,
+			    (cufftComplex *)xyfft_grid->data,
+			    (cufftReal *)xyfft_grid->data));
   } else if (fft_type == BOX) {
     cufftCheck(cufftExecC2R(c2r_plan,
 			    (cufftComplex *)fft_grid->data,

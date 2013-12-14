@@ -1,107 +1,60 @@
 #include <iostream>
 #include <cuda.h>
-#include <cufft.h>
-#include "gpu_utils.h"
+#include "cuda_utils.h"
 #include "XYZQ.h"
 #include "Bspline.h"
 #include "Grid.h"
 #include "Force.h"
+#ifdef USE_MPI
+#include "mpi_utils.h"
+#endif
+#include "MultiNodeMatrix3d.h"
 
-void time_transpose();
 void test();
 
 int main(int argc, char *argv[]) {
 
-  int gpu_ind = 0;
-  cudaCheck(cudaSetDevice(gpu_ind));
+  int numnode = 1;
+  int mynode = 0;
 
-  cudaCheck(cudaThreadSynchronize());
-  
-  cudaDeviceProp gpu_prop;
-  cudaCheck(cudaGetDeviceProperties(&gpu_prop, gpu_ind));
+#ifdef USE_MPI
+  start_mpi(argc, argv, numnode, mynode);
+#endif
 
-  int cuda_driver_version;
-  cudaCheck(cudaDriverGetVersion(&cuda_driver_version));
-
-  int cuda_rt_version;
-  cudaCheck(cudaRuntimeGetVersion(&cuda_rt_version));
-
-  printf("Using CUDA device (%d) %s\n",gpu_ind,gpu_prop.name);
-  printf("Using CUDA driver version %d\n",cuda_driver_version);
-  printf("Using CUDA runtime version %d\n",cuda_rt_version);
+  start_gpu(numnode, mynode);
 
   //  time_transpose();
 
-  test();
+  MultiNodeMatrix3d<float> mat0(64, 64, 64, 1, 2, 2, 0);
+  MultiNodeMatrix3d<float> mat1(64, 64, 64, 1, 2, 2, 1);
+  MultiNodeMatrix3d<float> mat2(64, 64, 64, 1, 2, 2, 2);
+  MultiNodeMatrix3d<float> mat3(64, 64, 64, 1, 2, 2, 3);
+
+
+  MultiNodeMatrix3d<float> mat0_t(64, 64, 64, 1, 2, 2, 0);
+  MultiNodeMatrix3d<float> mat1_t(64, 64, 64, 1, 2, 2, 1);
+  MultiNodeMatrix3d<float> mat2_t(64, 64, 64, 1, 2, 2, 2);
+  MultiNodeMatrix3d<float> mat3_t(64, 64, 64, 1, 2, 2, 3);
+
+  mat0.print_info();
+
+  //  mat1.print_info();
+  //  mat2.print_info();
+  //  mat3.print_info();
+
+
+  mat0.transpose_xyz_yzx(&mat0_t);
+  //  mat1.transpose_xyz_yzx(&mat1_t);
+  //  mat2.transpose_xyz_yzx(&mat2_t);
+  //  mat3.transpose_xyz_yzx(&mat3_t);
+
+  //  test();
+
+#ifdef USE_MPI
+  stop_mpi();
+#endif
 
   return 0;
-}
-
-//
-//
-//
-void time_transpose() {
-
-  const int NUM_REP = 100;
-  const int nfftx = 64;
-  const int nffty = 64;
-  const int nfftz = 64;
-  Matrix3d<float> A(nfftx, nffty, nfftz, "test_data/q_real_double.txt");
-  //  Matrix3d<float> A(nfftx, nffty, nfftz);
-  Matrix3d<float> B(nfftx, nffty, nfftz);
-  Matrix3d<float> C(nfftx, nffty, nfftz);
-
-  cudaEvent_t start_event, stop_event;
-  cudaCheck(cudaEventCreate(&start_event));
-  cudaCheck(cudaEventCreate(&stop_event));
-  float ms;
-  double max_diff;
-
-  // Copy
-  A.copy(&B);
-  cudaCheck(cudaEventRecord(start_event,0));
-  for (int i=0;i < NUM_REP;i++)
-    A.copy(&B);
-  cudaCheck(cudaEventRecord(stop_event,0));
-  cudaCheck(cudaEventSynchronize(stop_event));
-  cudaCheck(cudaEventElapsedTime(&ms, start_event, stop_event));
-  std::cout << "copy:" << std::endl;
-  std::cout << "time (ms) = " << ms << std::endl;
-  std::cout << "GB/s = " << 2*nfftx*nffty*nfftz*sizeof(float)*1e-6*NUM_REP/ms << std::endl;
-
-  // Transpose (x,y,z) -> (y,z,x)
-  A.transpose_xyz_yzx(&B);
-  cudaCheck(cudaEventRecord(start_event,0));
-  for (int i=0;i < NUM_REP;i++)
-    A.transpose_xyz_yzx(&B);
-  cudaCheck(cudaEventRecord(stop_event,0));
-  cudaCheck(cudaEventSynchronize(stop_event));
-  cudaCheck(cudaEventElapsedTime(&ms, start_event, stop_event));
-  A.transpose_xyz_yzx_host(&C);
-  if (!B.compare(&C, 0.0, max_diff)) {
-    std::cout << "Error in transpose_xyz_yzx" << std::endl;
-    return;
-  }
-  std::cout << "transpose_xyz_yzx:" << std::endl;
-  std::cout << "time (ms) = " << ms << std::endl;
-  std::cout << "GB/s = " << 2*nfftx*nffty*nfftz*sizeof(float)*1e-6*NUM_REP/ms << std::endl;
-
-  // Transpose (x,y,z) -> (z,x,y)
-  A.transpose_xyz_zxy(&B);
-  cudaCheck(cudaEventRecord(start_event,0));
-  for (int i=0;i < NUM_REP;i++)
-    A.transpose_xyz_zxy(&B);
-  cudaCheck(cudaEventRecord(stop_event,0));
-  cudaCheck(cudaEventSynchronize(stop_event));
-  cudaCheck(cudaEventElapsedTime(&ms, start_event, stop_event));
-  A.transpose_xyz_zxy_host(&C);
-  if (!B.compare(&C, 0.0, max_diff)) {
-    std::cout << "Error in transpose_xyz_zxy" << std::endl;
-    return;
-  }
-  std::cout << "transpose_xyz_zxy:" << std::endl;
-  std::cout << "time (ms) = " << ms << std::endl;
-  std::cout << "GB/s = " << 2*nfftx*nffty*nfftz*sizeof(float)*1e-6*NUM_REP/ms << std::endl;
 }
 
 //
@@ -142,9 +95,8 @@ void test() {
   Matrix3d<float2> q_comp10(nfftx/2+1, nffty, nfftz, "test_data/q_comp10_double.txt");
   Matrix3d<float> q_solved(nfftx, nffty, nfftz, "test_data/q_real2_double.txt");
 
-  Force<double> force_comp("test_data/force.txt");
-  Force<double> force(ncoord);
-  force.setzero();
+  Force<float> force_comp("test_data/force.txt");
+  Force<float> force(ncoord);
 
   // Load coordinates
   XYZQ xyzq("test_data/xyzq.txt");
@@ -164,12 +116,15 @@ void test() {
   bspline.fill_bspline(xyzq.xyzq, xyzq.ncoord);
 
   // Warm up
+  /*
   grid.spread_charge(xyzq.ncoord, bspline);
   grid.r2c_fft();
   grid.scalar_sum(recip, kappa, bspline.prefac_x, bspline.prefac_y, bspline.prefac_z);
   grid.c2r_fft();
-  grid.gather_force(ncoord, recip, bspline, force.stride, (long long int *)force.data);
+  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
+  */
 
+  // Run
   grid.spread_charge(xyzq.ncoord, bspline);
   /*
   if (!q.compare(grid.charge_grid, tol, max_diff)) {
@@ -182,11 +137,13 @@ void test() {
 
   tol = 0.002;
   grid.r2c_fft();
-  /*
   if (fft_type == BOX) {
     Matrix3d<float2> q_zfft_t(nfftx/2+1, nffty, nfftz);
     q_zfft.transpose_xyz_yzx(&q_zfft_t);
     if (!q_zfft_t.compare(grid.fft_grid, tol, max_diff)) {
+      grid.fft_grid->print(0,32,0,0,0,0);
+      std::cout<<"--------------------------------------------------"<<std::endl;
+      q_zfft_t.print(0,32,0,0,0,0);
       std::cout<< "q_zfft_t comparison FAILED" << std::endl;
       return;
     } else {
@@ -200,7 +157,8 @@ void test() {
       std::cout<< "q_zfft comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
     }
   }
-  */
+
+  return;
 
   tol = 1.0e-6;
   grid.scalar_sum(recip, kappa, bspline.prefac_x, bspline.prefac_y, bspline.prefac_z);
@@ -271,7 +229,7 @@ void test() {
   */
 
   // Calculate forces
-  grid.gather_force(ncoord, recip, bspline, force.stride, (long long int *)force.data);
+  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
 
   tol = 3.2e-4;
   if (!force_comp.compare(&force, tol, max_diff)) {
