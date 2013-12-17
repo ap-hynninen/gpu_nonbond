@@ -10,8 +10,10 @@ CL = mpiicc
 SRCS = Grid.cu Bspline.cu XYZQ.cu Matrix3d.cu MultiNodeMatrix3d.cpp Force.cu cuda_utils.cu gpu_recip.cu mpi_utils.cpp
 OBJS = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o cuda_utils.o gpu_recip.o mpi_utils.o
 
+CUDAROOT := $(subst /bin/,,$(dir $(shell which nvcc)))
+
 ifeq ($(OS),Linux)
-LFLAGS = -L /usr/local/cuda-6.0/lib64 -lcudart -lnvToolsExt -lcufft
+LFLAGS = -L $(CUDAROOT)/lib64 -lcudart -lnvToolsExt -lcufft
 else
 LFLAGS = -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcuda -lstdc++.6 -lnvToolsExt
 endif

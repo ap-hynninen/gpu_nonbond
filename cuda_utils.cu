@@ -2,6 +2,34 @@
 #include <cuda.h>
 #include "gpu_utils.h"
 
+//----------------------------------------------------------------------------------------
+//
+// Deallocate page-locked host memory
+// pp = memory pointer
+//
+void deallocate_host_T(void **pp) {
+  
+  if (*pp != NULL) {
+    cudaCheck(cudaFreeHost((void *)(*pp)));
+    *pp = NULL;
+  }
+
+}
+//----------------------------------------------------------------------------------------
+//
+// Allocate page-locked host memory
+// pp = memory pointer
+// len = length of the array
+//
+void allocate_host_T(void **pp, const int len, const size_t sizeofT) {
+  cudaCheck(cudaMallocHost(pp, sizeofT*len));
+}
+
+//----------------------------------------------------------------------------------------
+//
+// Deallocate gpu memory
+// pp = memory pointer
+//
 void deallocate_T(void **pp) {
   
   if (*pp != NULL) {
@@ -73,44 +101,83 @@ void clear_gpu_array_T(void *data, const int ndata, /*cudaStream_t stream, */ co
   cudaCheck(cudaMemsetAsync(data, 0, sizeofT*ndata, stream));
 }
 
-void copy3D_HtoD_T(void* h_data, void* d_data, int x0, int x1, int y0, int y1, int z0, int z1,
-		   size_t sizeofT) {
-  cudaMemcpy3DParms parms = {0};
+//----------------------------------------------------------------------------------------
 
-  parms.srcPos = make_cudaPos(x0, y0, z0);
-  parms.srcPtr = make_cudaPitchedPtr(h_data, sizeofT, x1-x0+1, y1-y0+1);
-
-  parms.dstPos = make_cudaPos(x0, y0, z0);
-  parms.dstPtr = make_cudaPitchedPtr(d_data, sizeofT, x1-x0+1, y1-y0+1);
-
-  parms.extent = make_cudaExtent(x1-x0+1, y1-y0+1, z1-z0+1);
-  parms.kind = cudaMemcpyHostToDevice;
-
-  cudaCheck(cudaMemcpy3D(&parms));
-}
-
-void copy3D_DtoH_T(void* src_data, void* dst_data,
+void copy3D_HtoD_T(void* src_data, void* dst_data,
 		   int src_x0, int src_y0, int src_z0,
 		   size_t src_xsize, size_t src_ysize,
-		   int dst_x0, int dst_x1, int dst_y0, int dst_y1, int dst_z0, int dst_z1,
+		   int dst_x0, int dst_y0, int dst_z0,
+		   size_t width, size_t height, size_t depth,
 		   size_t dst_xsize, size_t dst_ysize,
 		   size_t sizeofT) {
   cudaMemcpy3DParms parms = {0};
 
-  parms.srcPos = make_cudaPos(src_x0, src_y0, src_z0);
+  parms.srcPos = make_cudaPos(sizeofT*src_x0, src_y0, src_z0);
   parms.srcPtr = make_cudaPitchedPtr(src_data, sizeofT*src_xsize, src_xsize, src_ysize);
 
-  parms.dstPos = make_cudaPos(dst_x0, dst_y0, dst_z0);
+  parms.dstPos = make_cudaPos(sizeofT*dst_x0, dst_y0, dst_z0);
   parms.dstPtr = make_cudaPitchedPtr(dst_data, sizeofT*dst_xsize, dst_xsize, dst_ysize);
 
-  parms.extent = make_cudaExtent(sizeofT*(dst_x1-dst_x0+1), dst_y1-dst_y0+1, dst_z1-dst_z0+1);
+  parms.extent = make_cudaExtent(sizeofT*width, height, depth);
   parms.kind = cudaMemcpyHostToDevice;
 
-  cudaCheck(cudaMemcpy3D(&parms));
+  //  cudaCheck(cudaMemcpy3D(&parms));
+
+  if (cudaMemcpy3D(&parms) != cudaSuccess) {
+    std::cerr << "copy3D_HtoD_T" << std::endl;
+    std::cerr << "source: " << std::endl;
+    std::cerr << parms.srcPos.x << " " << parms.srcPos.y << " " << parms.srcPos.z << std::endl;
+    std::cerr << parms.srcPtr.pitch << " " << parms.srcPtr.xsize << " "<< parms.srcPtr.ysize << std::endl;
+    std::cerr << "destination: " << std::endl;
+    std::cerr << parms.dstPos.x << " " << parms.dstPos.y << " " << parms.dstPos.z << std::endl;
+    std::cerr << parms.dstPtr.pitch << " " << parms.dstPtr.xsize << " "<< parms.dstPtr.ysize << std::endl;
+    std::cerr << "extent: " << std::endl;
+    std::cerr << parms.extent.width << " "<< parms.extent.height << " "<< parms.extent.depth << std::endl;
+    exit(1);
+  }
 }
 
+//----------------------------------------------------------------------------------------
+
+void copy3D_DtoH_T(void* src_data, void* dst_data,
+		   int src_x0, int src_y0, int src_z0,
+		   size_t src_xsize, size_t src_ysize,
+		   int dst_x0, int dst_y0, int dst_z0,
+		   size_t width, size_t height, size_t depth,
+		   size_t dst_xsize, size_t dst_ysize,
+		   size_t sizeofT) {
+  cudaMemcpy3DParms parms = {0};
+
+  parms.srcPos = make_cudaPos(sizeofT*src_x0, src_y0, src_z0);
+  parms.srcPtr = make_cudaPitchedPtr(src_data, sizeofT*src_xsize, src_xsize, src_ysize);
+
+  parms.dstPos = make_cudaPos(sizeofT*dst_x0, dst_y0, dst_z0);
+  parms.dstPtr = make_cudaPitchedPtr(dst_data, sizeofT*dst_xsize, dst_xsize, dst_ysize);
+
+  parms.extent = make_cudaExtent(sizeofT*width, height, depth);
+  parms.kind = cudaMemcpyDeviceToHost;
+
+  //  cudaCheck(cudaMemcpy3D(&parms));
+  if (cudaMemcpy3D(&parms) != cudaSuccess) {
+    std::cerr << "copy3D_DtoH_T" << std::endl;
+    std::cerr << "source: " << std::endl;
+    std::cerr << parms.srcPos.x << " " << parms.srcPos.y << " " << parms.srcPos.z << std::endl;
+    std::cerr << parms.srcPtr.pitch << " " << parms.srcPtr.xsize << " "<< parms.srcPtr.ysize << std::endl;
+    std::cerr << "destination: " << std::endl;
+    std::cerr << parms.dstPos.x << " " << parms.dstPos.y << " " << parms.dstPos.z << std::endl;
+    std::cerr << parms.dstPtr.pitch << " " << parms.dstPtr.xsize << " "<< parms.dstPtr.ysize << std::endl;
+    std::cerr << "extent: " << std::endl;
+    std::cerr << parms.extent.width << " "<< parms.extent.height << " "<< parms.extent.depth << std::endl;
+    exit(1);
+  }
+}
+
+//----------------------------------------------------------------------------------------
+
 void start_gpu(int numnode, int mynode) {
-  int gpu_ind = 2;
+  int devices[4] = {2, 3, 0, 1};
+
+  int gpu_ind = devices[mynode % 4];
   cudaCheck(cudaSetDevice(gpu_ind));
 
   cudaCheck(cudaThreadSynchronize());
@@ -124,7 +191,11 @@ void start_gpu(int numnode, int mynode) {
   int cuda_rt_version;
   cudaCheck(cudaRuntimeGetVersion(&cuda_rt_version));
 
-  std::cout << "Using CUDA device " << gpu_ind << " " << gpu_prop.name << std::endl;
-  std::cout << "Using CUDA driver version " << cuda_driver_version << std::endl;
-  std::cout << "Using CUDA runtime version " << cuda_rt_version << std::endl;
+  if (mynode == 0) {
+    std::cout << "Using CUDA driver version " << cuda_driver_version << std::endl;
+    std::cout << "Using CUDA runtime version " << cuda_rt_version << std::endl;
+  }
+
+  std::cout << "Node " << mynode << " using CUDA device " << gpu_ind << " " << gpu_prop.name << std::endl;
+
 }

@@ -87,10 +87,12 @@ private:
   // true for using multiple GPUs for the FFTs
   bool multi_gpu;
 
+#if CUDA_VERSION >= 6000
   // data for multi-gpus
   cudaLibXtDesc *multi_data;
   CT2 *host_data;
   CT *host_tmp;
+#endif
 
   void init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 	  bool y_land_locked, bool z_land_locked);

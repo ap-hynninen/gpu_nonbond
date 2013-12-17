@@ -10,8 +10,8 @@ void start_mpi(int argc, char *argv[], int &numnode, int &mynode) {
   MPICheck(MPI_Comm_size(MPI_COMM_WORLD, &numnode));
   MPICheck(MPI_Comm_rank(MPI_COMM_WORLD, &mynode));
 
-  if (mynode == 0) std::cout << "numnode = " << numnode << std::endl;
-  std::cout << "mynode = " << mynode << std::endl;
+  if (mynode == 0) std::cout << "MPI started, numnode = " << numnode << std::endl;
+
 }
 
 void stop_mpi() {

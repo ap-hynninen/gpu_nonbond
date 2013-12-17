@@ -12,10 +12,10 @@
 
 void test();
 
-int main(int argc, char *argv[]) {
+int numnode = 1;
+int mynode = 0;
 
-  int numnode = 1;
-  int mynode = 0;
+int main(int argc, char *argv[]) {
 
 #ifdef USE_MPI
   start_mpi(argc, argv, numnode, mynode);
@@ -25,28 +25,30 @@ int main(int argc, char *argv[]) {
 
   //  time_transpose();
 
-  MultiNodeMatrix3d<float> mat0(64, 64, 64, 1, 2, 2, 0);
-  MultiNodeMatrix3d<float> mat1(64, 64, 64, 1, 2, 2, 1);
-  MultiNodeMatrix3d<float> mat2(64, 64, 64, 1, 2, 2, 2);
-  MultiNodeMatrix3d<float> mat3(64, 64, 64, 1, 2, 2, 3);
+  Matrix3d<float> q(64, 64, 64, "test_data/q_real_double.txt");
+  Matrix3d<float> q_t(64, 64, 64);
+  q.transpose_xyz_yzx(&q_t);
 
+  MultiNodeMatrix3d<float> mat(64, 64, 64, 1, 1, 2, mynode, "test_data/q_real_double.txt");
+  MultiNodeMatrix3d<float> mat_t(64, 64, 64, 1, 1, 2, mynode);
 
-  MultiNodeMatrix3d<float> mat0_t(64, 64, 64, 1, 2, 2, 0);
-  MultiNodeMatrix3d<float> mat1_t(64, 64, 64, 1, 2, 2, 1);
-  MultiNodeMatrix3d<float> mat2_t(64, 64, 64, 1, 2, 2, 2);
-  MultiNodeMatrix3d<float> mat3_t(64, 64, 64, 1, 2, 2, 3);
+  double max_diff;
+  bool mat_comp = mat.compare(&q, 0.0, max_diff);
+  if (!mat_comp) {
+    std::cout << "mat vs. q comparison FAILED" << std::endl;
+  } else {
+    if (mynode == 0) std::cout << "mat vs. q comparison OK" << std::endl;
+  }
 
-  mat0.print_info();
+  mat.setup_transpose_xyz_yzx(&mat_t);
 
-  //  mat1.print_info();
-  //  mat2.print_info();
-  //  mat3.print_info();
-
-
-  mat0.transpose_xyz_yzx(&mat0_t);
-  //  mat1.transpose_xyz_yzx(&mat1_t);
-  //  mat2.transpose_xyz_yzx(&mat2_t);
-  //  mat3.transpose_xyz_yzx(&mat3_t);
+  mat.transpose_xyz_yzx();
+  mat_comp = mat_t.compare(&q_t, 0.0, max_diff);
+  if (!mat_comp) {
+    std::cout << "mat_t vs. q_t comparison FAILED" << std::endl;
+  } else {
+    if (mynode == 0) std::cout << "mat_t vs. q_t comparison OK" << std::endl;
+  }
 
   //  test();
 
@@ -72,11 +74,7 @@ void test() {
   const int nffty = 64;
   const int nfftz = 64;
   const int order = 4;
-  const FFTtype fft_type = BOX;
-
-  // Number of MPI nodes & current node index
-  int nnode = 1;
-  int mynode = 0;
+  const FFTtype fft_type = SLAB;
 
   // Setup reciprocal vectors
   double recip[9];
@@ -103,7 +101,7 @@ void test() {
 
   // Create Bspline and Grid objects
   Bspline<float> bspline(ncoord, order, nfftx, nffty, nfftz);
-  Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, nnode, mynode);
+  Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
 
   double tol = 1.0e-5;
   double max_diff;
@@ -157,8 +155,6 @@ void test() {
       std::cout<< "q_zfft comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
     }
   }
-
-  return;
 
   tol = 1.0e-6;
   grid.scalar_sum(recip, kappa, bspline.prefac_x, bspline.prefac_y, bspline.prefac_z);

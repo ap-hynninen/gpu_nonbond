@@ -690,9 +690,14 @@ void Grid<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int
   allocate<CT>(&data2, data_size);
 
   if (multi_gpu) {
+#if CUDA_VERSION >= 6000
     cufftCheck(cufftXtMalloc(r2c_plan, &multi_data, CUFFT_XT_FORMAT_INPLACE));
     host_data = new CT2[xsize*ysize*zsize];
     host_tmp = new CT[2*(xsize/2+1)*ysize*zsize];
+#else
+    std::cerr << "No Multi-gpu FFT support in CUDA versions below 6.0" << std::endl;
+    exit(1);
+#endif
   }
 
   data1_len = data_size*sizeof(AT)/sizeof(CT);
@@ -774,7 +779,7 @@ Grid<AT, CT, CT2>::Grid(int nfftx, int nffty, int nfftz, int order,
     bool y_land_locked = (inode_y-1 >= 0) && (inode_y+1 < nnode_y);
     bool z_land_locked = (inode_z-1 >= 0) && (inode_z+1 < nnode_z);
 
-    multi_gpu = true;
+    multi_gpu = false;
 
     assert((multi_gpu && fft_type==BOX) || !multi_gpu);
 
@@ -852,6 +857,7 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
     
   } else if (fft_type == BOX) {
     if (multi_gpu) {
+#if CUDA_VERSION >= 6000
       cufftCheck(cufftCreate(&r2c_plan));
       cufftCheck(cufftCreate(&c2r_plan));
       int ngpu = 2;
@@ -864,6 +870,7 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 
       cufftCheck(cufftMakePlan3d(r2c_plan, nfftz, nffty, nfftx, CUFFT_C2C, worksize_r2c));
       cufftCheck(cufftMakePlan3d(c2r_plan, nfftz, nffty, nfftx, CUFFT_C2C, worksize_c2r));
+#endif
     } else {
       cufftCheck(cufftPlan3d(&r2c_plan, nfftz, nffty, nfftx, CUFFT_R2C));
       cufftCheck(cufftSetCompatibilityMode(r2c_plan, CUFFT_COMPATIBILITY_NATIVE));
@@ -890,11 +897,13 @@ Grid<AT, CT, CT2>::~Grid() {
   deallocate<CT>(&data1);
   deallocate<CT>(&data2);
 
+#if CUDA_VERSION >= 6000
   if (multi_gpu) {
     delete [] host_data;
     delete [] host_tmp;
     cufftCheck(cufftXtFree(multi_data));
   }
+#endif
 
   if (fft_type == COLUMN) {
     delete xfft_grid;
@@ -1237,6 +1246,7 @@ void Grid<AT, CT, CT2>::r2c_fft() {
 			    (cufftComplex *)zfft_grid->data, CUFFT_FORWARD));
   } else if (fft_type == BOX) {
     if (multi_gpu) {
+#if CUDA_VERSION >= 6000
       // Transform from Real -> Complex
       cudaCheck(cudaMemcpy(host_tmp, charge_grid->data, sizeof(CT)*xsize*ysize*zsize,
 			   cudaMemcpyDeviceToHost));
@@ -1266,6 +1276,7 @@ void Grid<AT, CT, CT2>::r2c_fft() {
 
       cudaCheck(cudaMemcpy(fft_grid->data, tmp, sizeof(CT2)*(xsize/2+1)*ysize*zsize,
 			   cudaMemcpyHostToDevice));
+#endif
     } else {
       cufftCheck(cufftExecR2C(r2c_plan,
 			      (cufftReal *)charge_grid->data,
