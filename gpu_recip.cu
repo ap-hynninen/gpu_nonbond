@@ -233,7 +233,7 @@ void test() {
   */
 
   // Calculate forces
-  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
+  //  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
   grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
 
   tol = 3.2e-4;

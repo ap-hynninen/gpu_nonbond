@@ -367,6 +367,25 @@ __forceinline__ __device__ void calc_one_theta_dtheta_4b(T w, T &theta0, T &thet
   theta0 = (((T)1.0)/((T)3.0))*(((T)1.0)-w)*theta0;
 }
 
+template <typename T>
+__forceinline__ __device__ void calc_one_theta_dtheta_4b(T w, T &theta0, T &theta1, T &theta2, T &theta3) {
+
+  theta3 = ((T)0);
+  theta1 = w;
+  theta0 = ((T)1) - w;
+  
+  // compute standard b-spline recursion
+  theta2 = ((T)0.5)*w*theta1;
+  theta1 = ((T)0.5)*((w+((T)1.0))*theta0 + (((T)2.0)-w)*theta1);
+  theta0 = ((T)0.5)*(((T)1.0)-w)*theta0;
+  
+  // one more recursion
+  theta3 = (((T)1.0)/((T)3.0))*w*theta2;
+  theta2 = (((T)1.0)/((T)3.0))*((w+((T)1.0))*theta1 + (((T)3.0)-w)*theta2);
+  theta1 = (((T)1.0)/((T)3.0))*((w+((T)2.0))*theta0 + (((T)2.0)-w)*theta1);
+  theta0 = (((T)1.0)/((T)3.0))*(((T)1.0)-w)*theta0;
+}
+
 //
 // Spreads the charge on the grid. Calculates theta and dtheta on the fly
 // blockDim.x               = Number of atoms each block loads
@@ -492,6 +511,183 @@ spread_charge_ortho_4(const float4 *xyzq, const int ncoord,
 
   // Grid point location, values of (ix0, iy0, iz0) are in range 0..3
   const int tid = (threadIdx.x + threadIdx.y*blockDim.x) % 64;
+  const int x0 = tid & 3;
+  const int y0 = (tid >> 2) & 3;
+  const int z0 = tid >> 4;
+
+  // Loop over atoms pos..pos_end-1
+  int iadd = blockDim.x*blockDim.y/64;
+  int i = (threadIdx.x + threadIdx.y*blockDim.x)/64;
+  int iend = pos_end - blockIdx.x*blockDim.x;
+  for (;i < iend;i += iadd) {
+    int x = sh_ix[i] + x0;
+    int y = sh_iy[i] + y0;
+    int z = sh_iz[i] + z0;
+    float q = sh_q[i];
+      
+    if (x >= nfftx) x -= nfftx;
+    if (y >= nffty) y -= nffty;
+    if (z >= nfftz) z -= nfftz;
+      
+    // Get position on the grid
+    int ind = x + nfftx*(y + nffty*z);
+      
+    // Here we unroll the 4x4x4 loop with 64 threads
+    // Calculate interpolated charge value and store it to global memory
+    write_grid<AT>(q*sh_thetax[i*4+x0]*sh_thetay[i*4+y0]*sh_thetaz[i*4+z0], ind, data);
+
+  }
+
+}
+
+//
+// Spreads the charge on the grid. Calculates theta and dtheta on the fly
+// blockDim.x               = Number of atoms each block loads
+// blockDim.y*blockDim.x/64 = Number of atoms we spread at once
+//
+template <typename AT>
+__global__ void
+spread_charge_ortho_4(const float4 *xyzq, const int ncoord,
+		      const float recip11, const float recip22, const float recip33,
+		      const int nfftx, const int nffty, const int nfftz,
+		      AT* data) {
+  
+  // Shared memory
+  //extern __shared__ void shmem[];
+
+  __shared__ int sh_ix[32];
+  __shared__ int sh_iy[32];
+  __shared__ int sh_iz[32];
+  __shared__ float sh_q[32];
+  __shared__ float sh_thetax[4*32];
+  __shared__ float sh_thetay[4*32];
+  __shared__ float sh_thetaz[4*32];
+
+  // Process atoms pos to pos_end-1
+  const unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
+  const unsigned int pos_end = min((blockIdx.x+1)*blockDim.x, ncoord);
+
+  // Load atom data into shared memory
+  /*
+  if (pos < pos_end) {
+
+    float recip;
+    int nfft;
+    float x;
+
+    float4 xyzqi = xyzq[pos];
+
+    if (threadIdx.y == 0) {
+      recip = recip11;
+      nfft = nfftx;
+      x = xyzqi.x;
+    } else if (threadIdx.y == 1) {
+      recip = recip22;
+      nfft = nffty;
+      x = xyzqi.y;
+    } else if (threadIdx.y == 2) {
+      recip = recip33;
+      nfft = nfftz;
+      x = xyzqi.z;
+    } else {
+      x = xyzqi.w;
+    }
+
+    int fri;
+    float theta0, theta1, theta2, theta3;
+
+    if (threadIdx.y < 3) {
+      float w, fr;
+      w = x*recip + 2.0f;
+      fr = (float)(nfft*(w - (floorf(w + 0.5f) - 0.5f)));
+      fri = (int)fr;
+      w = fr - (float)fri;
+
+      calc_one_theta_dtheta_4b<float>(w, theta0, theta1, theta2, theta3);
+    }
+    
+    if (threadIdx.y == 0) {
+      sh_ix[threadIdx.x] = fri;
+      sh_thetax[threadIdx.x*4 + 0] = theta0;
+      sh_thetax[threadIdx.x*4 + 1] = theta1;
+      sh_thetax[threadIdx.x*4 + 2] = theta2;
+      sh_thetax[threadIdx.x*4 + 3] = theta3;
+    } else if (threadIdx.y == 1) {
+      sh_iy[threadIdx.x] = fri;
+      sh_thetay[threadIdx.x*4 + 0] = theta0;
+      sh_thetay[threadIdx.x*4 + 1] = theta1;
+      sh_thetay[threadIdx.x*4 + 2] = theta2;
+      sh_thetay[threadIdx.x*4 + 3] = theta3;
+    } else if (threadIdx.y == 2) {
+      sh_iz[threadIdx.x] = fri;
+      sh_thetaz[threadIdx.x*4 + 0] = theta0;
+      sh_thetaz[threadIdx.x*4 + 1] = theta1;
+      sh_thetaz[threadIdx.x*4 + 2] = theta2;
+      sh_thetaz[threadIdx.x*4 + 3] = theta3;
+    } else {
+      sh_q[threadIdx.x] = x;
+    }
+
+  }
+  */
+
+  if (pos < pos_end && threadIdx.y == 0) {
+
+    float4 xyzqi = xyzq[pos];
+    float x = xyzqi.x;
+    float y = xyzqi.y;
+    float z = xyzqi.z;
+    float q = xyzqi.w;
+
+    sh_q[threadIdx.x] = q;
+
+    float w;
+
+    w = x*recip11 + 2.0f;
+    float frx = (float)(nfftx*(w - (floorf(w + 0.5f) - 0.5f)));
+    w = y*recip22 + 2.0f;
+    float fry = (float)(nffty*(w - (floorf(w + 0.5f) - 0.5f)));
+    w = z*recip33 + 2.0f;
+    float frz = (float)(nfftz*(w - (floorf(w + 0.5f) - 0.5f)));
+
+    int frxi = (int)frx;
+    int fryi = (int)fry;
+    int frzi = (int)frz;
+
+    sh_ix[threadIdx.x] = frxi;
+    sh_iy[threadIdx.x] = fryi;
+    sh_iz[threadIdx.x] = frzi;
+
+    float wx = frx - (float)frxi;
+    float wy = fry - (float)fryi;
+    float wz = frz - (float)frzi;
+
+    float theta0, theta1, theta2, theta3;
+
+    calc_one_theta_dtheta_4b<float>(wx, theta0, theta1, theta2, theta3);
+    sh_thetax[threadIdx.x*4 + 0] = theta0;
+    sh_thetax[threadIdx.x*4 + 1] = theta1;
+    sh_thetax[threadIdx.x*4 + 2] = theta2;
+    sh_thetax[threadIdx.x*4 + 3] = theta3;
+
+    calc_one_theta_dtheta_4b<float>(wy, theta0, theta1, theta2, theta3);
+    sh_thetay[threadIdx.x*4 + 0] = theta0;
+    sh_thetay[threadIdx.x*4 + 1] = theta1;
+    sh_thetay[threadIdx.x*4 + 2] = theta2;
+    sh_thetay[threadIdx.x*4 + 3] = theta3;
+
+    calc_one_theta_dtheta_4b<float>(wz, theta0, theta1, theta2, theta3);
+    sh_thetaz[threadIdx.x*4 + 0] = theta0;
+    sh_thetaz[threadIdx.x*4 + 1] = theta1;
+    sh_thetaz[threadIdx.x*4 + 2] = theta2;
+    sh_thetaz[threadIdx.x*4 + 3] = theta3;
+
+  }
+
+  __syncthreads();
+
+  // Grid point location, values of (ix0, iy0, iz0) are in range 0..3
+  const int tid = (threadIdx.x + threadIdx.y*blockDim.x) % 64;   // 0...63
   const int x0 = tid & 3;
   const int y0 = (tid >> 2) & 3;
   const int z0 = tid >> 4;
@@ -928,13 +1124,19 @@ __global__ void gather_force_4_ortho_kernel(const float4 *xyzq, const int ncoord
 					    const int stride,
 					    CT *force) {
   // Shared memory
-  extern __shared__ gather_t<CT> shbuf[];
+  __shared__ gather_t<CT> shmem[32];
+#if __CUDA_ARCH__ < 300
+  __shared__ float3 shred[32*2];
+#endif
 
+  //  extern __shared__ gather_t<CT> shbuf[];
   const int tid = threadIdx.x + threadIdx.y*blockDim.x;
+  /*
   volatile gather_t<CT> *shmem = shbuf;
 #if __CUDA_ARCH__ < 300
   volatile float3 *shred = &((float3 *)&shbuf[blockDim.x])[(tid/8)*8];
 #endif
+  */
 
   const int pos = blockIdx.x*blockDim.x + threadIdx.x;
   const int pos_end = min((blockIdx.x+1)*blockDim.x, ncoord);
@@ -1014,7 +1216,7 @@ __global__ void gather_force_4_ortho_kernel(const float4 *xyzq, const int ncoord
   const int ty = (tid & 1);     // 0, 1
   const int tz = (tid/2) & 3;   // 0, 1, 2, 3
 
-  // Calculate force by looping 64/8=8 times
+  // Calculate force by looping 64/16=4 times
   int base = tid/8;
   const int base_end = pos_end - blockIdx.x*blockDim.x;
   while (base < base_end) {
@@ -1170,257 +1372,6 @@ __global__ void gather_force_4_ortho_kernel(const float4 *xyzq, const int ncoord
   }
 
 }
-
-//
-// Gathers forces from the grid
-// blockDim.x            = Number of atoms each block loads
-// blockDim.x*blockDim.y = Total number of threads per block
-//
-template <typename AT, typename CT>
-__launch_bounds__(64)
-__global__ void gather_force_4_ortho_kernelB(const float4 *xyzq, const int ncoord,
-					     const int nfftx, const int nffty, const int nfftz,
-					     const int xsize, const int ysize, const int zsize,
-					     const float recip1, const float recip2, const float recip3,
-					     const float ccelec,
-					     const int stride,
-					     CT *force) {
-  // Shared memory
-  __shared__ float sh_x[32];
-  __shared__ float sh_y[32];
-  __shared__ float sh_z[32];
-  __shared__ float sh_q[32];
-  __shared__ float sh_f1[32];
-  __shared__ float sh_f2[32];
-  __shared__ float sh_f3[32];
-  __shared__ float3 sh_red_buf[8][8];
-
-  const int tid = threadIdx.x + threadIdx.y*blockDim.x; // 0...63
-
-  volatile float3* sh_red = sh_red_buf[tid/8];
-
-  const int pos = blockIdx.x*blockDim.x + threadIdx.x;        // 0...ncoord-1
-  const int pos_end = min((blockIdx.x+1)*blockDim.x, ncoord); // 0...ncoord
-
-  // Load atom data to shared memory
-  if (pos < pos_end && threadIdx.y == 0) {
-    float4 xyzqi = xyzq[pos];
-    sh_x[threadIdx.x] = xyzqi.x;
-    sh_y[threadIdx.x] = xyzqi.y;
-    sh_z[threadIdx.x] = xyzqi.z;
-    sh_q[threadIdx.x] = xyzqi.w;
-  }
-  __syncthreads();
-
-  // Calculate the index this thread is calculating
-  const int ty = (tid & 1);     // 0, 1
-  const int tz = (tid/2) & 3;   // 0, 1, 2, 3
-
-  // 8 threads calculate one force
-  // Calculate force by looping 64/16=4 times
-  int base = tid/8;                                       // 0...7
-  const int base_end = pos_end - blockIdx.x*blockDim.x;
-  while (base < base_end) {
-
-    float x = sh_x[base];
-    float y = sh_y[base];
-    float z = sh_z[base];
-
-    float w;
-
-    w = x*recip1 + 2.0f;
-    float frx = (float)(nfftx*(w - (floorf(w + 0.5f) - 0.5f)));
-
-    w = y*recip2 + 2.0f;
-    float fry = (float)(nffty*(w - (floorf(w + 0.5f) - 0.5f)));
-
-    w = z*recip3 + 2.0f;
-    float frz = (float)(nfftz*(w - (floorf(w + 0.5f) - 0.5f)));
-
-    int frxi = (int)frx;
-    int fryi = (int)fry;
-    int frzi = (int)frz;
-    
-    float wx = frx - (float)frxi;
-    float wy = fry - (float)fryi;
-    float wz = frz - (float)frzi;
-
-    float3 theta_tmp[4];
-    float3 dtheta_tmp[4];
-    calc_theta_dtheta_4<float, float3>(wx, wy, wz, theta_tmp, dtheta_tmp);
-
-    float thx0 = theta_tmp[0].x;
-    float thx1 = theta_tmp[0+1].x;
-    float thx2 = theta_tmp[0+2].x;
-    float thx3 = theta_tmp[0+3].x;
-    float thy0 = theta_tmp[ty].y;
-    float thy1 = theta_tmp[ty+2].y;
-    float thz0 = theta_tmp[tz].z;
-
-    float dthx0 = dtheta_tmp[0+0].x;
-    float dthx1 = dtheta_tmp[0+1].x;
-    float dthx2 = dtheta_tmp[0+2].x;
-    float dthx3 = dtheta_tmp[0+3].x;
-    float dthy0 = dtheta_tmp[ty].y;
-    float dthy1 = dtheta_tmp[ty+2].y;
-    float dthz0 = dtheta_tmp[tz].z;
-
-    int ix0 = frxi;
-    int iy0 = fryi + ty;
-    int iz0 = frzi + tz;
-
-    int ix1 = ix0 + 1;
-    int ix2 = ix0 + 2;
-    int ix3 = ix0 + 3;
-
-    int iy1 = iy0 + 2;
-
-    if (ix0 >= nfftx) ix0 -= nfftx;
-    if (iy0 >= nffty) iy0 -= nffty;
-    if (iz0 >= nfftz) iz0 -= nfftz;
-
-    if (ix1 >= nfftx) ix1 -= nfftx;
-    if (ix2 >= nfftx) ix2 -= nfftx;
-    if (ix3 >= nfftx) ix3 -= nfftx;
-
-    if (iy1 >= nffty) iy1 -= nffty;
-
-    float q = tex1Dfetch(grid_texref, ix0 + (iy0 + iz0*ysize)*xsize);
-    float f1 = dthx0 * thy0 * thz0 * q;
-    float f2 = thx0 * dthy0 * thz0 * q;
-    float f3 = thx0 * thy0 * dthz0 * q;
-
-    q = tex1Dfetch(grid_texref, ix1 + (iy0 + iz0*ysize)*xsize);
-    f1 += dthx1 * thy0 * thz0 * q;
-    f2 += thx1 * dthy0 * thz0 * q;
-    f3 += thx1 * thy0 * dthz0 * q;
-
-    q = tex1Dfetch(grid_texref, ix2 + (iy0 + iz0*ysize)*xsize);
-    f1 += dthx2 * thy0 * thz0 * q;
-    f2 += thx2 * dthy0 * thz0 * q;
-    f3 += thx2 * thy0 * dthz0 * q;
-
-    q = tex1Dfetch(grid_texref, ix3 + (iy0 + iz0*ysize)*xsize);
-    f1 += dthx3 * thy0 * thz0 * q;
-    f2 += thx3 * dthy0 * thz0 * q;
-    f3 += thx3 * thy0 * dthz0 * q;
-
-    q = tex1Dfetch(grid_texref, ix0 + (iy1 + iz0*ysize)*xsize);
-    f1 += dthx0 * thy1 * thz0 * q;
-    f2 += thx0 * dthy1 * thz0 * q;
-    f3 += thx0 * thy1 * dthz0 * q;
-
-    q = tex1Dfetch(grid_texref, ix1 + (iy1 + iz0*ysize)*xsize);
-    f1 += dthx1 * thy1 * thz0 * q;
-    f2 += thx1 * dthy1 * thz0 * q;
-    f3 += thx1 * thy1 * dthz0 * q;
-
-    q = tex1Dfetch(grid_texref, ix2 + (iy1 + iz0*ysize)*xsize);
-    f1 += dthx2 * thy1 * thz0 * q;
-    f2 += thx2 * dthy1 * thz0 * q;
-    f3 += thx2 * thy1 * dthz0 * q;
-
-    q = tex1Dfetch(grid_texref, ix3 + (iy1 + iz0*ysize)*xsize);
-    f1 += dthx3 * thy1 * thz0 * q;
-    f2 += thx3 * dthy1 * thz0 * q;
-    f3 += thx3 * thy1 * dthz0 * q;
-
-    /*
-    float q0 = tex1Dfetch(grid_texref, ix0 + (iy0 + iz0*ysize)*xsize);
-    float q1 = tex1Dfetch(grid_texref, ix1 + (iy0 + iz0*ysize)*xsize);
-    float q2 = tex1Dfetch(grid_texref, ix2 + (iy0 + iz0*ysize)*xsize);
-    float q3 = tex1Dfetch(grid_texref, ix3 + (iy0 + iz0*ysize)*xsize);
-    float q4 = tex1Dfetch(grid_texref, ix0 + (iy1 + iz0*ysize)*xsize);
-    float q5 = tex1Dfetch(grid_texref, ix1 + (iy1 + iz0*ysize)*xsize);
-    float q6 = tex1Dfetch(grid_texref, ix2 + (iy1 + iz0*ysize)*xsize);
-    float q7 = tex1Dfetch(grid_texref, ix3 + (iy1 + iz0*ysize)*xsize);
-
-    float thy0_thz0  = thy0 * thz0;
-    float dthy0_thz0 = dthy0 * thz0;
-    float thy0_dthz0 = thy0 * dthz0;
-
-    float thy1_thz0  = thy1 * thz0;
-    float dthy1_thz0 = dthy1 * thz0;
-    float thy1_dthz0 = thy1 * dthz0;
-
-    float f1 = dthx0 * thy0_thz0 * q0;
-    float f2 = thx0 * dthy0_thz0 * q0;
-    float f3 = thx0 * thy0_dthz0 * q0;
-
-    f1 += dthx1 * thy0_thz0 * q1;
-    f2 += thx1 * dthy0_thz0 * q1;
-    f3 += thx1 * thy0_dthz0 * q1;
-
-    f1 += dthx2 * thy0_thz0 * q2;
-    f2 += thx2 * dthy0_thz0 * q2;
-    f3 += thx2 * thy0_dthz0 * q2;
-
-    f1 += dthx3 * thy0_thz0 * q3;
-    f2 += thx3 * dthy0_thz0 * q3;
-    f3 += thx3 * thy0_dthz0 * q3;
-
-    f1 += dthx0 * thy1_thz0 * q4;
-    f2 += thx0 * dthy1_thz0 * q4;
-    f3 += thx0 * thy1_dthz0 * q4;
-
-    f1 += dthx1 * thy1_thz0 * q5;
-    f2 += thx1 * dthy1_thz0 * q5;
-    f3 += thx1 * thy1_dthz0 * q5;
-
-    f1 += dthx2 * thy1_thz0 * q6;
-    f2 += thx2 * dthy1_thz0 * q6;
-    f3 += thx2 * thy1_dthz0 * q6;
-
-    f1 += dthx3 * thy1_thz0 * q7;
-    f2 += thx3 * dthy1_thz0 * q7;
-    f3 += thx3 * thy1_dthz0 * q7;
-    */
-
-    // Reduce
-    const int i = threadIdx.x & 7;
-    sh_red[i].x = f1;
-    sh_red[i].y = f2;
-    sh_red[i].z = f3;
-
-    if (i < 4) {
-      sh_red[i].x += sh_red[i+4].x;
-      sh_red[i].y += sh_red[i+4].y;
-      sh_red[i].z += sh_red[i+4].z;
-    }
-
-    if (i < 2) {
-      sh_red[i].x += sh_red[i+2].x;
-      sh_red[i].y += sh_red[i+2].y;
-      sh_red[i].z += sh_red[i+2].z;
-    }
-
-    if (i == 0) {
-      sh_f1[base] = sh_red[0].x + sh_red[1].x;
-      sh_f2[base] = sh_red[0].y + sh_red[1].y;
-      sh_f3[base] = sh_red[0].z + sh_red[1].z;
-    }
-
-    base += 8;
-  }
-
-  // Write forces
-  const int stride2 = 2*stride;
-  __syncthreads();
-  if (pos < pos_end && threadIdx.y == 0) {
-    float f1 = sh_f1[threadIdx.x];
-    float f2 = sh_f2[threadIdx.x];
-    float f3 = sh_f3[threadIdx.x];
-    float q = sh_q[threadIdx.x]*ccelec;
-    float fx = q*recip1*f1*nfftx;
-    float fy = q*recip2*f2*nffty;
-    float fz = q*recip3*f3*nfftz;
-    force[pos]         = fx;
-    force[pos+stride]  = fy;
-    force[pos+stride2] = fz;
-  }
-
-}
-
 
 template<typename T>
 void bind_grid_texture(const T *data, const int data_len) {
@@ -1818,10 +1769,15 @@ void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, cons
 
   switch(order) {
   case 4:
+    /*
     spread_charge_ortho_4<AT> <<< nblock, nthread >>>(xyzq, ncoord, recip1, recip2, recip3,
 						      nfftx, nffty, nfftz,
 						      bspline.thetax, bspline.thetay, bspline.thetaz,
 						      bspline.dthetax, bspline.dthetay, bspline.dthetaz,
+						      (AT *)accum_grid->data);
+    */
+    spread_charge_ortho_4<AT> <<< nblock, nthread >>>(xyzq, ncoord, recip1, recip2, recip3,
+						      nfftx, nffty, nfftz,
 						      (AT *)accum_grid->data);
     break;
 
@@ -2007,7 +1963,7 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
 
   dim3 nthread(32, 2, 1);
   dim3 nblock((ncoord - 1)/nthread.x + 1, 1, 1);
-  size_t shmem_size = sizeof(gather_t<CT>)*nthread.x;// + sizeof(float3)*nthread.x*nthread.y;
+  //size_t shmem_size = sizeof(gather_t<CT>)*nthread.x;// + sizeof(float3)*nthread.x*nthread.y;
 
   // CCELEC is 1/ (4 pi eps ) in AKMA units, conversion from SI
   // units: CCELEC = e*e*Na / (4*pi*eps*1Kcal*1A)
@@ -2043,12 +1999,12 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
     switch(order) {
     case 4:
       gather_force_4_ortho_kernel<AT, CT> 
-	<<< nblock, nthread, shmem_size >>>(xyzq, ncoord,
-					    nfftx, nffty, nfftz,
-					    nfftx, nffty, nfftz,
-					    recip_loc[0], recip_loc[4], recip_loc[8],
-					    ccelec_loc,
-					    stride, force);
+	<<< nblock, nthread >>>(xyzq, ncoord,
+				nfftx, nffty, nfftz,
+				nfftx, nffty, nfftz,
+				recip_loc[0], recip_loc[4], recip_loc[8],
+				ccelec_loc,
+				stride, force);
       break;
     default:
       std::cerr<<"Grid::gather_force: order "<<order<<" not implemented"<<std::endl;
