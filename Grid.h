@@ -106,11 +106,15 @@ private:
   void print_info();
 
   void spread_charge(const int ncoord, const Bspline<CT> &bspline);
+  void spread_charge(const float4 *xyzq, const int ncoord, const double *recip,
+		     Bspline<CT> &bspline);
 
   void scalar_sum(const double* recip, const double kappa,
 		  CT* prefac_x, CT* prefac_y, CT* prefac_z);
 
   void gather_force(const int ncoord, const double* recip, const Bspline<CT> &bspline,
+		    const int stride, CT* force);
+  void gather_force(const float4 *xyzq, const int ncoord, const double* recip,
 		    const int stride, CT* force);
 
   void x_fft_r2c(CT2 *data);

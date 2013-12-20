@@ -324,6 +324,7 @@ void MultiNodeMatrix3d<T>::setup_transpose_xyz_yzx(MultiNodeMatrix3d<T>* mat) {
   }
   */
 
+#ifdef USE_MPI
   if (nrecv > 0) {
     recv_req = (void *)(new MPI_Request[nrecv]);
     recv_stat = (void *)(new MPI_Status[nrecv]);
@@ -333,7 +334,7 @@ void MultiNodeMatrix3d<T>::setup_transpose_xyz_yzx(MultiNodeMatrix3d<T>* mat) {
     send_req = (void *)(new MPI_Request[nsend]);
     send_stat = (void *)(new MPI_Status[nsend]);
   }
-
+#endif
 
 }
 
@@ -443,7 +444,13 @@ void MultiNodeMatrix3d<T>::transpose_xyz_yzx() {
   if (nrecv > 0) {
     for (int i=0;i < nrecv;i++) {
       int k;
+#ifdef USE_MPI
+      range_start("MPI_Waitany");
       MPICheck(MPI_Waitany(nrecv, (MPI_Request *)recv_req, &k, (MPI_Status *)recv_stat));
+      range_stop();
+#else
+      k = i;
+#endif
 
       /*
       if (mynode == 1) {
@@ -504,7 +511,9 @@ void MultiNodeMatrix3d<T>::transpose_xyz_yzx() {
 
   // Wait for sends to finish
   if (nsend > 0) {
+#ifdef USE_MPI
     MPICheck(MPI_Waitall(nsend, (MPI_Request *)send_req, (MPI_Status *)send_stat));
+#endif
   }
 
 }

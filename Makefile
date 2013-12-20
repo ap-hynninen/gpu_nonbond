@@ -2,10 +2,15 @@
 # Detect OS
 OS := $(shell uname -s)
 
-DEFS = USE_MPI
+DEFS = DUMMY #USE_MPI
 
+ifeq ($(DEFS),USE_MPI)
 CC = mpiicc
 CL = mpiicc
+else
+CC = icc
+CL = icc
+endif
 
 SRCS = Grid.cu Bspline.cu XYZQ.cu Matrix3d.cu MultiNodeMatrix3d.cpp Force.cu cuda_utils.cu gpu_recip.cu mpi_utils.cpp
 OBJS = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o cuda_utils.o gpu_recip.o mpi_utils.o
@@ -27,7 +32,7 @@ clean:
 	rm -f gpu_recip
 
 %.o : %.cu
-	nvcc -c -O3 -arch=sm_20 -fmad=true -use_fast_math -lineinfo -D$(DEFS) $<
+	nvcc -c -O3 -arch=sm_30 -fmad=true -use_fast_math -lineinfo -D$(DEFS) $<
 
 %.o : %.cpp
 	$(CC) -c -O3 -D$(DEFS) $<

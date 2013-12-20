@@ -1,4 +1,5 @@
 #include <iostream>
+#include <cassert>
 #include <math.h>
 #include <cuda.h>
 #include "gpu_utils.h"
@@ -337,6 +338,87 @@ void Bspline<T>::calc_prefac() {
   delete [] h_prefac_x;
   delete [] h_prefac_y;
   delete [] h_prefac_z;
+}
+
+//
+// Prints a part of (dthetax, dthetay, dthetaz)
+//
+template <typename T>
+void Bspline<T>::print_dtheta(int start, int end) {
+
+  assert(start <= end);
+  assert(start >= 0);
+  assert(end < dthetax_len);
+  assert(end < dthetay_len);
+  assert(end < dthetaz_len);
+
+  T *h_dthetax = new T[dthetax_len*order];
+  T *h_dthetay = new T[dthetay_len*order];
+  T *h_dthetaz = new T[dthetaz_len*order];
+
+  copy_DtoH<T>(dthetax, h_dthetax, (end+1)*order);
+  copy_DtoH<T>(dthetay, h_dthetay, (end+1)*order);
+  copy_DtoH<T>(dthetaz, h_dthetaz, (end+1)*order);
+  for (int i=start;i <= end;i++) {
+    std::cout << h_dthetax[i] << " "<< h_dthetay[i] << " "<< h_dthetaz[i] << std::endl;
+  }
+
+  delete [] h_dthetax;
+  delete [] h_dthetay;
+  delete [] h_dthetaz;
+}
+
+//
+// Compares (dthetax, dthetay, dthetaz) between two Bsplines
+//
+template <typename T>
+bool Bspline<T>::compare_dtheta(Bspline &a, int ncoord, double tol) {
+  assert(ncoord > 0);
+  assert(ncoord <= dthetax_len);
+  assert(ncoord <= a.dthetax_len);
+
+  T *h_dthetax1 = new T[ncoord*order];
+  T *h_dthetay1 = new T[ncoord*order];
+  T *h_dthetaz1 = new T[ncoord*order];
+
+  T *h_dthetax2 = new T[ncoord*order];
+  T *h_dthetay2 = new T[ncoord*order];
+  T *h_dthetaz2 = new T[ncoord*order];
+
+  copy_DtoH<T>(dthetax, h_dthetax1, ncoord*order);
+  copy_DtoH<T>(dthetay, h_dthetay1, ncoord*order);
+  copy_DtoH<T>(dthetaz, h_dthetaz1, ncoord*order);
+
+  copy_DtoH<T>(a.dthetax, h_dthetax2, ncoord*order);
+  copy_DtoH<T>(a.dthetay, h_dthetay2, ncoord*order);
+  copy_DtoH<T>(a.dthetaz, h_dthetaz2, ncoord*order);
+
+  bool ok = true;
+
+  try {
+    for (int i=0;i < ncoord;i++) {
+      double dx = fabs(h_dthetax1[i] - h_dthetax2[i]);
+      double dy = fabs(h_dthetay1[i] - h_dthetay2[i]);
+      double dz = fabs(h_dthetaz1[i] - h_dthetaz2[i]);
+      if (dx > tol || dy > tol || dz > tol) throw i;
+    }
+  }
+  catch (int i) {
+    std::cout << "compare_dtheta, outside tolerance at i="<<i<<std::endl;
+    std::cout << "this: " << h_dthetax1[i] << " " << h_dthetay1[i] << " "<< h_dthetaz1[i] <<std::endl;
+    std::cout << "comp: " << h_dthetax2[i] << " " << h_dthetay2[i] << " "<< h_dthetaz2[i] <<std::endl;
+    ok = false;
+  }
+
+  delete [] h_dthetax1;
+  delete [] h_dthetay1;
+  delete [] h_dthetaz1;
+
+  delete [] h_dthetax2;
+  delete [] h_dthetay2;
+  delete [] h_dthetaz2;
+  
+  return ok;
 }
 
 //

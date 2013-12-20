@@ -152,6 +152,9 @@ static void print_gpu_float(float *data, const int ndata) {
 }
 
 //----------------------------------------------------------------------------------------
+void range_start(char *range_name);
+void range_stop();
+//----------------------------------------------------------------------------------------
 
 void start_gpu(int numnode, int mynode);
 

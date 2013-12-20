@@ -4,6 +4,9 @@
 static __constant__ const float FORCE_SCALE = (float)(1ll << 40);
 static __constant__ const double INV_FORCE_SCALE = (double)1.0/(double)(1ll << 40);
 
+static __constant__ const float FORCE_SCALE_I = (float)(1 << 31);
+static __constant__ const double INV_FORCE_SCALE_I = (double)1.0/(double)(1 << 31);
+
 #define cudaCheck(stmt) do {                                 \
         cudaError_t err = stmt;                            \
         if (err != cudaSuccess) {                          \
@@ -84,5 +87,20 @@ __device__ inline long long int lliroundf(float f)
     asm("cvt.rni.s64.f32 	%0, %1;" : "=l"(l) : "f"(f));
     return l;
 }
+
+__device__ inline unsigned int itoui(int l)
+{
+    unsigned int u;
+    asm("mov.b32    %0, %1;" : "=r"(u) : "r"(l));
+    return u;
+}
+
+__device__ inline int iroundf(float f)
+{
+    int l;
+    asm("cvt.rni.s32.f32 	%0, %1;" : "=r"(l) : "f"(f));
+    return l;
+}
+
 // End of copied code.
 

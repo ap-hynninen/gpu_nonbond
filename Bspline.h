@@ -67,6 +67,10 @@ public:
 
   void fill_bspline(const float4 *xyzq, const int ncoord);
   void calc_prefac();
+
+  void print_dtheta(int start, int end);
+
+  bool compare_dtheta(Bspline &a, int ncoord, double tol);
 };
 
 #endif // BSPLINE_H

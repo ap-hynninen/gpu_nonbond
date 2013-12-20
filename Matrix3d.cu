@@ -193,6 +193,11 @@ inline double Matrix3d<long long int>::norm(long long int a, long long int b) {
 }
 
 template <>
+inline double Matrix3d<int>::norm(int a, int b) {
+  return (double)abs(a-b);
+}
+
+template <>
 inline double Matrix3d<float>::norm(float a, float b) {
   return (double)fabsf(a-b);
 }
@@ -204,6 +209,9 @@ inline double Matrix3d<float2>::norm(float2 a, float2 b) {
 
 template<>
 inline bool Matrix3d<long long int>::is_nan(long long int a) {return false;};
+
+template<>
+inline bool Matrix3d<int>::is_nan(int a) {return false;};
 
 template<>
 inline bool Matrix3d<float>::is_nan(float a) {
@@ -669,3 +677,4 @@ int Matrix3d<T>::get_zsize() {
 template class Matrix3d<float>;
 template class Matrix3d<float2>;
 template class Matrix3d<long long int>;
+template class Matrix3d<int>;

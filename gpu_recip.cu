@@ -25,6 +25,7 @@ int main(int argc, char *argv[]) {
 
   //  time_transpose();
 
+  /*
   Matrix3d<float> q(64, 64, 64, "test_data/q_real_double.txt");
   Matrix3d<float> q_t(64, 64, 64);
   q.transpose_xyz_yzx(&q_t);
@@ -49,8 +50,9 @@ int main(int argc, char *argv[]) {
   } else {
     if (mynode == 0) std::cout << "mat_t vs. q_t comparison OK" << std::endl;
   }
-
-  //  test();
+  */
+  
+  test();
 
 #ifdef USE_MPI
   stop_mpi();
@@ -74,7 +76,7 @@ void test() {
   const int nffty = 64;
   const int nfftz = 64;
   const int order = 4;
-  const FFTtype fft_type = SLAB;
+  const FFTtype fft_type = BOX;
 
   // Setup reciprocal vectors
   double recip[9];
@@ -101,7 +103,8 @@ void test() {
 
   // Create Bspline and Grid objects
   Bspline<float> bspline(ncoord, order, nfftx, nffty, nfftz);
-  Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
+  //  Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
+  Grid<int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
 
   double tol = 1.0e-5;
   double max_diff;
@@ -123,7 +126,8 @@ void test() {
   */
 
   // Run
-  grid.spread_charge(xyzq.ncoord, bspline);
+  //grid.spread_charge(xyzq.ncoord, bspline);
+  grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip, bspline);
   /*
   if (!q.compare(grid.charge_grid, tol, max_diff)) {
     std::cout<< "q comparison FAILED" << std::endl;
@@ -135,13 +139,11 @@ void test() {
 
   tol = 0.002;
   grid.r2c_fft();
+  /*
   if (fft_type == BOX) {
     Matrix3d<float2> q_zfft_t(nfftx/2+1, nffty, nfftz);
     q_zfft.transpose_xyz_yzx(&q_zfft_t);
     if (!q_zfft_t.compare(grid.fft_grid, tol, max_diff)) {
-      grid.fft_grid->print(0,32,0,0,0,0);
-      std::cout<<"--------------------------------------------------"<<std::endl;
-      q_zfft_t.print(0,32,0,0,0,0);
       std::cout<< "q_zfft_t comparison FAILED" << std::endl;
       return;
     } else {
@@ -155,19 +157,27 @@ void test() {
       std::cout<< "q_zfft comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
     }
   }
+  */
 
   tol = 1.0e-6;
   grid.scalar_sum(recip, kappa, bspline.prefac_x, bspline.prefac_y, bspline.prefac_z);
-
   /*
-  if (!q_zfft_summed.compare(grid.zfft_grid, tol, max_diff)) {
-    std::cout<< "q_zfft_summed comparison FAILED" << std::endl;
-    q_zfft_summed.print(0,10,0,0,0,0);
-    std::cout<<"====================================="<<std::endl;
-    grid.zfft_grid->print(0,10,0,0,0,0);
-    return;
+  if (fft_type == BOX) {
+    Matrix3d<float2> q_zfft_summed_t(nfftx/2+1, nffty, nfftz);
+    q_zfft_summed.transpose_xyz_yzx(&q_zfft_summed_t);
+    if (!q_zfft_summed_t.compare(grid.fft_grid, tol, max_diff)) {
+      std::cout<< "q_zfft_summed_t comparison FAILED" << std::endl;
+      return;
+    } else {
+      std::cout<< "q_zfft_summed_t comparison OK (tolerance "<<tol<<" max difference "<<max_diff << ")" << std::endl;
+    }
   } else {
-    std::cout<< "q_zfft_summed comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+    if (!q_zfft_summed.compare(grid.zfft_grid, tol, max_diff)) {
+      std::cout<< "q_zfft_summed comparison FAILED" << std::endl;
+      return;
+    } else {
+      std::cout<< "q_zfft_summed comparison OK (tolerance "<<tol<<" max difference "<<max_diff << ")" << std::endl;
+    }
   }
   */
 
@@ -203,7 +213,6 @@ void test() {
 
   tol = 1.0e-5;
   grid.c2r_fft();
-
   /*
   grid.solved_grid->scale(1.0f/(float)(nfftx*nffty*nfftz));
   if (!q.compare(grid.solved_grid, tol, max_diff)) {
@@ -212,7 +221,6 @@ void test() {
   } else {
     std::cout<< "q comparison OK (tolerance " << tol << " max difference "<< max_diff << ")" << std::endl;
   }
-  return;
   */
 
   /*
@@ -226,11 +234,13 @@ void test() {
 
   // Calculate forces
   grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
+  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
 
   tol = 3.2e-4;
   if (!force_comp.compare(&force, tol, max_diff)) {
+    std::cout<<"force comparison FAILED"<<std::endl;
   } else {
-    std::cout<< "force comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+    std::cout<<"force comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
 
 }

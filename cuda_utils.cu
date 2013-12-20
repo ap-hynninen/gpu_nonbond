@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cuda.h>
+#include <nvToolsExtCuda.h>
 #include "gpu_utils.h"
 
 //----------------------------------------------------------------------------------------
@@ -174,6 +175,34 @@ void copy3D_DtoH_T(void* src_data, void* dst_data,
 
 //----------------------------------------------------------------------------------------
 
+void range_start(char *range_name) {
+  static int color_id=0;
+  nvtxEventAttributes_t att;
+  att.version = NVTX_VERSION;
+  att.size = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
+  att.colorType = NVTX_COLOR_ARGB;
+  if (color_id == 0) {
+    att.color = 0xFFFF0000;
+  } else if (color_id == 1) {
+    att.color = 0xFF00FF00;
+  } else if (color_id == 2) {
+    att.color = 0xFF0000FF;
+  } else if (color_id == 3) {
+    att.color = 0xFFFF00FF;
+  }
+  color_id++;
+  if (color_id > 3) color_id = 0;
+  att.messageType = NVTX_MESSAGE_TYPE_ASCII;
+  att.message.ascii = range_name;
+  nvtxRangePushEx(&att);
+}
+
+void range_stop() {
+  nvtxRangePop();
+}
+
+//----------------------------------------------------------------------------------------
+
 void start_gpu(int numnode, int mynode) {
   int devices[4] = {2, 3, 0, 1};
 
@@ -197,5 +226,5 @@ void start_gpu(int numnode, int mynode) {
   }
 
   std::cout << "Node " << mynode << " using CUDA device " << gpu_ind << " " << gpu_prop.name << std::endl;
-
+  
 }
