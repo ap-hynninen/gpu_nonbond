@@ -12,8 +12,8 @@ CC = icc
 CL = icc
 endif
 
-SRCS = Grid.cu Bspline.cu XYZQ.cu Matrix3d.cu MultiNodeMatrix3d.cpp Force.cu cuda_utils.cu gpu_recip.cu mpi_utils.cpp
-OBJS = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o cuda_utils.o gpu_recip.o mpi_utils.o
+SRCS = Grid.cu Bspline.cu XYZQ.cu Matrix3d.cu MultiNodeMatrix3d.cpp Force.cu cuda_utils.cu gpu_recip.cu mpi_utils.cpp DirectForce.cu NeighborList.cu gpu_direct.cu
+OBJS = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o cuda_utils.o gpu_recip.o mpi_utils.o DirectForce.o NeighborList.o gpu_direct.o
 
 CUDAROOT := $(subst /bin/,,$(dir $(shell which nvcc)))
 
@@ -25,6 +25,9 @@ endif
 
 gpu_recip : $(OBJS)
 	$(CL) $(LFLAGS) -o gpu_recip $(OBJS)
+
+gpu_direct : $(OBJS)
+	$(CL) $(LFLAGS) -o gpu_direct $(OBJS)
 
 clean: 
 	rm -f *.o
