@@ -53,18 +53,18 @@ void NeighborList<tilesize>::load(const char *filename) {
 
     file >> ni >> ntot;
 
+    std::cerr << "ni = " << ni << " ntot = " << ntot << std::endl;
+
     h_ientry = new ientry_t[ni];
     h_tile_indj = new int[ntot];
     h_tile_excl = new tile_excl_t<tilesize>[ntot];
 
     for (int i=0;i < ni;i++) {
-      file >> h_ientry[i].indi >> h_ientry[i].ish >> h_ientry[i].startj >> h_ientry[i].endj;
-      //int nj = h_ientry[i].endj - h_ientry[i].startj + 1;
+      file >> std::dec >> h_ientry[i].indi >> h_ientry[i].ish >> h_ientry[i].startj >> h_ientry[i].endj;
       for (int j=h_ientry[i].startj;j <= h_ientry[i].endj;j++) {
-	file >> h_tile_indj[j];
+	file >> std::dec >> h_tile_indj[j];
 	for (int k=0;k < num_excl;k++) {
-	  file >> h_tile_excl[j].excl[k];
-	  //fscanf(fp," %x",&((*h_tile_excl)[j].excl[k]));
+	  file >> std::hex >> h_tile_excl[j].excl[k];
 	}
       }
     }

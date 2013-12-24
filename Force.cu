@@ -2,9 +2,14 @@
 #include <fstream>
 #include <cassert>
 #include <cuda.h>
+#include "gpu_utils.h"
+#include "reduce.h"
 #include "cuda_utils.h"
 #include "Force.h"
 
+//
+// Class creator
+//
 template <typename T>
 Force<T>::Force(const int ncoord) : ncoord(ncoord) {
   stride = ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
@@ -51,6 +56,9 @@ Force<T>::Force(const char *filename) {
 
 }
 
+//
+// Class destructor
+//
 template <typename T>
 Force<T>::~Force() {
   deallocate<T>(&data);
@@ -115,5 +123,24 @@ bool Force<T>::compare(Force<T>* force, const double tol, double& max_diff) {
   return ok;
 }
 
+//
+// Converts one type of force array to another. Result is in "force"
+//
+template <typename T>
+template <typename T2>
+void Force<T>::convert(Force<T2>* force) {
+
+  assert(force->ncoord == ncoord);
+  assert(force->stride == stride);
+
+  int nthread = 512;
+  int nblock = (3*stride - 1)/nthread + 1;
+
+  reduce_data<T, T2> <<< nblock, nthread >>>(3*stride,
+					     this->data,
+					     force->data);
+}
+
+template class Force<long long int>;
 template class Force<double>;
 template class Force<float>;

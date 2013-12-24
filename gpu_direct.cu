@@ -41,25 +41,29 @@ void test() {
   const double boxy = 62.23;
   const double boxz = 62.23;
   const double kappa = 0.320;
+  const double roff = 9.0;
+  const double ron = 7.5;
   const int ncoord = 23558;
-  const int nfftx = 64;
-  const int nffty = 64;
-  const int nfftz = 64;
-  const int order = 4;
 
-  // Setup reciprocal vectors
-  double recip[9];
-  for (int i=0;i < 9;i++) recip[i] = 0;
-  recip[0] = 1.0/boxx;
-  recip[4] = 1.0/boxy;
-  recip[8] = 1.0/boxz;
-
-  Force<float> force_comp("test_data/force_direct.txt");
+  //  Force<float> force_comp("test_data/force_direct.txt");
+  Force<long long int> force_fp(ncoord);
   Force<float> force(ncoord);
 
   // Load coordinates
-  XYZQ xyzq("test_data/xyzq.txt");
+  XYZQ xyzq("test_data/xyzq_direct.txt");
 
+  NeighborList<32> nlist;
+  nlist.load("test_data/nlist.txt");
+
+  DirectForce<long long int, float> dir;
+  dir.setup(boxx, boxy, boxz, kappa, roff, ron, VDW_CUT, EWALD, true, true);
+  dir.set_vdwparam("test_data/vdwparam.txt");
+  dir.set_vdwtype("test_data/vdwtype.txt");
+  dir.calc_force(ncoord, xyzq.xyzq, &nlist, false, force_fp.data);
+
+  return;
+
+  /*
   double max_diff;
   double tol = 3.2e-4;
   if (!force_comp.compare(&force, tol, max_diff)) {
@@ -67,5 +71,6 @@ void test() {
   } else {
     std::cout<<"force comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
+  */
 
 }

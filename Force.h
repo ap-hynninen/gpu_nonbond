@@ -27,6 +27,8 @@ public:
 
   void setzero();
   bool compare(Force<T>* force, const double tol, double& max_diff);
+
+  template <typename T2> void convert(Force<T2>* force);
 };
 
 

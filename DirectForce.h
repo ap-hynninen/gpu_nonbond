@@ -11,6 +11,8 @@
 template <int tilesize> class NeighborList;
 #endif
 
+enum {NONE, EWALD, EWALD_LOOKUP, VDW_CUT, VDW_VSH, VDW_VSW, VDW_VFSW};
+
 template <typename AT, typename CT>
 class DirectForce {
 

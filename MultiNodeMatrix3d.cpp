@@ -7,7 +7,6 @@
 #include "mpi_utils.h"
 #include "cuda_utils.h"
 #include "MultiNodeMatrix3d.h"
-//#include <cuda.h>
 
 #define max(a,b) ((a) > (b) ? (a) : (b))
 #define min(a,b) ((a) < (b) ? (a) : (b))

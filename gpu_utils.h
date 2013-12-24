@@ -1,4 +1,7 @@
 
+#ifndef GPU_UTILS_H
+#define GPU_UTILS_H
+
 #include <stdio.h>
 
 static __constant__ const float FORCE_SCALE = (float)(1ll << 40);
@@ -88,6 +91,8 @@ __device__ inline long long int lliroundf(float f)
     return l;
 }
 
+// End of copied code.
+
 __device__ inline unsigned int itoui(int l)
 {
     unsigned int u;
@@ -102,5 +107,4 @@ __device__ inline int iroundf(float f)
     return l;
 }
 
-// End of copied code.
-
+#endif // GPU_UTILS_H

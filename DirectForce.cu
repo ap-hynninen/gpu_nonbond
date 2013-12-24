@@ -92,8 +92,6 @@ public:
 };
 
 
-enum {NONE, EWALD, EWALD_LOOKUP, VDW_CUT, VDW_VSH, VDW_VSW, VDW_VFSW};
-
 //#define WARPSIZE 32                             // Number of threads per warp
 //#define TILESIZE 32                             // Number of atoms per tile direction
 //#define NUM_EXCL ((32*32-1)/32 + 1) // Number of exclusion mask integers
@@ -512,7 +510,7 @@ DirectForce<AT, CT>::~DirectForce() {
 // Copies h_setup -> d_setup
 //
 void update_setup() {
-  cudaCheck(cudaMemcpyToSymbol(&d_setup, &h_setup, sizeof(DirectSettings_t)));
+  cudaCheck(cudaMemcpyToSymbol(d_setup, &h_setup, sizeof(DirectSettings_t)));
 }
 
 //
