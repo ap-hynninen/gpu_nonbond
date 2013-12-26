@@ -50,18 +50,17 @@ void test() {
   Force<float> force(ncoord);
 
   // Load coordinates
-  XYZQ xyzq("test_data/xyzq_direct.txt");
+  XYZQ xyzq("test_data/xyzq_direct.txt", 32);
 
   NeighborList<32> nlist;
   nlist.load("test_data/nlist.txt");
+  nlist.analyze();
 
   DirectForce<long long int, float> dir;
-  dir.setup(boxx, boxy, boxz, kappa, roff, ron, VDW_CUT, EWALD, true, true);
+  dir.setup(boxx, boxy, boxz, kappa, roff, ron, VDW_VSH, EWALD_LOOKUP, true, true);
   dir.set_vdwparam("test_data/vdwparam.txt");
   dir.set_vdwtype("test_data/vdwtype.txt");
-  dir.calc_force(ncoord, xyzq.xyzq, &nlist, false, force_fp.data);
-
-  return;
+  dir.calc_force(ncoord, xyzq.xyzq, &nlist, false, force_fp.stride, force_fp.data);
 
   /*
   double max_diff;

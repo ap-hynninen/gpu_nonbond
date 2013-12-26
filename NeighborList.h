@@ -24,6 +24,8 @@ private:
 
   int ni;
 
+  int ntot;
+
   int tile_excl_len;
   tile_excl_t<tilesize> *tile_excl;
 
@@ -36,6 +38,7 @@ private:
 public:
   NeighborList();
   ~NeighborList();
+  void analyze();
   void load(const char *filename);
 };
 

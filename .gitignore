@@ -1,3 +1,4 @@
 *~
 *.o
 gpu_recip
+gpu_direct

@@ -9,7 +9,7 @@ class XYZQ {
   int ncoord;
   float4 *xyzq;
 
-  XYZQ(int ncoord);
-  XYZQ(const char *filename);
+  XYZQ(int ncoord, int align=1);
+  XYZQ(const char *filename, int align=1);
   ~XYZQ();
 };

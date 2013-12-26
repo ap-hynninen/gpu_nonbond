@@ -37,6 +37,13 @@ private:
   bool calc_vdw;
   bool calc_elec;
 
+  // Lookup table for Ewald. Used if elec_model == EWALD_LOOKUP
+  CT *ewald_force;
+  int n_ewald_force;
+
+  void setup_ewald_force(CT h);
+  void set_elec_model(int elec_model, CT h=0.01);
+
 public:
 
   DirectForce();
@@ -59,7 +66,7 @@ public:
 
   void calc_force(const int ncoord, const float4 *xyzq,
 		  const NeighborList<32> *nlist, const bool calc_energy,
-		  AT *force);
+		  const int stride, AT *force);
 
 };
 

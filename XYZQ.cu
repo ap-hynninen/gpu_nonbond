@@ -11,11 +11,11 @@
 //
 //
 
-XYZQ::XYZQ(int ncoord) : ncoord(ncoord) {
-  allocate<float4>(&xyzq, ncoord);
+XYZQ::XYZQ(int ncoord, int align) : ncoord(ncoord) {
+  allocate<float4>(&xyzq, ((ncoord-1)/align+1)*align);
 }
 
-XYZQ::XYZQ(const char *filename) {
+XYZQ::XYZQ(const char *filename, int align) {
   
   std::ifstream file(filename);
   if (file.is_open()) {
@@ -38,7 +38,7 @@ XYZQ::XYZQ(const char *filename) {
     while (file >> xyzq_cpu[i].x >> xyzq_cpu[i].y >> xyzq_cpu[i].z >> xyzq_cpu[i].w) i++;
     
     // Allocate GPU memory
-    allocate<float4>(&xyzq, ncoord);
+    allocate<float4>(&xyzq, ((ncoord-1)/align+1)*align);
 
     // Copy coordinates from CPU to GPU
     copy_HtoD<float4>(xyzq_cpu, xyzq, ncoord);

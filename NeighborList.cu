@@ -33,13 +33,60 @@ NeighborList<tilesize>::~NeighborList() {
   if (tile_indj != NULL) deallocate<int>(&tile_indj);
 }
 
+static unsigned int count_1bits(unsigned int x)
+{
+  x = x - ((x >> 1) & 0x55555555);
+  x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
+  x = x + (x >> 8);
+  x = x + (x >> 16);
+  return x & 0x0000003F;
+}
+
+//
+// Analyzes the neighbor list and prints info
+//
+template <int tilesize>
+void NeighborList<tilesize>::analyze() {
+
+  ientry_t *h_ientry;
+  int *h_tile_indj;
+  tile_excl_t<tilesize> *h_tile_excl;
+
+  h_ientry = new ientry_t[ni];
+  h_tile_indj = new int[ntot];
+  h_tile_excl = new tile_excl_t<tilesize>[ntot];
+
+  copy_DtoH<ientry_t>(ientry, h_ientry, ni);
+  copy_DtoH<int>(tile_indj, h_tile_indj, ntot);
+  copy_DtoH< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, ntot);
+
+  std::cout << "ni = " << ni << " ntot = " << ntot << std::endl;
+
+  unsigned int nexcl_bit = 0;
+  for (int i=0;i < ni;i++) {
+    for (int j=h_ientry[i].startj;j <= h_ientry[i].endj;j++) {
+      for (int k=0;k < num_excl;k++) {
+	nexcl_bit += count_1bits(h_tile_excl[j].excl[k]);
+      }
+    }
+  }
+
+  unsigned int ntot_pairs = ntot*tilesize*tilesize;
+  std::cout << "Total number of pairs = " << ntot_pairs << std::endl;
+  std::cout << "Number of excluded pairs = " << nexcl_bit << " (" << 
+    ((double)nexcl_bit*100)/(double)ntot_pairs << "%)" << std::endl;
+
+  delete [] h_ientry;
+  delete [] h_tile_indj;
+  delete [] h_tile_excl;
+
+}
 
 //
 // Load neighbor list from file
 //
 template <int tilesize>
 void NeighborList<tilesize>::load(const char *filename) {
-  int ntot;
 
   ientry_t *h_ientry;
   int *h_tile_indj;
@@ -53,14 +100,13 @@ void NeighborList<tilesize>::load(const char *filename) {
 
     file >> ni >> ntot;
 
-    std::cerr << "ni = " << ni << " ntot = " << ntot << std::endl;
-
     h_ientry = new ientry_t[ni];
     h_tile_indj = new int[ntot];
     h_tile_excl = new tile_excl_t<tilesize>[ntot];
 
     for (int i=0;i < ni;i++) {
-      file >> std::dec >> h_ientry[i].indi >> h_ientry[i].ish >> h_ientry[i].startj >> h_ientry[i].endj;
+      file >> std::dec >> h_ientry[i].indi >> h_ientry[i].ish >> 
+	h_ientry[i].startj >> h_ientry[i].endj;
       for (int j=h_ientry[i].startj;j <= h_ientry[i].endj;j++) {
 	file >> std::dec >> h_tile_indj[j];
 	for (int k=0;k < num_excl;k++) {

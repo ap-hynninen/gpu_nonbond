@@ -8,6 +8,8 @@
 #include "NeighborList.h"
 #include "DirectForce.h"
 
+const int warpsize = 32;
+
 template <typename AT, typename CT>
 __forceinline__ __device__ void write_force(const CT fx, const CT fy, const CT fz,
 					    const int ind, const int stride,
@@ -113,6 +115,9 @@ struct DirectSettings_t {
   float roffinv18;
 
   float inv_roff2_ron2;
+
+  float hinv;
+  float *ewald_force;
 };
 
 // Settings for direct computation in host memory
@@ -179,6 +184,21 @@ float pair_vdw_force(float r2, float r, float rinv, float rinv2, float c6, float
   return fij_vdw;
 }
 
+static texture<float, 1, cudaReadModeElementType> ewald_force_texref;
+
+//
+// Returns simple linear interpolation
+// NOTE: Could the interpolation be done implicitly using the texture unit?
+//
+__forceinline__ __device__ float lookup_force(float r, float hinv) {
+  float r_hinv = r*hinv;
+  int ind = (int)r_hinv;
+  float f1 = r_hinv - (float)ind;
+  float f2 = 1.0f - f1;
+  return f1*__ldg(&d_setup.ewald_force[ind]) + f2*__ldg(&d_setup.ewald_force[ind+1]);
+  //return f1*tex1Dfetch(ewald_force_texref, ind) + f2*tex1Dfetch(ewald_force_texref, ind+1);
+}
+
 //
 // Calculates electrostatic force & energy
 //
@@ -191,7 +211,7 @@ float pair_elec_force(float r2, float r, float rinv, float qi, float qj, double 
   float qq = qi*qj;
 
   if (elec_model == EWALD_LOOKUP) {
-    fij_elec = 0.0f; //qq*lookup_force(r, kappa);
+    fij_elec = qi*qj*lookup_force(r, d_setup.hinv);
   } else if (elec_model == EWALD) {
     float erfc_val = fasterfc(d_setup.kappa*r);
     float exp_val = expf(-d_setup.kappa2*r2);
@@ -212,15 +232,15 @@ float pair_elec_force(float r2, float r, float rinv, float qi, float qj, double 
 //
 template <typename AT, typename CT, int tilesize, int vdw_model, int elec_model,
 	  bool calc_energy, bool tex_vdwparam>
-__global__ void calc_force_kernel(const int ni, const ientry_t *ientry,
-				  const int *tile_indj, const tile_excl_t<tilesize> *tile_excl,
+__global__ void calc_force_kernel(const int ni, const ientry_t* __restrict__ ientry,
+				  const int* __restrict__ tile_indj,
+				  const tile_excl_t<tilesize>* __restrict__ tile_excl,
 				  const int stride,
-				  const float *vdwparam, const int nvdwparam,
-				  const float4 *xyzq, const int *vdwtype,
+				  const float* __restrict__ vdwparam, const int nvdwparam,
+				  const float4* __restrict__ xyzq, const int* __restrict__ vdwtype,
 				  AT *force) {
 
   // Pre-computed constants
-  const int warpsize = 32;
   const int num_excl = ((tilesize*tilesize-1)/32 + 1);
   const int num_thread_per_excl = (32/num_excl);
 
@@ -229,8 +249,11 @@ __global__ void calc_force_kernel(const int ni, const ientry_t *ientry,
   //
    extern __shared__ char shmem[];
 
-   volatile float4 *xyzq_i = (float4 *)&shmem[0];                   // tilesize*blockDim.y
-   volatile int *vdwtype_i = (int *)&xyzq_i[tilesize*blockDim.y];   // tilesize*blockDim.y
+   volatile float *x_i = (float *)&shmem[0];                        // tilesize*blockDim.y
+   volatile float *y_i = (float *)&x_i[tilesize*blockDim.y];        // tilesize*blockDim.y
+   volatile float *z_i = (float *)&y_i[tilesize*blockDim.y];        // tilesize*blockDim.y
+   volatile float *q_i = (float *)&z_i[tilesize*blockDim.y];        // tilesize*blockDim.y
+   volatile int *vdwtype_i = (int *)&q_i[tilesize*blockDim.y];      // tilesize*blockDim.y
    volatile AT *fix = (AT *)&vdwtype_i[tilesize*blockDim.y];        // WARPSIZE*blockDim.y
    volatile AT *fiy = &fix[warpsize*blockDim.y];                    // WARPSIZE*blockDim.y
    volatile AT *fiz = &fiy[warpsize*blockDim.y];                    // WARPSIZE*blockDim.y
@@ -239,14 +262,6 @@ __global__ void calc_force_kernel(const int ni, const ientry_t *ientry,
    if (tex_vdwparam) {
      vdwparam_sh = (float *)&fiz[warpsize*blockDim.y];
    }
-
-   /*
-  __shared__ float4 xyzq_i[TILESIZE*TILEX_NBLOCK];
-  __shared__ int vdwtype_i[TILESIZE*TILEX_NBLOCK];
-  __shared__ AT fix[WARPSIZE*TILEX_NBLOCK];
-  __shared__ AT fiy[WARPSIZE*TILEX_NBLOCK];
-  __shared__ AT fiz[WARPSIZE*TILEX_NBLOCK];
-   */
 
   /*
 #ifdef PREC_SPDP
@@ -292,10 +307,10 @@ __global__ void calc_force_kernel(const int ni, const ientry_t *ientry,
 
   // Load i-atom data to shared memory (and shift coordinates)
   float4 xyzq_tmp = xyzq[indi + load_ij];
-  xyzq_i[sh_start + load_ij].x = xyzq_tmp.x + shx;
-  xyzq_i[sh_start + load_ij].y = xyzq_tmp.y + shy;
-  xyzq_i[sh_start + load_ij].z = xyzq_tmp.z + shz;
-  xyzq_i[sh_start + load_ij].w = xyzq_tmp.w;
+  x_i[sh_start + load_ij] = xyzq_tmp.x + shx;
+  y_i[sh_start + load_ij] = xyzq_tmp.y + shy;
+  z_i[sh_start + load_ij] = xyzq_tmp.z + shz;
+  q_i[sh_start + load_ij] = xyzq_tmp.w;
 
   vdwtype_i[sh_start + load_ij] = vdwtype[indi + load_ij];
 
@@ -385,9 +400,9 @@ __global__ void calc_force_kernel(const int ni, const ientry_t *ientry,
 	  ii = sh_start + ((threadIdx.x + t) % tilesize);
 	}
 	
-	float dx = xyzq_i[ii].x - xyzq_j.x;
-	float dy = xyzq_i[ii].y - xyzq_j.y;
-	float dz = xyzq_i[ii].z - xyzq_j.z;
+	float dx = x_i[ii] - xyzq_j.x;
+	float dy = y_i[ii] - xyzq_j.y;
+	float dz = z_i[ii] - xyzq_j.z;
 	
 	float r2 = dx*dx + dy*dy + dz*dz;
 
@@ -399,6 +414,8 @@ __global__ void calc_force_kernel(const int ni, const ientry_t *ientry,
 
 	  float c6, c12;
 	  if (tex_vdwparam) {
+	    //c6 = __ldg(&vdwparam[ivdw]);
+	    //c12 = __ldg(&vdwparam[ivdw+1]);
 	    float2 c6c12 = tex1Dfetch(vdwparam_texref, ivdw);
 	    c6  = c6c12.x;
 	    c12 = c6c12.y;
@@ -413,7 +430,8 @@ __global__ void calc_force_kernel(const int ni, const ientry_t *ientry,
 
 	  float fij_vdw = pair_vdw_force<vdw_model, calc_energy>(r2, r, rinv, rinv2, c6, c12, vdwpotl);
 
-	  float fij_elec = pair_elec_force<elec_model, calc_energy>(r2, r, rinv, xyzq_i[ii].w, xyzq_j.w, coulpotl);
+	  float fij_elec = pair_elec_force<elec_model, calc_energy>(r2, r, rinv,
+								    q_i[ii], xyzq_j.w, coulpotl);
 
 	  float fij = (fij_vdw - fij_elec)*rinv2;
 
@@ -436,7 +454,7 @@ __global__ void calc_force_kernel(const int ni, const ientry_t *ientry,
 	  fix[ii] += fxij;
 	  fiy[ii] += fyij;
 	  fiz[ii] += fzij;
-	}
+	} // if (r2 < d_setup.roff2)
       }
 
       // Advance exclusion mask
@@ -455,7 +473,7 @@ __global__ void calc_force_kernel(const int ni, const ientry_t *ientry,
     // Reduce energies to (pot)
     // Reduces within thread block, uses the "xyzq_i" shared memory buffer
     __syncthreads();          // NOTE: this makes sure we can write to xyzq_i 
-    double2 *potbuf = (double2 *)(xyzq_i);
+    double2 *potbuf = (double2 *)(x_i);
     potbuf[tid].x = vdwpotl;
     potbuf[tid].y = coulpotl;
     // sync to make sure all threads in block are finished writing share memory
@@ -493,6 +511,9 @@ DirectForce<AT, CT>::DirectForce() {
   vdwtype = NULL;
   vdwtype_len = 0;
 
+  ewald_force = NULL;
+  n_ewald_force = 0;
+
   set_calc_vdw(true);
   set_calc_elec(true);
 }
@@ -504,6 +525,7 @@ template <typename AT, typename CT>
 DirectForce<AT, CT>::~DirectForce() {
   if (vdwparam != NULL) deallocate<CT>(&vdwparam);
   if (vdwtype != NULL) deallocate<int>(&vdwtype);
+  if (ewald_force != NULL) deallocate<CT>(&ewald_force);
 }
 
 //
@@ -538,7 +560,7 @@ void DirectForce<AT, CT>::setup(CT boxx, CT boxy, CT boxz,
   h_setup.inv_roff2_ron2 = ((CT)1.0)/(h_setup.inv_roff2_ron2*h_setup.inv_roff2_ron2*h_setup.inv_roff2_ron2);
 
   this->vdw_model = vdw_model;
-  this->elec_model = elec_model;
+  set_elec_model(elec_model);
 
   set_calc_vdw(calc_vdw);
   set_calc_elec(calc_elec);
@@ -698,17 +720,63 @@ void DirectForce<AT, CT>::set_vdwtype(const char *filename) {
 }
 
 //
+// Builds Ewald lookup table
+// roff  = distance cut-off
+// h     = the distance between interpolation points
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::setup_ewald_force(CT h) {
+
+  h_setup.hinv = ((CT)1.0)/h;
+
+  n_ewald_force = (int)(sqrt(h_setup.roff2)*h_setup.hinv) + 2;
+
+  CT *h_ewald_force = new CT[n_ewald_force];
+
+  for (int i=1;i < n_ewald_force;i++) {
+    const CT two_sqrtpi = (CT)1.12837916709551;    // 2/sqrt(pi)
+    CT r = i*h;
+    CT r2 = r*r;
+    h_ewald_force[i] = two_sqrtpi*((CT)h_setup.kappa)*exp(-((CT)h_setup.kappa2)*r2) + 
+      erfc(((CT)h_setup.kappa)*r)/r;
+  }
+  h_ewald_force[0] = h_ewald_force[1];
+
+  allocate<CT>(&ewald_force, n_ewald_force);
+  copy_HtoD<CT>(h_ewald_force, ewald_force, n_ewald_force);
+
+  h_setup.ewald_force = ewald_force;
+
+  delete [] h_ewald_force;
+
+}
+
+//
+// Sets method for calculating electrostatic force and energy
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::set_elec_model(int elec_model, CT h) {
+  this->elec_model = elec_model;
+  
+  if (elec_model == EWALD_LOOKUP) {
+    setup_ewald_force(h);
+  }
+}
+
+//
 // Calculates direct force
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,				     
+void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 				     const NeighborList<32> *nlist, const bool calc_energy,
-				     AT *force) {
+				     const int stride, AT *force) {
 
-  int stride = 0;
+  const int tilesize = 32;
 
-  dim3 nthread(32, 6, 1);
+  dim3 nthread(32, 2, 1);
   dim3 nblock((nlist->ni-1)/nthread.y+1, 1, 1);
+  size_t shmem_size = tilesize*nthread.y*(sizeof(float4) + sizeof(int)) + 
+    warpsize*nthread.y*3*sizeof(AT);
 
   int vdw_model_loc = calc_vdw ? vdw_model : NONE;
   int elec_model_loc = calc_elec ? elec_model : NONE;
@@ -716,15 +784,31 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
   if (vdw_model_loc == VDW_VSH) {
     if (elec_model_loc == EWALD) {
       if (calc_energy) {
-	calc_force_kernel <AT, CT, 32, VDW_VSH, EWALD, true, true>
-	  <<< nblock, nthread >>>(nlist->ni, nlist->ientry, nlist->tile_indj, nlist->tile_excl,
-				  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-				  force);
+	calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, true, true>
+	  <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+					      nlist->tile_excl,
+					      stride, vdwparam, nvdwparam, xyzq, vdwtype,
+					      force);
       } else {
-	calc_force_kernel <AT, CT, 32, VDW_VSH, EWALD, false, true>
-	  <<< nblock, nthread >>>(nlist->ni, nlist->ientry, nlist->tile_indj, nlist->tile_excl,
-				  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-				  force);
+	calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, false, true>
+	  <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+					      nlist->tile_excl,
+					      stride, vdwparam, nvdwparam, xyzq, vdwtype,
+					      force);
+      }
+    } else if (elec_model_loc == EWALD_LOOKUP) {
+      if (calc_energy) {
+	calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD_LOOKUP, true, true>
+	  <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+					      nlist->tile_excl,
+					      stride, vdwparam, nvdwparam, xyzq, vdwtype,
+					      force);
+      } else {
+	calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD_LOOKUP, false, true>
+	  <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+					      nlist->tile_excl,
+					      stride, vdwparam, nvdwparam, xyzq, vdwtype,
+					      force);
       }
     } else {
       std::cout<<"DirectForce<AT, CT>::calc_force, Invalid EWALD model"<<std::endl;
