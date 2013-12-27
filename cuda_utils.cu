@@ -225,6 +225,13 @@ void start_gpu(int numnode, int mynode) {
     std::cout << "Using CUDA runtime version " << cuda_rt_version << std::endl;
   }
 
-  std::cout << "Node " << mynode << " using CUDA device " << gpu_ind << " " << gpu_prop.name << std::endl;
-  
+  std::cout << "Node " << mynode << " using CUDA device " << gpu_ind << 
+    " " << gpu_prop.name << std::endl;
+
+  /*
+  std::cout << gpu_prop.maxGridSize[0] << " " << 
+    gpu_prop.maxGridSize[1] << " "<< 
+    gpu_prop.maxGridSize[2] << std::endl;
+  */
+
 }

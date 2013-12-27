@@ -184,7 +184,7 @@ float pair_vdw_force(float r2, float r, float rinv, float rinv2, float c6, float
   return fij_vdw;
 }
 
-static texture<float, 1, cudaReadModeElementType> ewald_force_texref;
+//static texture<float, 1, cudaReadModeElementType> ewald_force_texref;
 
 //
 // Returns simple linear interpolation
@@ -195,7 +195,11 @@ __forceinline__ __device__ float lookup_force(float r, float hinv) {
   int ind = (int)r_hinv;
   float f1 = r_hinv - (float)ind;
   float f2 = 1.0f - f1;
+#if __CUDA_ARCH__ < 350
+  return f1*d_setup.ewald_force[ind] + f2*d_setup.ewald_force[ind+1];
+#else
   return f1*__ldg(&d_setup.ewald_force[ind]) + f2*__ldg(&d_setup.ewald_force[ind+1]);
+#endif
   //return f1*tex1Dfetch(ewald_force_texref, ind) + f2*tex1Dfetch(ewald_force_texref, ind+1);
 }
 
@@ -247,21 +251,21 @@ __global__ void calc_force_kernel(const int ni, const ientry_t* __restrict__ ien
   //
   // Shared data, common for the entire block
   //
-   extern __shared__ char shmem[];
-
-   volatile float *x_i = (float *)&shmem[0];                        // tilesize*blockDim.y
-   volatile float *y_i = (float *)&x_i[tilesize*blockDim.y];        // tilesize*blockDim.y
-   volatile float *z_i = (float *)&y_i[tilesize*blockDim.y];        // tilesize*blockDim.y
-   volatile float *q_i = (float *)&z_i[tilesize*blockDim.y];        // tilesize*blockDim.y
-   volatile int *vdwtype_i = (int *)&q_i[tilesize*blockDim.y];      // tilesize*blockDim.y
-   volatile AT *fix = (AT *)&vdwtype_i[tilesize*blockDim.y];        // WARPSIZE*blockDim.y
-   volatile AT *fiy = &fix[warpsize*blockDim.y];                    // WARPSIZE*blockDim.y
-   volatile AT *fiz = &fiy[warpsize*blockDim.y];                    // WARPSIZE*blockDim.y
-   volatile float *vdwparam_sh;
-
-   if (tex_vdwparam) {
-     vdwparam_sh = (float *)&fiz[warpsize*blockDim.y];
-   }
+  extern __shared__ char shmem[];
+  
+  volatile float *x_i = (float *)&shmem[0];                        // tilesize*blockDim.y
+  volatile float *y_i = (float *)&x_i[tilesize*blockDim.y];        // tilesize*blockDim.y
+  volatile float *z_i = (float *)&y_i[tilesize*blockDim.y];        // tilesize*blockDim.y
+  volatile float *q_i = (float *)&z_i[tilesize*blockDim.y];        // tilesize*blockDim.y
+  volatile int *vdwtype_i = (int *)&q_i[tilesize*blockDim.y];      // tilesize*blockDim.y
+  volatile AT *fix = (AT *)&vdwtype_i[tilesize*blockDim.y];        // WARPSIZE*blockDim.y
+  volatile AT *fiy = &fix[warpsize*blockDim.y];                    // WARPSIZE*blockDim.y
+  volatile AT *fiz = &fiy[warpsize*blockDim.y];                    // WARPSIZE*blockDim.y
+  volatile float *vdwparam_sh;
+  
+  if (tex_vdwparam) {
+    vdwparam_sh = (float *)&fiz[warpsize*blockDim.y];
+  }
 
   /*
 #ifdef PREC_SPDP
@@ -408,6 +412,13 @@ __global__ void calc_force_kernel(const int ni, const ientry_t* __restrict__ ien
 
 	if (r2 < d_setup.roff2) {
 
+	  float rinv = rsqrtf(r2);
+	  float rinv2 = rinv*rinv;
+	  float r = r2*rinv;
+
+	  float fij_elec = pair_elec_force<elec_model, calc_energy>(r2, r, rinv,
+								    q_i[ii], xyzq_j.w, coulpotl);
+
 	  int ia = vdwtype_i[ii];
 	  int aa = (ja > ia) ? ja : ia;      // aa = max(ja,ia)
 	  int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
@@ -424,14 +435,8 @@ __global__ void calc_force_kernel(const int ni, const ientry_t* __restrict__ ien
 	    c12 = vdwparam_sh[ivdw+1];
 	  }
 
-	  float rinv = rsqrtf(r2);
-	  float rinv2 = rinv*rinv;
-	  float r = r2*rinv;
-
 	  float fij_vdw = pair_vdw_force<vdw_model, calc_energy>(r2, r, rinv, rinv2, c6, c12, vdwpotl);
 
-	  float fij_elec = pair_elec_force<elec_model, calc_energy>(r2, r, rinv,
-								    q_i[ii], xyzq_j.w, coulpotl);
 
 	  float fij = (fij_vdw - fij_elec)*rinv2;
 
@@ -494,6 +499,175 @@ __global__ void calc_force_kernel(const int ni, const ientry_t* __restrict__ ien
     }
 
   }
+
+}
+
+//
+// Nonbonded force kernel
+//
+template <typename AT, typename CT, int tilesize, int vdw_model, int elec_model,
+	  bool calc_energy>
+__global__ 
+void calc_force_kernel_sparse(const int ni, const ientry_t* __restrict__ ientry,
+			      const int* __restrict__ tile_indj,
+			      const pairs_t<tilesize>* __restrict__ pairs,
+			      const int stride,
+			      const float* __restrict__ vdwparam, const int nvdwparam,
+			      const float4* __restrict__ xyzq, const int* __restrict__ vdwtype,
+			      AT *force) {
+  
+  //
+  // Shared data, common for the entire block
+  //
+  extern __shared__ char shmem[];
+
+  volatile float *x_i = (float *)&shmem[0];                        // tilesize*blockDim.y
+  volatile float *y_i = (float *)&x_i[tilesize*blockDim.y];        // tilesize*blockDim.y
+  volatile float *z_i = (float *)&y_i[tilesize*blockDim.y];        // tilesize*blockDim.y
+  volatile float *q_i = (float *)&z_i[tilesize*blockDim.y];        // tilesize*blockDim.y
+  volatile int *vdwtype_i = (int *)&q_i[tilesize*blockDim.y];      // tilesize*blockDim.y
+  volatile AT *sh_force = (AT *)&vdwtype_i[tilesize*blockDim.y];   // blockDim.x*blockDim.y*3
+  
+  // Load ijentry
+  const unsigned int ientry_ind = threadIdx.y + blockDim.y*blockIdx.x;
+
+  int indi, ish, startj, endj;
+  if (ientry_ind < ni) {
+    indi   = ientry[ientry_ind].indi;
+    ish    = ientry[ientry_ind].ish;
+    startj = ientry[ientry_ind].startj;
+    endj   = ientry[ientry_ind].endj;
+  } else {
+    indi = 0;
+    ish  = 0;
+    startj = 1;
+    endj = 0;
+  }
+
+  // Calculate shift for i-atom
+  float shz = (ish/9 - 1)*d_setup.boxz;
+  ish -= (ish/9)*9;
+  float shy = (ish/3 - 1)*d_setup.boxy;
+  ish -= (ish/3)*3;
+  float shx = (ish - 1)*d_setup.boxx;
+
+  const unsigned int sh_start = tilesize*threadIdx.y;
+
+  unsigned int load_ij;
+  if (tilesize == 16) {
+    load_ij = threadIdx.x % tilesize;
+  } else {
+    load_ij = threadIdx.x;
+  }
+
+  // Load i-atom data to shared memory (and shift coordinates)
+  float4 xyzq_tmp = xyzq[indi + load_ij];
+  x_i[sh_start + load_ij] = xyzq_tmp.x + shx;
+  y_i[sh_start + load_ij] = xyzq_tmp.y + shy;
+  z_i[sh_start + load_ij] = xyzq_tmp.z + shz;
+  q_i[sh_start + load_ij] = xyzq_tmp.w;
+
+  vdwtype_i[sh_start + load_ij] = vdwtype[indi + load_ij];
+
+  const unsigned int shi = threadIdx.x + blockDim.x*3*threadIdx.y;
+  sh_force[shi]                = (AT)0;
+  sh_force[shi + blockDim.x]   = (AT)0;
+  sh_force[shi + blockDim.x*2] = (AT)0;
+
+  double vdwpotl;
+  double coulpotl;
+  if (calc_energy) {
+    vdwpotl = 0.0;
+    coulpotl = 0.0;
+  }
+
+  for (int jtile=startj;jtile <= endj;jtile++) {
+
+    // Load j-atom data
+    int indj = tile_indj[jtile];
+    float4 xyzq_j = xyzq[indj + load_ij];
+    int ja = vdwtype[indj + load_ij];
+
+    // This thread calculates the interaction between i and j=load_ij
+    int i = pairs[jtile].i[load_ij];
+
+    int ii;
+    ii = sh_start + i;
+	
+    float dx = x_i[ii] - xyzq_j.x;
+    float dy = y_i[ii] - xyzq_j.y;
+    float dz = z_i[ii] - xyzq_j.z;
+	
+    float r2 = dx*dx + dy*dy + dz*dz;
+
+    if (r2 < d_setup.roff2) {
+
+      float rinv = rsqrtf(r2);
+      float rinv2 = rinv*rinv;
+      float r = r2*rinv;
+      
+      float fij_elec = pair_elec_force<elec_model, calc_energy>(r2, r, rinv,
+								q_i[ii], xyzq_j.w, coulpotl);
+
+      int ia = vdwtype_i[ii];
+      int aa = (ja > ia) ? ja : ia;      // aa = max(ja,ia)
+      int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
+
+      float c6, c12;
+      float2 c6c12 = tex1Dfetch(vdwparam_texref, ivdw);
+      c6  = c6c12.x;
+      c12 = c6c12.y;
+
+      float fij_vdw = pair_vdw_force<vdw_model, calc_energy>(r2, r, rinv, rinv2, c6, c12, vdwpotl);
+      
+      float fij = (fij_vdw - fij_elec)*rinv2;
+
+      AT fxij;
+      AT fyij;
+      AT fzij;
+      calc_component_force<AT, CT>(fij, dx, dy, dz, fxij, fyij, fzij);
+
+      // Write j forces to global memory
+      write_force<AT, CT>(-fxij, -fyij, -fzij, indj+load_ij, stride, force);
+
+      // Write i forces to shared memory
+      write_force<AT, CT>(fxij, fyij, fzij, blockDim.x*3*threadIdx.y + i, blockDim.x, sh_force);
+
+    } // if (r2 < d_setup.roff2)
+
+  }
+
+  // Write i forces to global memory
+  write_force<AT, CT>(sh_force[shi], sh_force[shi + blockDim.x], sh_force[shi + blockDim.x*2],
+		      indi+load_ij, stride, force);
+
+  /*
+  if (calc_energy) {
+    // Reduce energies to (pot)
+    // Reduces within thread block, uses the "xyzq_i" shared memory buffer
+    __syncthreads();          // NOTE: this makes sure we can write to xyzq_i 
+    double2 *potbuf = (double2 *)(x_i);
+    potbuf[tid].x = vdwpotl;
+    potbuf[tid].y = coulpotl;
+    // sync to make sure all threads in block are finished writing share memory
+    __syncthreads();
+    const int nthreadblock = blockDim.x*blockDim.y;
+    for (int i=1;i < nthreadblock;i *= 2) {
+      int pos = tid + i;
+      double vdwpot_val  = (pos < nthreadblock) ? potbuf[pos].x : 0.0;
+      double coulpot_val = (pos < nthreadblock) ? potbuf[pos].y : 0.0;
+      __syncthreads();
+      potbuf[tid].x += vdwpot_val;
+      potbuf[tid].y += coulpot_val;
+      __syncthreads();
+    }
+    if (tid == 0) {
+      atomicAdd((double *)&force[stride*3],   potbuf[0].x);
+      atomicAdd((double *)&force[stride*3+1], potbuf[0].y);
+    }
+
+  }
+  */
 
 }
 
@@ -774,50 +948,61 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
   const int tilesize = 32;
 
   dim3 nthread(32, 2, 1);
-  dim3 nblock((nlist->ni-1)/nthread.y+1, 1, 1);
+  dim3 nblock_tot((nlist->ni-1)/nthread.y+1, 1, 1);
   size_t shmem_size = tilesize*nthread.y*(sizeof(float4) + sizeof(int)) + 
     warpsize*nthread.y*3*sizeof(AT);
 
   int vdw_model_loc = calc_vdw ? vdw_model : NONE;
   int elec_model_loc = calc_elec ? elec_model : NONE;
 
-  if (vdw_model_loc == VDW_VSH) {
-    if (elec_model_loc == EWALD) {
-      if (calc_energy) {
-	calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, true, true>
-	  <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-					      nlist->tile_excl,
-					      stride, vdwparam, nvdwparam, xyzq, vdwtype,
-					      force);
+  unsigned int max_nblock = 2147483647;
+
+  while (nblock_tot.x != 0) {
+
+    dim3 nblock;
+    nblock.x = (nblock_tot.x > max_nblock) ? max_nblock : nblock_tot.x;
+    nblock_tot.x -= nblock.x;
+
+    if (vdw_model_loc == VDW_VSH) {
+      if (elec_model_loc == EWALD) {
+	if (calc_energy) {
+	  calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, true, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	} else {
+	  calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, false, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	}
+      } else if (elec_model_loc == EWALD_LOOKUP) {
+	if (calc_energy) {
+	  calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD_LOOKUP, true, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	} else {
+	  calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD_LOOKUP, false, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	}
       } else {
-	calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, false, true>
-	  <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-					      nlist->tile_excl,
-					      stride, vdwparam, nvdwparam, xyzq, vdwtype,
-					      force);
-      }
-    } else if (elec_model_loc == EWALD_LOOKUP) {
-      if (calc_energy) {
-	calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD_LOOKUP, true, true>
-	  <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-					      nlist->tile_excl,
-					      stride, vdwparam, nvdwparam, xyzq, vdwtype,
-					      force);
-      } else {
-	calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD_LOOKUP, false, true>
-	  <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-					      nlist->tile_excl,
-					      stride, vdwparam, nvdwparam, xyzq, vdwtype,
-					      force);
+	std::cout<<"DirectForce<AT, CT>::calc_force, Invalid EWALD model"<<std::endl;
+	exit(1);
       }
     } else {
-      std::cout<<"DirectForce<AT, CT>::calc_force, Invalid EWALD model"<<std::endl;
+      std::cout<<"DirectForce<AT, CT>::calc_force, Invalid VDW model"<<std::endl;
       exit(1);
     }
-  } else {
-    std::cout<<"DirectForce<AT, CT>::calc_force, Invalid VDW model"<<std::endl;
-    exit(1);
+
   }
+
 }
 
 
