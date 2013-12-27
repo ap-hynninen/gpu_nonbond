@@ -7,12 +7,19 @@
 #include "cuda_utils.h"
 #include "Force.h"
 
+
+static int get_stride(int ncoord) {
+  const int sizeof_T = 4;
+  //return ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
+  return ((ncoord*sizeof_T - 1)/256 + 1)*256/sizeof_T;
+}
+
 //
 // Class creator
 //
 template <typename T>
 Force<T>::Force(const int ncoord) : ncoord(ncoord) {
-  stride = ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
+  stride = get_stride(ncoord);
   allocate<T>(&data, 3*stride);
 }
 
@@ -27,7 +34,7 @@ Force<T>::Force(const char *filename) {
     ncoord = 0;
     while (file >> fx >> fy >> fz) ncoord++;
 
-    stride = ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
+    stride = get_stride(ncoord);
 
     // Rewind
     file.clear();
@@ -111,8 +118,8 @@ bool Force<T>::compare(Force<T>* force, const double tol, double& max_diff) {
   }
   catch (int a) {
     std::cout << "i = "<< i << std::endl;
-    std::cout << "fx1 fy1 fz1 = " << fx1 << " "<< fy1 << " "<< fz1 << std::endl;
-    std::cout << "fx2 fy2 fz2 = " << fx2 << " "<< fy2 << " "<< fz2 << std::endl;
+    std::cout << "this: fx1 fy1 fz1 = " << fx1 << " "<< fy1 << " "<< fz1 << std::endl;
+    std::cout << "force:fx2 fy2 fz2 = " << fx2 << " "<< fy2 << " "<< fz2 << std::endl;
     if (a == 2) std::cout << "difference: " << diff << std::endl;
     ok = false;
   }
@@ -141,6 +148,10 @@ void Force<T>::convert(Force<T2>* force) {
 					     force->data);
 }
 
+//
+// Explicit instances of Force class
+//
 template class Force<long long int>;
 template class Force<double>;
 template class Force<float>;
+template void Force<long long int>::convert<float>(Force<float>* force);

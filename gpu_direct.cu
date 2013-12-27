@@ -45,16 +45,19 @@ void test() {
   const double ron = 7.5;
   const int ncoord = 23558;
 
-  //  Force<float> force_comp("test_data/force_direct.txt");
+  Force<float> force_comp("test_data/force_direct.txt");
   Force<long long int> force_fp(ncoord);
   Force<float> force(ncoord);
+
+  force_fp.setzero();
 
   // Load coordinates
   XYZQ xyzq("test_data/xyzq_direct.txt", 32);
 
   NeighborList<32> nlist;
   nlist.load("test_data/nlist.txt");
-  nlist.remove_empty_tiles();
+  //  nlist.remove_empty_tiles();
+  nlist.split_dense_sparse(32);
   nlist.analyze();
 
   DirectForce<long long int, float> dir;
@@ -63,14 +66,15 @@ void test() {
   dir.set_vdwtype("test_data/vdwtype.txt");
   dir.calc_force(ncoord, xyzq.xyzq, &nlist, false, force_fp.stride, force_fp.data);
 
-  /*
+  force_fp.convert(&force);
+
   double max_diff;
-  double tol = 3.2e-4;
+  double tol = 7.7e-4;
   if (!force_comp.compare(&force, tol, max_diff)) {
     std::cout<<"force comparison FAILED"<<std::endl;
   } else {
-    std::cout<<"force comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+    std::cout<<"force comparison OK (tolerance " << tol << " max difference " << 
+      max_diff << ")" << std::endl;
   }
-  */
 
 }

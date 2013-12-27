@@ -6,16 +6,16 @@
 
 template <typename AT, typename CT>
 __global__ static void reduce_data(const int nfft_tot,
-			    const AT *data_in,
-			    CT *data_out) {
+				   const AT *data_in,
+				   CT *data_out) {
   // The generic version can not be used
 }
 
 // Convert "long long int" -> "float"
 template <>
 __global__ static void reduce_data<long long int, float>(const int nfft_tot,
-						  const long long int *data_in,
-						  float *data_out) {
+							 const long long int *data_in,
+							 float *data_out) {
   unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
   
   while (pos < nfft_tot) {
@@ -29,8 +29,8 @@ __global__ static void reduce_data<long long int, float>(const int nfft_tot,
 // Convert "int" -> "float"
 template <>
 __global__ static void reduce_data<int, float>(const int nfft_tot,
-					const int *data_in,
-					float *data_out) {
+					       const int *data_in,
+					       float *data_out) {
   unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
   
   while (pos < nfft_tot) {
@@ -44,8 +44,8 @@ __global__ static void reduce_data<int, float>(const int nfft_tot,
 // Convert "long long int" -> "double"
 template <>
 __global__ static void reduce_data<long long int, double>(const int nfft_tot,
-						   const long long int *data_in,
-						   double *data_out) {
+							  const long long int *data_in,
+							  double *data_out) {
   unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
   
   while (pos < nfft_tot) {

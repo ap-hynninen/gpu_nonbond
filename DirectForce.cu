@@ -781,8 +781,10 @@ void DirectForce<AT, CT>::set_vdwparam(int nvdwparam, CT *h_vdwparam) {
   // NOTE: this is done in order to avoid the multiplication in the inner loop
   CT *h_vdwparam_fixed = new CT[nvdwparam];
   for(int i=0;i < nvdwparam/2;i++) {
-    h_vdwparam_fixed[i*2]   = ((CT)6.0)*h_vdwparam[i*2];
-    h_vdwparam_fixed[i*2+1] = ((CT)12.0)*h_vdwparam[i*2+1];
+    //h_vdwparam_fixed[i*2]   = ((CT)6.0)*h_vdwparam[i*2];
+    //h_vdwparam_fixed[i*2+1] = ((CT)12.0)*h_vdwparam[i*2+1];
+    h_vdwparam_fixed[i*2]   = h_vdwparam[i*2];
+    h_vdwparam_fixed[i*2+1] = h_vdwparam[i*2+1];
   }
 
   bool vdwparam_reallocated = false;
@@ -949,6 +951,7 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 
   dim3 nthread(32, 2, 1);
   dim3 nblock_tot((nlist->ni-1)/nthread.y+1, 1, 1);
+
   size_t shmem_size = tilesize*nthread.y*(sizeof(float4) + sizeof(int)) + 
     warpsize*nthread.y*3*sizeof(AT);
 

@@ -12,6 +12,7 @@
 template <int tilesize>
 NeighborList<tilesize>::NeighborList() {
   ni = 0;
+  ntot = 0;
 
   tile_excl = NULL;
   tile_excl_len = 0;
@@ -21,6 +22,19 @@ NeighborList<tilesize>::NeighborList() {
 
   tile_indj = NULL;
   tile_indj_len = 0;
+
+  // Sparse
+  ni_sparse = 0;
+  ntot_sparse = 0;
+
+  pairs_len = 0;
+  pairs = NULL;
+  
+  ientry_sparse_len = 0;
+  ientry_sparse = NULL;
+
+  tile_indj_sparse_len = NULL;
+  tile_indj_sparse = NULL;
 }
 
 //
@@ -31,6 +45,10 @@ NeighborList<tilesize>::~NeighborList() {
   if (tile_excl != NULL) deallocate< tile_excl_t<tilesize> > (&tile_excl);
   if (ientry != NULL) deallocate<ientry_t>(&ientry);
   if (tile_indj != NULL) deallocate<int>(&tile_indj);
+  // Sparse
+  if (pairs != NULL) deallocate< pairs_t<tilesize> > (&pairs);
+  if (ientry_sparse != NULL) deallocate<ientry_t>(&ientry_sparse);
+  if (tile_indj_sparse != NULL) deallocate<int>(&tile_indj_sparse);
 }
 
 /*
@@ -248,18 +266,19 @@ void NeighborList<tilesize>::analyze() {
 
   std::cout << "Number of i-tiles = " << ni << ", total number of tiles = " << ntot << std::endl;
 
-  std::ofstream file("npair.txt", std::ofstream::out);
+  std::ofstream file_npair("npair.txt", std::ofstream::out);
+  std::ofstream file_nj("nj.txt", std::ofstream::out);
 
   unsigned int nexcl_bit = 0;
   unsigned int nexcl_bit_self = 0;
   unsigned int nempty_tile = 0;
   unsigned int nempty_line = 0;
   for (int i=0;i < ni;i++) {
+    file_nj << h_ientry[i].endj - h_ientry[i].startj + 1 << std::endl;
     for (int j=h_ientry[i].startj;j <= h_ientry[i].endj;j++) {
       int npair = 0;
       bool empty_tile = true;
       for (int k=0;k < num_excl;k++) {
-	//unsigned int n1bit = count_1bits(h_tile_excl[j].excl[k]);
 	unsigned int n1bit = BitCount(h_tile_excl[j].excl[k]);
 
 	if (n1bit > 32) {
@@ -278,11 +297,12 @@ void NeighborList<tilesize>::analyze() {
 	if (h_ientry[i].indi == h_tile_indj[j]) nexcl_bit_self += n1bit;
       }
       if (empty_tile) nempty_tile++;
-      file << npair << std::endl;
+      file_npair << npair << std::endl;
     }
   }
 
-  file.close();
+  file_npair.close();
+  file_nj.close();
 
   unsigned int ntot_pairs = ntot*tilesize*tilesize;
   std::cout << "Total number of pairs = " << ntot_pairs << std::endl;
