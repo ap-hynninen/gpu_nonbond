@@ -8,8 +8,6 @@
 #include "NeighborList.h"
 #include "DirectForce.h"
 
-const int warpsize = 32;
-
 template <typename AT, typename CT>
 __forceinline__ __device__ void write_force(const CT fx, const CT fy, const CT fz,
 					    const int ind, const int stride,
@@ -990,6 +988,72 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 						force);
 	} else {
 	  calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD_LOOKUP, false, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	}
+      } else {
+	std::cout<<"DirectForce<AT, CT>::calc_force, Invalid EWALD model"<<std::endl;
+	exit(1);
+      }
+    } else if (vdw_model_loc == VDW_VSW) {
+      if (elec_model_loc == EWALD) {
+	if (calc_energy) {
+	  calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD, true, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	} else {
+	  calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD, false, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	}
+      } else if (elec_model_loc == EWALD_LOOKUP) {
+	if (calc_energy) {
+	  calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD_LOOKUP, true, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	} else {
+	  calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD_LOOKUP, false, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	}
+      } else {
+	std::cout<<"DirectForce<AT, CT>::calc_force, Invalid EWALD model"<<std::endl;
+	exit(1);
+      }
+    } else if (vdw_model_loc == VDW_CUT) {
+      if (elec_model_loc == EWALD) {
+	if (calc_energy) {
+	  calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD, true, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	} else {
+	  calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD, false, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	}
+      } else if (elec_model_loc == EWALD_LOOKUP) {
+	if (calc_energy) {
+	  calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD_LOOKUP, true, true>
+	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
+						nlist->tile_excl,
+						stride, vdwparam, nvdwparam, xyzq, vdwtype,
+						force);
+	} else {
+	  calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD_LOOKUP, false, true>
 	    <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
 						nlist->tile_excl,
 						stride, vdwparam, nvdwparam, xyzq, vdwtype,

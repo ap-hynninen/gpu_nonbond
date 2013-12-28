@@ -74,23 +74,29 @@ void reallocate_T(void **pp, int *curlen, const int newlen, const float fac, con
 //
 // Copies memory Host -> Device
 //
-void copy_HtoD_T(void *h_array, void *d_array, int array_len, /*cudaStream_t stream, */const size_t sizeofT) {
-
-  cudaStream_t stream = 0;
-
+void copy_HtoD_async_T(void *h_array, void *d_array, int array_len, cudaStream_t stream,
+		       const size_t sizeofT) {
   cudaCheck(cudaMemcpyAsync(d_array, h_array, sizeofT*array_len,
 			    cudaMemcpyHostToDevice, stream));
+}
 
+void copy_HtoD_T(void *h_array, void *d_array, int array_len,
+		 const size_t sizeofT) {
+  cudaCheck(cudaMemcpy(d_array, h_array, sizeofT*array_len,
+		       cudaMemcpyHostToDevice));
 }
 
 //----------------------------------------------------------------------------------------
 //
 // Copies memory Device -> Host
 //
+void copy_DtoH_async_T(void *d_array, void *h_array, const int array_len, cudaStream_t stream,
+		       const size_t sizeofT) {
+  cudaCheck(cudaMemcpyAsync(h_array, d_array, sizeofT*array_len, cudaMemcpyDeviceToHost, stream));
+}
+
 void copy_DtoH_T(void *d_array, void *h_array, const int array_len, const size_t sizeofT) {
-
   cudaCheck(cudaMemcpy(h_array, d_array, sizeofT*array_len, cudaMemcpyDeviceToHost));
-
 }
 
 //----------------------------------------------------------------------------------------
@@ -203,7 +209,9 @@ void range_stop() {
 
 //----------------------------------------------------------------------------------------
 
-void start_gpu(int numnode, int mynode) {
+static cudaStream_t direct_nonbond_stream;
+
+void start_gpu(int numnode, int mynode, bool use_streams) {
   int devices[4] = {2, 3, 0, 1};
 
   int gpu_ind = devices[mynode % 4];
@@ -228,10 +236,20 @@ void start_gpu(int numnode, int mynode) {
   std::cout << "Node " << mynode << " using CUDA device " << gpu_ind << 
     " " << gpu_prop.name << std::endl;
 
+  if (use_streams) {
+    cudaCheck(cudaStreamCreate(&direct_nonbond_stream));
+  } else {
+    direct_nonbond_stream = 0;
+  }
+
   /*
   std::cout << gpu_prop.maxGridSize[0] << " " << 
     gpu_prop.maxGridSize[1] << " "<< 
     gpu_prop.maxGridSize[2] << std::endl;
   */
 
+}
+
+cudaStream_t get_direct_nonbond_stream() {
+  return direct_nonbond_stream;
 }

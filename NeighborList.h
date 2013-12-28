@@ -2,8 +2,13 @@
 #define NEIGHBORLIST_H
 
 template <int tilesize>
+struct num_excl {
+  static const int val = ((tilesize*tilesize-1)/32 + 1);
+};
+
+template <int tilesize>
 struct tile_excl_t {
-  unsigned int excl[((tilesize*tilesize-1)/32 + 1)]; // Exclusion mask
+  unsigned int excl[num_excl<tilesize>::val]; // Exclusion mask
 };
 
 struct ientry_t {
@@ -24,9 +29,6 @@ template <int tilesize>
 class NeighborList {
   friend class DirectForce<long long int, float>;
 private:
-
-  // Number of exclusion integers
-  const static int num_excl = ((tilesize*tilesize-1)/32 + 1);
 
   // Number of i tiles
   int ni;
@@ -61,6 +63,18 @@ private:
 public:
   NeighborList();
   ~NeighborList();
+
+  void build_excl(const float boxx, const float boxy, const float boxz,
+		  const float roff,
+		  const int n_ijlist, const int3 *ijlist,
+		  const int *cell_start,
+		  const float4 *xyzq);
+  
+  void add_tile_final(const int ntile_final, const int *tile_ind_final,
+		      const tile_excl_t<tilesize> *tile_excl_final);
+
+  void set_ientry(int ni, ientry_t *h_ientry);
+
   void split_dense_sparse(int npair_cutoff);
   void remove_empty_tiles();
   void analyze();
