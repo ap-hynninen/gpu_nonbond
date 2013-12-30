@@ -56,4 +56,25 @@ __global__ static void reduce_data<long long int, double>(const int nfft_tot,
 
 }
 
+template <typename AT, typename CT>
+__global__ static void reduce_data(const int nfft_tot,
+				   AT *data_in) {
+  // The generic version can not be used
+}
+
+// Convert "long long int" -> "double"
+template <>
+__global__ static void reduce_data<long long int, double>(const int nfft_tot,
+							  long long int *data_in) {
+  unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
+  double *data_out = (double *)data_in;
+  
+  while (pos < nfft_tot) {
+    long long int val = data_in[pos];
+    data_out[pos] = ((double)val)*INV_FORCE_SCALE;
+    pos += blockDim.x*gridDim.x;
+  }
+
+}
+
 #endif // REDUCE_H

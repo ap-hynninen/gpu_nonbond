@@ -8,19 +8,29 @@
 #include "Force.h"
 
 
-static int get_stride(int ncoord) {
+template <typename T>
+int Force<T>::calc_stride() {
   const int sizeof_T = 4;
   //return ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
   return ((ncoord*sizeof_T - 1)/256 + 1)*256/sizeof_T;
 }
 
 //
-// Class creator
+// Class creators
 //
 template <typename T>
+Force<T>::Force() {
+  ncoord = 0;
+  stride = 0;
+  data_len = 0;
+  data = NULL;
+}
+
+template <typename T>
 Force<T>::Force(const int ncoord) : ncoord(ncoord) {
-  stride = get_stride(ncoord);
-  allocate<T>(&data, 3*stride);
+  stride = calc_stride();
+  data_len = 3*stride;
+  allocate<T>(&data, data_len);
 }
 
 template <typename T>
@@ -34,7 +44,7 @@ Force<T>::Force(const char *filename) {
     ncoord = 0;
     while (file >> fx >> fy >> fz) ncoord++;
 
-    stride = get_stride(ncoord);
+    stride = calc_stride();
 
     // Rewind
     file.clear();
@@ -48,7 +58,8 @@ Force<T>::Force(const char *filename) {
     while (file >> data_cpu[i] >> data_cpu[i+stride] >> data_cpu[i+stride*2]) i++;
     
     // Allocate GPU memory
-    allocate<T>(&data, 3*stride);
+    data_len = 3*stride;
+    allocate<T>(&data, data_len);
 
     // Copy coordinates from CPU to GPU
     copy_HtoD<T>(data_cpu, data, 3*stride);
@@ -68,7 +79,7 @@ Force<T>::Force(const char *filename) {
 //
 template <typename T>
 Force<T>::~Force() {
-  deallocate<T>(&data);
+  if (data != NULL) deallocate<T>(&data);
 }
 
 //
@@ -131,6 +142,32 @@ bool Force<T>::compare(Force<T>* force, const double tol, double& max_diff) {
 }
 
 //
+// Sets the size of the force array
+//
+template <typename T>
+void Force<T>::set_ncoord(int ncoord, float fac) {
+  this->ncoord = ncoord;
+  stride = calc_stride();
+  reallocate<T>(&data, &data_len, 3*stride, fac);
+}
+
+//
+// Returns stride
+//
+template <typename T>
+int Force<T>::get_stride() {
+  return stride;
+}
+
+//
+// Copies force to host
+//
+template <typename T>
+void Force<T>::get_force(T *h_data) {
+  copy_DtoH<T>(data, h_data, 3*stride);
+}
+
+//
 // Converts one type of force array to another. Result is in "force"
 //
 template <typename T>
@@ -143,9 +180,25 @@ void Force<T>::convert(Force<T2>* force) {
   int nthread = 512;
   int nblock = (3*stride - 1)/nthread + 1;
 
-  reduce_data<T, T2> <<< nblock, nthread >>>(3*stride,
-					     this->data,
-					     force->data);
+  reduce_data<T, T2>
+    <<< nblock, nthread >>>(3*stride, this->data, force->data);
+}
+
+//
+// Converts one type of force array to another. Result is in "this"
+// NOTE: Only works when the size of the types T and T2 match
+//
+template <typename T>
+template <typename T2>
+void Force<T>::convert() {
+
+  assert(sizeof(T) == sizeof(T2));
+
+  int nthread = 512;
+  int nblock = (3*stride - 1)/nthread + 1;
+
+  reduce_data<T, T2>
+    <<< nblock, nthread >>>(3*stride, this->data);
 }
 
 //
@@ -155,3 +208,4 @@ template class Force<long long int>;
 template class Force<double>;
 template class Force<float>;
 template void Force<long long int>::convert<float>(Force<float>* force);
+template void Force<long long int>::convert<double>();

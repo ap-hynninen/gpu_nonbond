@@ -65,7 +65,9 @@ public:
   void set_vdwtype(const char *filename);
 
   void calc_force(const int ncoord, const float4 *xyzq,
-		  const NeighborList<32> *nlist, const bool calc_energy,
+		  const NeighborList<32> *nlist,
+		  const bool calc_energy,
+		  const bool calc_virial,
 		  const int stride, AT *force);
 
 };

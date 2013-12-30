@@ -1072,14 +1072,18 @@ __global__ void gather_force_4_ortho_kernel(const float4 *xyzq, const int ncoord
 					    const float ccelec,
 					    const int stride,
 					    CT *force) {
+
+  const int tid = threadIdx.x + threadIdx.y*blockDim.x;
+
   // Shared memory
   __shared__ gather_t<CT> shmem[32];
 #if __CUDA_ARCH__ < 300
-  __shared__ float3 shred[32*2];
+  __shared__ float3 shred_buf[32*2];
+  volatile float3 *shred = &shred_buf[(tid/8)*8];
 #endif
 
   //  extern __shared__ gather_t<CT> shbuf[];
-  const int tid = threadIdx.x + threadIdx.y*blockDim.x;
+
   /*
   volatile gather_t<CT> *shmem = shbuf;
 #if __CUDA_ARCH__ < 300

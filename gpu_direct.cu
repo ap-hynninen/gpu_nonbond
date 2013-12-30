@@ -64,9 +64,10 @@ void test() {
   dir.setup(boxx, boxy, boxz, kappa, roff, ron, VDW_VSH, EWALD, true, true);
   dir.set_vdwparam("test_data/vdwparam.txt");
   dir.set_vdwtype("test_data/vdwtype.txt");
-  dir.calc_force(ncoord, xyzq.xyzq, &nlist, false, force_fp.stride, force_fp.data);
+  dir.calc_force(ncoord, xyzq.xyzq, &nlist, false, false, force_fp.stride, force_fp.data);
 
   force_fp.convert(&force);
+  //  force_fp.convert<double>();
 
   double max_diff;
   double tol = 7.7e-4;

@@ -11,11 +11,23 @@
 //
 //
 
-XYZQ::XYZQ(int ncoord, int align) : ncoord(ncoord) {
-  allocate<float4>(&xyzq, ((ncoord-1)/align+1)*align);
+int XYZQ::get_xyzq_len() {
+  return ((ncoord-1)/align+1)*align;
 }
 
-XYZQ::XYZQ(const char *filename, int align) {
+XYZQ::XYZQ() {
+  ncoord = 0;
+  xyzq_len = 0;
+  align = 32;
+  xyzq = NULL;
+}
+
+XYZQ::XYZQ(int ncoord, int align) : ncoord(ncoord), align(align) {
+  xyzq_len = get_xyzq_len();
+  allocate<float4>(&xyzq, xyzq_len);
+}
+
+XYZQ::XYZQ(const char *filename, int align) : align(align) {
   
   std::ifstream file(filename);
   if (file.is_open()) {
@@ -38,7 +50,8 @@ XYZQ::XYZQ(const char *filename, int align) {
     while (file >> xyzq_cpu[i].x >> xyzq_cpu[i].y >> xyzq_cpu[i].z >> xyzq_cpu[i].w) i++;
     
     // Allocate GPU memory
-    allocate<float4>(&xyzq, ((ncoord-1)/align+1)*align);
+    xyzq_len = get_xyzq_len();
+    allocate<float4>(&xyzq, xyzq_len);
 
     // Copy coordinates from CPU to GPU
     copy_HtoD<float4>(xyzq_cpu, xyzq, ncoord);
@@ -53,6 +66,29 @@ XYZQ::XYZQ(const char *filename, int align) {
   
 }
 
+//
+// Class destructor
+//
 XYZQ::~XYZQ() {
-  deallocate<float4>(&xyzq);
+  if (xyzq != NULL) deallocate<float4>(&xyzq);
+}
+
+//
+// Set ncoord
+//
+void XYZQ::set_ncoord(int ncoord, float fac) {
+  this->ncoord = ncoord;
+  int req_xyzq_len = get_xyzq_len();
+  
+  reallocate<float4>(&xyzq, &xyzq_len, req_xyzq_len, fac);
+}
+
+//
+// Copies xyzq from host
+//
+void XYZQ::set_xyzq(int ncoord, float4 *h_xyzq) {
+
+  set_ncoord(ncoord);
+
+  copy_HtoD<float4>(h_xyzq, xyzq, ncoord, get_direct_nonbond_stream());
 }
