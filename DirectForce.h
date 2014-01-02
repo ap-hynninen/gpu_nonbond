@@ -11,7 +11,13 @@
 template <int tilesize> class NeighborList;
 #endif
 
-enum {NONE, EWALD, EWALD_LOOKUP, VDW_CUT, VDW_VSH, VDW_VSW, VDW_VFSW};
+enum {NONE=0, 
+      VDW_VSH=1, VDW_VSW=2, VDW_VFSW=3, 
+      EWALD=4,
+      CSHIFT=5, CFSWIT=6, CSHFT=7, CSWIT=8, RSWIT=9,
+      RSHFT=10, RSHIFT=11, RFSWIT=12,
+      VDW_CUT=13,
+      EWALD_LOOKUP=14};
 
 template <typename AT, typename CT>
 class DirectForce {
@@ -41,9 +47,13 @@ private:
   CT *ewald_force;
   int n_ewald_force;
 
+  // true if energy / virial was calculated when the calc_force was previously called
+  bool prev_calc_energy;
+  bool prev_calc_virial;
+
   void setup_ewald_force(CT h);
   void set_elec_model(int elec_model, CT h=0.01);
-
+  void clear_energy_virial();
 public:
 
   DirectForce();
@@ -70,6 +80,8 @@ public:
 		  const bool calc_virial,
 		  const int stride, AT *force);
 
+  
+  void get_energy_virial(double *energy_vdw, double *energy_elec);
 };
 
 #endif // DIRECTFORCE_H

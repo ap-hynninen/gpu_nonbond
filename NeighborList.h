@@ -70,8 +70,8 @@ public:
 		  const int *cell_start,
 		  const float4 *xyzq);
   
-  void add_tile_final(const int ntile_final, const int *tile_ind_final,
-		      const tile_excl_t<tilesize> *tile_excl_final);
+  void add_tile_top(const int ntile_top, const int *tile_ind_top,
+		    const tile_excl_t<tilesize> *tile_excl_top);
 
   void set_ientry(int ni, ientry_t *h_ientry);
 

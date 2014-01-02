@@ -116,14 +116,29 @@ struct DirectSettings_t {
 
   float hinv;
   float *ewald_force;
+
 };
 
-// Settings for direct computation in host memory
-static DirectSettings_t h_setup;
+struct EnergyVirial_t {
+  // Energies
+  double energy_vdw;
+  double energy_elec;
 
-// Settings for direct computation in device memory
+  // Shift forces for calculating virials
+  double sforcex[27];
+  double sforcey[27];
+  double sforcez[27];
+};
+
+// Settings for direct computation in host and device memory
+static DirectSettings_t h_setup;
 static __constant__ DirectSettings_t d_setup;
 
+// Energy and virial in host and device memory
+static EnergyVirial_t h_energy_virial;
+static __device__ EnergyVirial_t d_energy_virial;
+
+// VdW parameter texture reference
 static texture<float2, 1, cudaReadModeElementType> vdwparam_texref;
 static bool vdwparam_texref_bound = false;
 
@@ -291,13 +306,18 @@ __global__ void calc_force_kernel(const int ni, const ientry_t* __restrict__ ien
   }
 
   // Calculate shift for i-atom
-  float shz = (ish/9 - 1)*d_setup.boxz;
-  ish -= (ish/9)*9;
-  float shy = (ish/3 - 1)*d_setup.boxy;
-  ish -= (ish/3)*3;
-  float shx = (ish - 1)*d_setup.boxx;
+  // ish = 1...27
+  int ish_tmp = ish;
+  float shz = (ish_tmp/9 - 1)*d_setup.boxz;
+  ish_tmp -= (ish_tmp/9)*9;
+  float shy = (ish_tmp/3 - 1)*d_setup.boxy;
+  ish_tmp -= (ish_tmp/3)*3;
+  float shx = (ish_tmp - 1)*d_setup.boxx;
 
   const unsigned int sh_start = tilesize*threadIdx.y;
+  // tid:
+  // threadIdx.y=0: 0...31
+  // threadIdx.y=1: 32...63
   const unsigned int tid = threadIdx.x + blockDim.x*threadIdx.y;
 
   unsigned int load_ij;
@@ -469,17 +489,61 @@ __global__ void calc_force_kernel(const int ni, const ientry_t* __restrict__ ien
   }
 
   // Dump shared memory force (fi)
-  __syncthreads();
+  //__syncthreads();         // <-- Is this really needed?
   write_force<AT, CT>(fix[tid], fiy[tid], fiz[tid], indi+load_ij, stride, force);
 
+  if (calc_virial) {
+    // Value of ish depends on threadIdx.y => Reduce within warp
+    __syncthreads();
+    double *shmem_p = ((double *)x_i);
+    volatile double *sforcex = &shmem_p[blockDim.x*threadIdx.y];
+    volatile double *sforcey = &shmem_p[blockDim.x*(blockDim.y + threadIdx.y)];
+    volatile double *sforcez = &shmem_p[blockDim.x*(blockDim.y*2 + threadIdx.y)];
+
+    if (threadIdx.x < 16) {
+      sforcex[threadIdx.x] += sforcex[threadIdx.x + 16];
+      sforcey[threadIdx.x] += sforcey[threadIdx.x + 16];
+      sforcez[threadIdx.x] += sforcez[threadIdx.x + 16];
+    }
+
+    if (threadIdx.x < 8) {
+      sforcex[threadIdx.x] += sforcex[threadIdx.x + 8];
+      sforcey[threadIdx.x] += sforcey[threadIdx.x + 8];
+      sforcez[threadIdx.x] += sforcez[threadIdx.x + 8];
+    }
+
+    if (threadIdx.x < 4) {
+      sforcex[threadIdx.x] += sforcex[threadIdx.x + 4];
+      sforcey[threadIdx.x] += sforcey[threadIdx.x + 4];
+      sforcez[threadIdx.x] += sforcez[threadIdx.x + 4];
+    }
+
+    if (threadIdx.x < 2) {
+      sforcex[threadIdx.x] += sforcex[threadIdx.x + 2];
+      sforcey[threadIdx.x] += sforcey[threadIdx.x + 2];
+      sforcez[threadIdx.x] += sforcez[threadIdx.x + 2];
+    }
+
+    if (threadIdx.x < 1) {
+      sforcex[threadIdx.x] += sforcex[threadIdx.x + 1];
+      sforcey[threadIdx.x] += sforcey[threadIdx.x + 1];
+      sforcez[threadIdx.x] += sforcez[threadIdx.x + 1];
+
+      atomicAdd(&d_energy_virial.sforcex[ish-1], sforcex[0]);
+      atomicAdd(&d_energy_virial.sforcey[ish-1], sforcey[0]);
+      atomicAdd(&d_energy_virial.sforcez[ish-1], sforcez[0]);
+    }
+
+  }
+
   if (calc_energy) {
-    // Reduce energies to (pot)
+    // Reduce energies to
     // Reduces within thread block, uses the "xyzq_i" shared memory buffer
-    __syncthreads();          // NOTE: this makes sure we can write to xyzq_i 
+    __syncthreads();          // NOTE: this makes sure we can write to x_i 
     double2 *potbuf = (double2 *)(x_i);
     potbuf[tid].x = vdwpotl;
     potbuf[tid].y = coulpotl;
-    // sync to make sure all threads in block are finished writing share memory
+    // sync to make sure all threads in block have finished writing share memory
     __syncthreads();
     const int nthreadblock = blockDim.x*blockDim.y;
     for (int i=1;i < nthreadblock;i *= 2) {
@@ -492,8 +556,10 @@ __global__ void calc_force_kernel(const int ni, const ientry_t* __restrict__ ien
       __syncthreads();
     }
     if (tid == 0) {
-      atomicAdd((double *)&force[stride*3],   potbuf[0].x);
-      atomicAdd((double *)&force[stride*3+1], potbuf[0].y);
+      //      atomicAdd((double *)&force[stride*3],   potbuf[0].x);
+      //      atomicAdd((double *)&force[stride*3+1], potbuf[0].y);
+      atomicAdd(&d_energy_virial.energy_vdw, potbuf[0].x);
+      atomicAdd(&d_energy_virial.energy_elec, potbuf[0].y);
     }
 
   }
@@ -688,6 +754,10 @@ DirectForce<AT, CT>::DirectForce() {
 
   set_calc_vdw(true);
   set_calc_elec(true);
+
+  clear_energy_virial();
+  prev_calc_energy = false;
+  prev_calc_virial = false;
 }
 
 //
@@ -960,6 +1030,11 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 
   unsigned int max_nblock = 2147483647;
 
+  prev_calc_energy = calc_energy;
+  prev_calc_virial = calc_virial;
+
+  if (calc_energy || calc_virial) clear_energy_virial();
+
   while (nblock_tot.x != 0) {
 
     dim3 nblock;
@@ -1170,6 +1245,36 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 
 }
 
+//
+// Sets Energies and virials to zero
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::clear_energy_virial() {
+  h_energy_virial.energy_vdw = 0.0;
+  h_energy_virial.energy_elec = 0.0;
+  for (int i=0;i < 27;i++) {
+    h_energy_virial.sforcex[i] = 0.0;
+    h_energy_virial.sforcey[i] = 0.0;
+    h_energy_virial.sforcez[i] = 0.0;
+  }
+  cudaCheck(cudaMemcpyToSymbol(d_energy_virial, &h_energy_virial, sizeof(EnergyVirial_t)));
+}
+
+//
+// Read Energies and virials
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::get_energy_virial(double *energy_vdw, double *energy_elec) {
+  if (prev_calc_energy && prev_calc_virial) {
+    cudaCheck(cudaMemcpyFromSymbol(&h_energy_virial, d_energy_virial, sizeof(EnergyVirial_t)));
+  } else if (prev_calc_energy) {
+    cudaCheck(cudaMemcpyFromSymbol(&h_energy_virial, d_energy_virial, 2*sizeof(double)));
+  } else if (prev_calc_virial) {
+    cudaCheck(cudaMemcpyFromSymbol(&h_energy_virial, d_energy_virial, 27*3*sizeof(double), 2*sizeof(double)));
+  }
+  *energy_vdw = h_energy_virial.energy_vdw;
+  *energy_elec = h_energy_virial.energy_elec;
+}
 
 //
 // Explicit instances of DirectForce

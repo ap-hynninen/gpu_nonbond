@@ -4,6 +4,7 @@
 
 void deallocate_host_T(void **pp);
 void allocate_host_T(void **pp, const int len, const size_t sizeofT);
+void reallocate_host_T(void **pp, int *curlen, const int newlen, const float fac, const size_t sizeofT);
 
 void deallocate_T(void **pp);
 void allocate_T(void **pp, const int len, const size_t sizeofT);
@@ -22,7 +23,10 @@ void copy_DtoH_async_T(void *d_array, void *h_array, const int array_len, cudaSt
 #endif
 void copy_DtoH_T(void *d_array, void *h_array, const int array_len, const size_t sizeofT);
 
-void clear_gpu_array_T(void *data, const int ndata, /*cudaStream_t stream, */ const size_t sizeofT);
+#ifdef __CUDACC__
+void clear_gpu_array_async_T(void *data, const int ndata, cudaStream_t stream, const size_t sizeofT);
+#endif
+void clear_gpu_array_T(void *data, const int ndata, const size_t sizeofT);
 
 void copy3D_HtoD_T(void* src_data, void* dst_data,
 		   int src_x0, int src_y0, int src_z0,
@@ -58,6 +62,19 @@ void deallocate_host(T **pp) {
 template <class T>
 void allocate_host(T **pp, const int len) {
   allocate_host_T((void **)pp, len, sizeof(T));
+}
+
+//----------------------------------------------------------------------------------------
+//
+// Allocate & re-allocate host memory
+// pp = memory pointer
+// curlen = current length of the array
+// newlen = new required length of the array
+// fac = extra space allocation factor: in case of re-allocation new length will be fac*newlen
+//
+template <class T>
+void reallocate_host(T **pp, int *curlen, const int newlen, const float fac=1.0f) {
+  reallocate_host_T((void **)pp, curlen, newlen, fac, sizeof(T));
 }
 
 //----------------------------------------------------------------------------------------
@@ -130,8 +147,16 @@ void copy_DtoH(T *d_array, T *h_array, const int array_len
 //----------------------------------------------------------------------------------------
 
 template <class T>
-void clear_gpu_array(T *data, const int ndata /*, cudaStream_t stream=0*/) {
-  clear_gpu_array_T(data, ndata, /*stream, */ sizeof(T));
+void clear_gpu_array(T *data, const int ndata
+#ifdef __CUDACC__
+		     , cudaStream_t stream=0
+#endif
+		     ) {
+#ifdef __CUDACC__
+  clear_gpu_array_async_T(data, ndata, stream, sizeof(T));
+#else
+  clear_gpu_array_T(data, ndata, sizeof(T));
+#endif
 }
 
 //----------------------------------------------------------------------------------------
@@ -167,24 +192,15 @@ void copy3D_DtoH(T* src_data, T* dst_data,
 }
 
 //----------------------------------------------------------------------------------------
-
-static void print_gpu_float(float *data, const int ndata) {
-  float *h_data = new float[ndata];
-
-  copy_DtoH<float>(data, h_data, ndata);
-			   
-  for (int i=0;i < ndata;i++)
-    std::cout << h_data[i] << std::endl;
-
-  delete [] h_data;
-}
-
-//----------------------------------------------------------------------------------------
-void range_start(char *range_name);
-void range_stop();
+void gpu_range_start(char *range_name);
+void gpu_range_stop();
 //----------------------------------------------------------------------------------------
 
-void start_gpu(int numnode, int mynode, bool use_streams=false);
+void start_gpu(int numnode, int mynode);
+void stop_gpu();
+void start_streams();
+void stop_streams();
+int get_gpu_ind();
 
 #ifdef __CUDACC__
 cudaStream_t get_direct_nonbond_stream();

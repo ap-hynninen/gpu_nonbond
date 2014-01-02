@@ -86,8 +86,8 @@ Force<T>::~Force() {
 // Sets force data to zero
 //
 template <typename T>
-void Force<T>::setzero() {
-  clear_gpu_array<T>(data, 3*stride);
+void Force<T>::clear() {
+  clear_gpu_array<T>(data, 3*stride, get_direct_nonbond_stream());
 }
 
 //

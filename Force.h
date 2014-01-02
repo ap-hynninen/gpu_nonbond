@@ -30,7 +30,7 @@ public:
   Force(const char *filename);
   ~Force();
 
-  void setzero();
+  void clear();
   bool compare(Force<T>* force, const double tol, double& max_diff);
 
   void set_ncoord(int ncoord, float fac=1.0f);

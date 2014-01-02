@@ -49,7 +49,7 @@ void test() {
   Force<long long int> force_fp(ncoord);
   Force<float> force(ncoord);
 
-  force_fp.setzero();
+  force_fp.clear();
 
   // Load coordinates
   XYZQ xyzq("test_data/xyzq_direct.txt", 32);

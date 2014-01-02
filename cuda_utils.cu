@@ -2,6 +2,7 @@
 #include <cuda.h>
 #include <nvToolsExtCuda.h>
 #include "gpu_utils.h"
+#include "cuda_utils.h"
 
 //----------------------------------------------------------------------------------------
 //
@@ -24,6 +25,28 @@ void deallocate_host_T(void **pp) {
 //
 void allocate_host_T(void **pp, const int len, const size_t sizeofT) {
   cudaCheck(cudaMallocHost(pp, sizeofT*len));
+}
+
+//----------------------------------------------------------------------------------------
+//
+// Allocate & re-allocate page-locked host memory
+// pp = memory pointer
+// curlen = current length of the array
+// newlen = new required length of the array
+// fac = extra space allocation factor: in case of re-allocation new length will be fac*newlen
+//
+void reallocate_host_T(void **pp, int *curlen, const int newlen, const float fac, const size_t sizeofT) {
+
+  if (*pp != NULL && *curlen < newlen) {
+    cudaCheck(cudaFreeHost((void *)(*pp)));
+    *pp = NULL;
+  }
+
+  if (*pp == NULL) {
+    *curlen = (int)(float(newlen)*fac);
+    allocate_host_T(pp, *curlen, sizeofT);
+  }
+
 }
 
 //----------------------------------------------------------------------------------------
@@ -101,11 +124,12 @@ void copy_DtoH_T(void *d_array, void *h_array, const int array_len, const size_t
 
 //----------------------------------------------------------------------------------------
 
-void clear_gpu_array_T(void *data, const int ndata, /*cudaStream_t stream, */ const size_t sizeofT) {
-
-  cudaStream_t stream = 0;
-
+void clear_gpu_array_async_T(void *data, const int ndata, cudaStream_t stream, const size_t sizeofT) {
   cudaCheck(cudaMemsetAsync(data, 0, sizeofT*ndata, stream));
+}
+
+void clear_gpu_array_T(void *data, const int ndata, const size_t sizeofT) {
+  cudaCheck(cudaMemset(data, 0, sizeofT*ndata));
 }
 
 //----------------------------------------------------------------------------------------
@@ -181,7 +205,7 @@ void copy3D_DtoH_T(void* src_data, void* dst_data,
 
 //----------------------------------------------------------------------------------------
 
-void range_start(char *range_name) {
+void gpu_range_start(char *range_name) {
   static int color_id=0;
   nvtxEventAttributes_t att;
   att.version = NVTX_VERSION;
@@ -203,24 +227,37 @@ void range_start(char *range_name) {
   nvtxRangePushEx(&att);
 }
 
-void range_stop() {
+void gpu_range_stop() {
   nvtxRangePop();
 }
 
 //----------------------------------------------------------------------------------------
 
-static cudaStream_t direct_nonbond_stream;
+static cudaStream_t direct_nonbond_stream = 0;
+static int gpu_ind = -1;
+static cudaDeviceProp gpu_prop;
 
-void start_gpu(int numnode, int mynode, bool use_streams) {
+void start_gpu(int numnode, int mynode) {
   int devices[4] = {2, 3, 0, 1};
 
-  int gpu_ind = devices[mynode % 4];
+  int device_count;
+  cudaCheck(cudaGetDeviceCount(&device_count));
+  if (device_count < 1) {
+    std::cout << "No CUDA device found" << std::endl;
+    exit(1);
+  }
+
+  gpu_ind = devices[mynode % 4];
   cudaCheck(cudaSetDevice(gpu_ind));
 
   cudaCheck(cudaThreadSynchronize());
   
-  cudaDeviceProp gpu_prop;
   cudaCheck(cudaGetDeviceProperties(&gpu_prop, gpu_ind));
+
+  if (gpu_prop.major < 2) {
+    std::cout << "CUDA device(s) must have compute capability 2.0 or higher" << std::endl;
+    exit(1);
+  }
 
   int cuda_driver_version;
   cudaCheck(cudaDriverGetVersion(&cuda_driver_version));
@@ -229,27 +266,34 @@ void start_gpu(int numnode, int mynode, bool use_streams) {
   cudaCheck(cudaRuntimeGetVersion(&cuda_rt_version));
 
   if (mynode == 0) {
+    std::cout << "Number of CUDA devices found " << device_count << std::endl;
     std::cout << "Using CUDA driver version " << cuda_driver_version << std::endl;
     std::cout << "Using CUDA runtime version " << cuda_rt_version << std::endl;
   }
 
-  std::cout << "Node " << mynode << " using CUDA device " << gpu_ind << 
+  std::cout << "Node " << mynode << " uses CUDA device " << gpu_ind << 
     " " << gpu_prop.name << std::endl;
+  
+}
 
-  if (use_streams) {
-    cudaCheck(cudaStreamCreate(&direct_nonbond_stream));
-  } else {
-    direct_nonbond_stream = 0;
-  }
+void stop_gpu() {
+  cudaCheck(cudaDeviceReset());
+  gpu_ind = -1;
+}
 
-  /*
-  std::cout << gpu_prop.maxGridSize[0] << " " << 
-    gpu_prop.maxGridSize[1] << " "<< 
-    gpu_prop.maxGridSize[2] << std::endl;
-  */
+void start_streams() {
+  cudaCheck(cudaStreamCreate(&direct_nonbond_stream));
+}
 
+void stop_streams() {
+  cudaCheck(cudaStreamDestroy(direct_nonbond_stream));
+  direct_nonbond_stream = 0;
 }
 
 cudaStream_t get_direct_nonbond_stream() {
   return direct_nonbond_stream;
+}
+
+int get_gpu_ind() {
+  return gpu_ind;
 }

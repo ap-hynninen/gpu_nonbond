@@ -390,43 +390,43 @@ void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, cons
 
 //----------------------------------------------------------------------------------------
 //
-// Combines tile_excl_final on GPU
+// Combines tile_excl_top on GPU
 // One thread takes care of one integer in the exclusion mask, therefore:
 //
 // 32x32 tile, 32 integers per tile
 // 16x16 tile, 8 integers per tile
 //
 template <int tilesize>
-__global__ void add_tile_final_kernel(const int ntile_final,
-				      const int *tile_ind_final,
-				      const tile_excl_t<tilesize> *tile_excl_final,
-				      tile_excl_t<tilesize> *tile_excl) {
+__global__ void add_tile_top_kernel(const int ntile_top,
+				    const int *tile_ind_top,
+				    const tile_excl_t<tilesize> *tile_excl_top,
+				    tile_excl_t<tilesize> *tile_excl) {
   // Global thread index
   const unsigned int gtid = threadIdx.x + blockDim.x*blockIdx.x;
-  // Index to tile_ind_final[]
+  // Index to tile_ind_top[]
   const unsigned int i = gtid / (num_excl<tilesize>::val);
   // Index to exclusion mask
   const unsigned int ix = gtid % (num_excl<tilesize>::val);
 
-  if (i < ntile_final) {
-    int ind = tile_ind_final[i];
-    tile_excl[ind].excl[ix] |= tile_excl_final[i].excl[ix];
+  if (i < ntile_top) {
+    int ind = tile_ind_top[i];
+    tile_excl[ind].excl[ix] |= tile_excl_top[i].excl[ix];
   }
 
 }
 
 //
-// Host wrapper for add_tile_final_kernel
+// Host wrapper for add_tile_top_kernel
 //
 template <int tilesize>
-void NeighborList<tilesize>::add_tile_final(const int ntile_final, const int *tile_ind_final,
-					    const tile_excl_t<tilesize> *tile_excl_final) {
+void NeighborList<tilesize>::add_tile_top(const int ntile_top, const int *tile_ind_top,
+					  const tile_excl_t<tilesize> *tile_excl_top) {
   int nthread = 256;
-  int nblock = (ntile_final*(num_excl<tilesize>::val) - 1)/nthread + 1;
+  int nblock = (ntile_top*(num_excl<tilesize>::val) - 1)/nthread + 1;
   
-  add_tile_final_kernel<tilesize>
+  add_tile_top_kernel<tilesize>
     <<< nblock, nthread, 0, get_direct_nonbond_stream() >>>
-    (ntile_final, tile_ind_final, tile_excl_final, tile_excl);
+    (ntile_top, tile_ind_top, tile_excl_top, tile_excl);
   
   cudaCheck(cudaGetLastError());
 }

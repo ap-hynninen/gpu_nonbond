@@ -4,7 +4,8 @@
 
 #include <stdio.h>
 
-static __constant__ const int warpsize = 32;
+static const int warpsize = 32;
+//static __constant__ const int warpsize = 32;
 
 static __constant__ const float FORCE_SCALE = (float)(1ll << 40);
 static __constant__ const double INV_FORCE_SCALE = (double)1.0/(double)(1ll << 40);
