@@ -40,11 +40,6 @@ public:
   T *dthetay;
   T *dthetaz;
 
-  // prefac arrays
-  T* prefac_x;
-  T* prefac_y;
-  T* prefac_z;
-
   // Grid positions and charge of the atoms
   int *gix;
   int *giy;
@@ -54,8 +49,6 @@ public:
 private:
 
   void set_ncoord(const int ncoord);
-  void dftmod(double *bsp_mod, const double *bsp_arr, const int nfft);
-  void fill_bspline_host(const double w, double *array, double *darray);
 
 public:
 
@@ -66,7 +59,6 @@ public:
   void set_recip(const B *recip);
 
   void fill_bspline(const float4 *xyzq, const int ncoord);
-  void calc_prefac();
 
   void print_dtheta(int start, int end);
 

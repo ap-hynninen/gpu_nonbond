@@ -174,9 +174,6 @@ Bspline<T>::Bspline(const int ncoord, const int order,
 
   set_ncoord(ncoord);
 
-  allocate<T>(&prefac_x, nfftx);
-  allocate<T>(&prefac_y, nffty);
-  allocate<T>(&prefac_z, nfftz);
   allocate<T>(&recip, 9);
 }
   
@@ -192,9 +189,6 @@ Bspline<T>::~Bspline() {
   deallocate<int>(&giy);
   deallocate<int>(&giz);
   deallocate<T>(&charge);
-  deallocate<T>(&prefac_x);
-  deallocate<T>(&prefac_y);
-  deallocate<T>(&prefac_z);
   deallocate<T>(&recip);
 }
 
@@ -233,111 +227,6 @@ void Bspline<T>::fill_bspline(const float4 *xyzq, const int ncoord) {
   }
   
   cudaCheck(cudaGetLastError());
-}
-
-template <typename T>
-void Bspline<T>::dftmod(double *bsp_mod, const double *bsp_arr, const int nfft) {
-
-  const double rsmall = 1.0e-10;
-  double nfftr = (2.0*3.14159265358979323846)/(double)nfft;
-
-  for (int k=1;k <= nfft;k++) {
-    double sum1 = 0.0;
-    double sum2 = 0.0;
-    double arg1 = (k-1)*nfftr;
-    for (int j=1;j < nfft;j++) {
-      double arg = arg1*(j-1);
-      sum1 += bsp_arr[j-1]*cos(arg);
-      sum2 += bsp_arr[j-1]*sin(arg);
-    }
-    bsp_mod[k-1] = sum1*sum1 + sum2*sum2;
-  }
-
-  for (int k=1;k <= nfft;k++)
-    if (bsp_mod[k-1] < rsmall)
-      bsp_mod[k-1] = 0.5*(bsp_mod[k-1-1] + bsp_mod[k+1-1]);
-
-  for (int k=1;k <= nfft;k++)
-    bsp_mod[k-1] = 1.0/bsp_mod[k-1];
-
-}
-
-template <typename T>
-void Bspline<T>::fill_bspline_host(const double w, double *array, double *darray) {
-
-  //--- do linear case
-  array[order-1] = 0.0;
-  array[2-1] = w;
-  array[1-1] = 1.0 - w;
-
-  //--- compute standard b-spline recursion
-  for (int k=3;k <= order-1;k++) {
-    double div = 1.0 / (double)(k-1);
-    array[k-1] = div*w*array[k-1-1];
-    for (int j=1;j <= k-2;j++)
-      array[k-j-1] = div*((w+j)*array[k-j-1-1] + (k-j-w)*array[k-j-1]);
-    array[1-1] = div*(1.0-w)*array[1-1];
-  }
-
-  //--- perform standard b-spline differentiation
-  darray[1-1] = -array[1-1];
-  for (int j=2;j <= order;j++)
-    darray[j-1] = array[j-1-1] - array[j-1];
-
-  //--- one more recursion
-  int k = order;
-  double div = 1.0 / (double)(k-1);
-  array[k-1] = div*w*array[k-1-1];
-  for (int j=1;j <= k-2;j++)
-    array[k-j-1] = div*((w+j)*array[k-j-1-1] + (k-j-w)*array[k-j-1]);
-
-  array[1-1] = div*(1.0-w)*array[1-1];
-
-}
-
-//
-// Calculates (prefac_x, prefac_y, prefac_z)
-// NOTE: This calculation is done on the CPU since it is only done infrequently
-//
-template <typename T>
-void Bspline<T>::calc_prefac() {
-  
-  int max_nfft = max(nfftx, max(nffty, nfftz));
-  double *bsp_arr = new double[max_nfft];
-  double *bsp_mod = new double[max_nfft];
-  double *array = new double[order];
-  double *darray = new double[order];
-  T *h_prefac_x = new T[nfftx];
-  T *h_prefac_y = new T[nffty];
-  T *h_prefac_z = new T[nfftz];
-
-  fill_bspline_host(0.0, array, darray);
-  for (int i=0;i < max_nfft;i++) bsp_arr[i] = 0.0;
-  for (int i=2;i <= order+1;i++) bsp_arr[i-1] = array[i-1-1];
-
-  dftmod(bsp_mod, bsp_arr, nfftx);
-  for (int i=0;i < nfftx;i++) h_prefac_x[i] = (T)bsp_mod[i];
-
-  dftmod(bsp_mod, bsp_arr, nffty);
-  for (int i=0;i < nffty;i++) h_prefac_y[i] = (T)bsp_mod[i];
-
-  dftmod(bsp_mod, bsp_arr, nfftz);
-  for (int i=0;i < nfftz;i++) h_prefac_z[i] = (T)bsp_mod[i];
-
-  //  std::cout<< "h_prefac_x = "<<std::endl;
-  //  for (int i=0;i < 10;i++) std::cout<<h_prefac_x[i]<<std::endl;
-
-  copy_HtoD<T>(h_prefac_x, prefac_x, nfftx);
-  copy_HtoD<T>(h_prefac_y, prefac_y, nfftx);
-  copy_HtoD<T>(h_prefac_z, prefac_z, nfftx);
-
-  delete [] bsp_arr;
-  delete [] bsp_mod;
-  delete [] array;
-  delete [] darray;
-  delete [] h_prefac_x;
-  delete [] h_prefac_y;
-  delete [] h_prefac_z;
 }
 
 //

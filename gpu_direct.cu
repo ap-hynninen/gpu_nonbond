@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
   start_mpi(argc, argv, numnode, mynode);
 #endif
 
-  start_gpu(numnode, mynode, false);
+  start_gpu(numnode, mynode);
   
   test();
 
@@ -56,8 +56,8 @@ void test() {
 
   NeighborList<32> nlist;
   nlist.load("test_data/nlist.txt");
-  //  nlist.remove_empty_tiles();
-  nlist.split_dense_sparse(32);
+  //nlist.remove_empty_tiles();
+  nlist.split_dense_sparse(512);
   nlist.analyze();
 
   DirectForce<long long int, float> dir;
@@ -67,7 +67,6 @@ void test() {
   dir.calc_force(ncoord, xyzq.xyzq, &nlist, false, false, force_fp.stride, force_fp.data);
 
   force_fp.convert(&force);
-  //  force_fp.convert<double>();
 
   double max_diff;
   double tol = 7.7e-4;

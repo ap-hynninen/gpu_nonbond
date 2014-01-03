@@ -1489,6 +1489,11 @@ Grid<AT, CT, CT2>::Grid(int nfftx, int nffty, int nfftz, int order,
     assert((multi_gpu && fft_type==BOX) || !multi_gpu);
 
     init(x0, x1, y0, y1, z0, z1, order, y_land_locked, z_land_locked);
+
+    allocate<CT>(&prefac_x, nfftx);
+    allocate<CT>(&prefac_y, nffty);
+    allocate<CT>(&prefac_z, nfftz);
+    calc_prefac();
 }
 
 //
@@ -1629,6 +1634,10 @@ Grid<AT, CT, CT2>::~Grid() {
     cufftCheck(cufftDestroy(r2c_plan));
     cufftCheck(cufftDestroy(c2r_plan));
   }
+
+  deallocate<CT>(&prefac_x);
+  deallocate<CT>(&prefac_y);
+  deallocate<CT>(&prefac_z);
 }
 
 template <typename AT, typename CT, typename CT2>
@@ -1702,8 +1711,7 @@ void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspli
 }
 
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, const double *recip,
-				      Bspline<CT> &bspline) {
+void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, const double *recip) {
 
   clear_gpu_array<AT>((AT *)accum_grid->data, xsize*ysize*zsize);
 
@@ -1722,13 +1730,6 @@ void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, cons
 
   switch(order) {
   case 4:
-    /*
-    spread_charge_ortho_4<AT> <<< nblock, nthread >>>(xyzq, ncoord, recip1, recip2, recip3,
-						      nfftx, nffty, nfftz,
-						      bspline.thetax, bspline.thetay, bspline.thetaz,
-						      bspline.dthetax, bspline.dthetay, bspline.dthetaz,
-						      (AT *)accum_grid->data);
-    */
     spread_charge_ortho_4<AT> <<< nblock, nthread >>>(xyzq, ncoord, recip1, recip2, recip3,
 						      nfftx, nffty, nfftz,
 						      (AT *)accum_grid->data);
@@ -1758,8 +1759,7 @@ void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, cons
 // Perform scalar sum without calculating virial or energy (faster)
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
-				   CT* prefac_x, CT* prefac_y, CT* prefac_z) {
+void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa) {
 
   const double pi = 3.14159265358979323846;
   int nthread = 512;
@@ -2145,6 +2145,115 @@ void Grid<AT, CT, CT2>::c2r_fft() {
 			    (cufftReal *)fft_grid->data));
   }
 
+}
+
+//
+// Sets Bspline order
+//
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::set_order(int order) {
+  this->order = order;
+  calc_prefac();
+}
+
+void dftmod(double *bsp_mod, const double *bsp_arr, const int nfft) {
+
+  const double rsmall = 1.0e-10;
+  double nfftr = (2.0*3.14159265358979323846)/(double)nfft;
+
+  for (int k=1;k <= nfft;k++) {
+    double sum1 = 0.0;
+    double sum2 = 0.0;
+    double arg1 = (k-1)*nfftr;
+    for (int j=1;j < nfft;j++) {
+      double arg = arg1*(j-1);
+      sum1 += bsp_arr[j-1]*cos(arg);
+      sum2 += bsp_arr[j-1]*sin(arg);
+    }
+    bsp_mod[k-1] = sum1*sum1 + sum2*sum2;
+  }
+
+  for (int k=1;k <= nfft;k++)
+    if (bsp_mod[k-1] < rsmall)
+      bsp_mod[k-1] = 0.5*(bsp_mod[k-1-1] + bsp_mod[k+1-1]);
+
+  for (int k=1;k <= nfft;k++)
+    bsp_mod[k-1] = 1.0/bsp_mod[k-1];
+
+}
+
+void fill_bspline_host(const int order, const double w, double *array, double *darray) {
+
+  //--- do linear case
+  array[order-1] = 0.0;
+  array[2-1] = w;
+  array[1-1] = 1.0 - w;
+
+  //--- compute standard b-spline recursion
+  for (int k=3;k <= order-1;k++) {
+    double div = 1.0 / (double)(k-1);
+    array[k-1] = div*w*array[k-1-1];
+    for (int j=1;j <= k-2;j++)
+      array[k-j-1] = div*((w+j)*array[k-j-1-1] + (k-j-w)*array[k-j-1]);
+    array[1-1] = div*(1.0-w)*array[1-1];
+  }
+
+  //--- perform standard b-spline differentiation
+  darray[1-1] = -array[1-1];
+  for (int j=2;j <= order;j++)
+    darray[j-1] = array[j-1-1] - array[j-1];
+
+  //--- one more recursion
+  int k = order;
+  double div = 1.0 / (double)(k-1);
+  array[k-1] = div*w*array[k-1-1];
+  for (int j=1;j <= k-2;j++)
+    array[k-j-1] = div*((w+j)*array[k-j-1-1] + (k-j-w)*array[k-j-1]);
+
+  array[1-1] = div*(1.0-w)*array[1-1];
+
+}
+
+//
+// Calculates (prefac_x, prefac_y, prefac_z)
+// NOTE: This calculation is done on the CPU since it is only done infrequently
+//
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::calc_prefac() {
+  
+  int max_nfft = max(nfftx, max(nffty, nfftz));
+  double *bsp_arr = new double[max_nfft];
+  double *bsp_mod = new double[max_nfft];
+  double *array = new double[order];
+  double *darray = new double[order];
+  CT *h_prefac_x = new CT[nfftx];
+  CT *h_prefac_y = new CT[nffty];
+  CT *h_prefac_z = new CT[nfftz];
+
+  fill_bspline_host(order, 0.0, array, darray);
+  for (int i=0;i < max_nfft;i++) bsp_arr[i] = 0.0;
+  for (int i=2;i <= order+1;i++) bsp_arr[i-1] = array[i-1-1];
+
+  dftmod(bsp_mod, bsp_arr, nfftx);
+  for (int i=0;i < nfftx;i++) h_prefac_x[i] = (CT)bsp_mod[i];
+
+  dftmod(bsp_mod, bsp_arr, nffty);
+  for (int i=0;i < nffty;i++) h_prefac_y[i] = (CT)bsp_mod[i];
+
+  dftmod(bsp_mod, bsp_arr, nfftz);
+  for (int i=0;i < nfftz;i++) h_prefac_z[i] = (CT)bsp_mod[i];
+
+  copy_HtoD<CT>(h_prefac_x, prefac_x, nfftx);
+  copy_HtoD<CT>(h_prefac_y, prefac_y, nfftx);
+  copy_HtoD<CT>(h_prefac_z, prefac_z, nfftx);
+
+  delete [] bsp_arr;
+  delete [] bsp_mod;
+  delete [] array;
+  delete [] darray;
+  delete [] h_prefac_x;
+  delete [] h_prefac_y;
+  delete [] h_prefac_z;
 }
 
 //

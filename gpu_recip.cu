@@ -110,24 +110,23 @@ void test() {
   double max_diff;
 
   bspline.set_recip<double>(recip);
-  bspline.calc_prefac();
 
   grid.print_info();
 
   bspline.fill_bspline(xyzq.xyzq, xyzq.ncoord);
 
   // Warm up
-  /*
-  grid.spread_charge(xyzq.ncoord, bspline);
+  //grid.spread_charge(xyzq.ncoord, bspline);
+  grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
   grid.r2c_fft();
-  grid.scalar_sum(recip, kappa, bspline.prefac_x, bspline.prefac_y, bspline.prefac_z);
+  grid.scalar_sum(recip, kappa);
   grid.c2r_fft();
-  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  */
+  //grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
+  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
 
   // Run
   //grid.spread_charge(xyzq.ncoord, bspline);
-  grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip, bspline);
+  grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
   /*
   if (!q.compare(grid.charge_grid, tol, max_diff)) {
     std::cout<< "q comparison FAILED" << std::endl;
@@ -160,7 +159,7 @@ void test() {
   */
 
   tol = 1.0e-6;
-  grid.scalar_sum(recip, kappa, bspline.prefac_x, bspline.prefac_y, bspline.prefac_z);
+  grid.scalar_sum(recip, kappa);
   /*
   if (fft_type == BOX) {
     Matrix3d<float2> q_zfft_summed_t(nfftx/2+1, nffty, nfftz);

@@ -94,10 +94,17 @@ private:
   CT *host_tmp;
 #endif
 
+  // Prefactor arrays
+  CT* prefac_x;
+  CT* prefac_y;
+  CT* prefac_z;
+
   void init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 	  bool y_land_locked, bool z_land_locked);
 
   void make_fft_plans();
+
+  void calc_prefac();
 
  public:
   Grid(int nfftx, int nffty, int nfftz, int order, FFTtype fft_type, int nnode, int mynode);
@@ -106,11 +113,9 @@ private:
   void print_info();
 
   void spread_charge(const int ncoord, const Bspline<CT> &bspline);
-  void spread_charge(const float4 *xyzq, const int ncoord, const double *recip,
-		     Bspline<CT> &bspline);
+  void spread_charge(const float4 *xyzq, const int ncoord, const double *recip);
 
-  void scalar_sum(const double* recip, const double kappa,
-		  CT* prefac_x, CT* prefac_y, CT* prefac_z);
+  void scalar_sum(const double* recip, const double kappa);
 
   void gather_force(const int ncoord, const double* recip, const Bspline<CT> &bspline,
 		    const int stride, CT* force);
@@ -123,6 +128,12 @@ private:
   void z_fft_c2c(CT2 *data, const int direction);
   void r2c_fft();
   void c2r_fft();
+
+  int get_nfftx() {return nfftx;}
+  int get_nffty() {return nffty;}
+  int get_nfftz() {return nfftz;}
+  void set_order(int order);
+
 
   //  void test_copy();
   //  void test_transpose();
