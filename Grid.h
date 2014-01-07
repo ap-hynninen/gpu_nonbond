@@ -132,8 +132,8 @@ private:
   int get_nfftx() {return nfftx;}
   int get_nffty() {return nffty;}
   int get_nfftz() {return nfftz;}
+  int get_order() {return order;}
   void set_order(int order);
-
 
   //  void test_copy();
   //  void test_transpose();

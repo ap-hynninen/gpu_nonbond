@@ -8,6 +8,8 @@
 #include "NeighborList.h"
 #include "DirectForce.h"
 
+static __constant__ const float ccelec = 332.0716;
+
 template <typename AT, typename CT>
 __forceinline__ __device__ void write_force(const CT fx, const CT fy, const CT fz,
 					    const int ind, const int stride,
@@ -332,7 +334,7 @@ __global__ void calc_force_kernel(const int ni, const ientry_t* __restrict__ ien
   x_i[sh_start + load_ij] = xyzq_tmp.x + shx;
   y_i[sh_start + load_ij] = xyzq_tmp.y + shy;
   z_i[sh_start + load_ij] = xyzq_tmp.z + shz;
-  q_i[sh_start + load_ij] = xyzq_tmp.w;
+  q_i[sh_start + load_ij] = xyzq_tmp.w*ccelec;
 
   vdwtype_i[sh_start + load_ij] = vdwtype[indi + load_ij];
 
@@ -579,7 +581,7 @@ void calc_force_kernel_sparse(const int ni, const ientry_t* __restrict__ ientry,
 			      const float* __restrict__ vdwparam, const int nvdwparam,
 			      const float4* __restrict__ xyzq, const int* __restrict__ vdwtype,
 			      AT *force) {
-  
+
   //
   // Shared data, common for the entire block
   //
@@ -629,7 +631,7 @@ void calc_force_kernel_sparse(const int ni, const ientry_t* __restrict__ ientry,
   x_i[sh_start + load_ij] = xyzq_tmp.x + shx;
   y_i[sh_start + load_ij] = xyzq_tmp.y + shy;
   z_i[sh_start + load_ij] = xyzq_tmp.z + shz;
-  q_i[sh_start + load_ij] = xyzq_tmp.w;
+  q_i[sh_start + load_ij] = xyzq_tmp.w*ccelec;
 
   vdwtype_i[sh_start + load_ij] = vdwtype[indi + load_ij];
 

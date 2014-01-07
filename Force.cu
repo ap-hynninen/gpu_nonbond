@@ -202,6 +202,24 @@ void Force<T>::convert() {
 }
 
 //
+// Converts one type of force array to another and adds force to the result.
+// Result is in "this"
+// NOTE: Only works when the size of the types T and T2 match
+//
+template <typename T>
+template <typename T2, typename T3>
+void Force<T>::convert_add(Force<T3> *force) {
+
+  assert(sizeof(T) == sizeof(T2));
+
+  int nthread = 512;
+  int nblock = (3*stride - 1)/nthread + 1;
+
+  reduce_add_data<T, T2, T3>
+    <<< nblock, nthread >>>(3*stride, force->data, this->data);
+}
+
+//
 // Explicit instances of Force class
 //
 template class Force<long long int>;
@@ -209,3 +227,4 @@ template class Force<double>;
 template class Force<float>;
 template void Force<long long int>::convert<float>(Force<float>* force);
 template void Force<long long int>::convert<double>();
+template void Force<long long int>::convert_add<double>(Force<float> *force);

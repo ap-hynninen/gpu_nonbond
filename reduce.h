@@ -77,4 +77,29 @@ __global__ static void reduce_data<long long int, double>(const int nfft_tot,
 
 }
 
+template <typename AT, typename CT1, typename CT2>
+__global__ static void reduce_add_data(const int nfft_tot,
+				       const CT2* __restrict__ data_add,
+				       AT *data_inout) {
+  // The generic version can not be used
+}
+
+// Convert "long long int" -> "double" and adds "float"
+template <>
+__global__ static 
+void reduce_add_data<long long int, double, float>(const int nfft_tot,
+						   const float* __restrict__ data_add,
+						   long long int *data_inout) {
+
+  unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
+  double *data_out = (double *)data_inout;
+  
+  while (pos < nfft_tot) {
+    long long int val = data_inout[pos];
+    double val_add = (double)data_add[pos];
+    data_out[pos] = ((double)val)*INV_FORCE_SCALE + val_add;
+    pos += blockDim.x*gridDim.x;
+  }
+
+}
 #endif // REDUCE_H

@@ -95,7 +95,7 @@ void test() {
   Matrix3d<float2> q_comp10(nfftx/2+1, nffty, nfftz, "test_data/q_comp10_double.txt");
   Matrix3d<float> q_solved(nfftx, nffty, nfftz, "test_data/q_real2_double.txt");
 
-  Force<float> force_comp("test_data/force.txt");
+  Force<float> force_comp("test_data/force_recip.txt");
   Force<float> force(ncoord);
 
   // Load coordinates
@@ -103,8 +103,8 @@ void test() {
 
   // Create Bspline and Grid objects
   Bspline<float> bspline(ncoord, order, nfftx, nffty, nfftz);
-  //  Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
-  Grid<int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
+  Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
+  //Grid<int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
 
   double tol = 1.0e-5;
   double max_diff;
@@ -235,7 +235,7 @@ void test() {
   //  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
   grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
 
-  tol = 3.2e-4;
+  tol = 3.3e-4;
   if (!force_comp.compare(&force, tol, max_diff)) {
     std::cout<<"force comparison FAILED"<<std::endl;
   } else {

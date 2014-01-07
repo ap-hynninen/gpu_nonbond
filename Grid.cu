@@ -1944,6 +1944,7 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
   recip_loc[8] = (CT)(recip[8]);
 
   CT ccelec_loc = (CT)ccelec;
+  //CT ccelec_loc = (CT)(1.0);
 
   bool ortho = (recip[1] == 0.0 && recip[2] == 0.0 && recip[3] == 0.0 &&
 		recip[5] == 0.0 && recip[6] == 0.0 && recip[7] == 0.0);

@@ -52,12 +52,12 @@ void test() {
   force_fp.clear();
 
   // Load coordinates
-  XYZQ xyzq("test_data/xyzq_direct.txt", 32);
+  XYZQ xyzq("test_data/xyzq.txt", 32);
 
   NeighborList<32> nlist;
   nlist.load("test_data/nlist.txt");
   //nlist.remove_empty_tiles();
-  nlist.split_dense_sparse(512);
+  //nlist.split_dense_sparse(512);
   nlist.analyze();
 
   DirectForce<long long int, float> dir;
@@ -69,7 +69,7 @@ void test() {
   force_fp.convert(&force);
 
   double max_diff;
-  double tol = 7.7e-4;
+  double tol = 7.71e-4;
   if (!force_comp.compare(&force, tol, max_diff)) {
     std::cout<<"force comparison FAILED"<<std::endl;
   } else {
