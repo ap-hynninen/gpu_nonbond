@@ -2245,8 +2245,8 @@ void Grid<AT, CT, CT2>::calc_prefac() {
   for (int i=0;i < nfftz;i++) h_prefac_z[i] = (CT)bsp_mod[i];
 
   copy_HtoD<CT>(h_prefac_x, prefac_x, nfftx);
-  copy_HtoD<CT>(h_prefac_y, prefac_y, nfftx);
-  copy_HtoD<CT>(h_prefac_z, prefac_z, nfftx);
+  copy_HtoD<CT>(h_prefac_y, prefac_y, nffty);
+  copy_HtoD<CT>(h_prefac_z, prefac_z, nfftz);
 
   delete [] bsp_arr;
   delete [] bsp_mod;

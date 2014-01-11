@@ -49,20 +49,24 @@ void copy3D_DtoH_T(void* src_data, void* dst_data,
 // Deallocate page-locked host memory
 // pp = memory pointer
 //
+#ifdef __cplusplus
 template <class T>
 void deallocate_host(T **pp) {
   deallocate_host_T((void **)pp);
 }
+#endif
 //----------------------------------------------------------------------------------------
 //
 // Allocate page-locked host memory
 // pp = memory pointer
 // len = length of the array
 //
+#ifdef __cplusplus
 template <class T>
 void allocate_host(T **pp, const int len) {
   allocate_host_T((void **)pp, len, sizeof(T));
 }
+#endif
 
 //----------------------------------------------------------------------------------------
 //
@@ -72,30 +76,36 @@ void allocate_host(T **pp, const int len) {
 // newlen = new required length of the array
 // fac = extra space allocation factor: in case of re-allocation new length will be fac*newlen
 //
+#ifdef __cplusplus
 template <class T>
 void reallocate_host(T **pp, int *curlen, const int newlen, const float fac=1.0f) {
   reallocate_host_T((void **)pp, curlen, newlen, fac, sizeof(T));
 }
+#endif
 
 //----------------------------------------------------------------------------------------
 //
 // Deallocate gpu memory
 // pp = memory pointer
 //
+#ifdef __cplusplus
 template <class T>
 void deallocate(T **pp) {
   deallocate_T((void **)pp);
 }
+#endif
 //----------------------------------------------------------------------------------------
 //
 // Allocate gpu memory
 // pp = memory pointer
 // len = length of the array
 //
+#ifdef __cplusplus
 template <class T>
 void allocate(T **pp, const int len) {
   allocate_T((void **)pp, len, sizeof(T));
 }
+#endif
 
 //----------------------------------------------------------------------------------------
 //
@@ -105,14 +115,18 @@ void allocate(T **pp, const int len) {
 // newlen = new required length of the array
 // fac = extra space allocation factor: in case of re-allocation new length will be fac*newlen
 //
+#ifdef __cplusplus
 template <class T>
 void reallocate(T **pp, int *curlen, const int newlen, const float fac=1.0f) {
   reallocate_T((void **)pp, curlen, newlen, fac, sizeof(T));
 }
+#endif
+
 //----------------------------------------------------------------------------------------
 //
 // Copies memory Host -> Device
 //
+#ifdef __cplusplus
 template <class T>
 void copy_HtoD(T *h_array, T *d_array, int array_len
 #ifdef __CUDACC__
@@ -126,11 +140,13 @@ void copy_HtoD(T *h_array, T *d_array, int array_len
   copy_HtoD_T(h_array, d_array, array_len, sizeof(T));
 #endif
 }
+#endif
 
 //----------------------------------------------------------------------------------------
 //
 // Copies memory Device -> Host
 //
+#ifdef __cplusplus
 template <class T>
 void copy_DtoH(T *d_array, T *h_array, const int array_len
 #ifdef __CUDACC__
@@ -143,9 +159,11 @@ void copy_DtoH(T *d_array, T *h_array, const int array_len
   copy_DtoH_T(d_array, h_array, array_len, sizeof(T));
 #endif
 }
+#endif
 
 //----------------------------------------------------------------------------------------
 
+#ifdef __cplusplus
 template <class T>
 void clear_gpu_array(T *data, const int ndata
 #ifdef __CUDACC__
@@ -158,9 +176,11 @@ void clear_gpu_array(T *data, const int ndata
   clear_gpu_array_T(data, ndata, sizeof(T));
 #endif
 }
+#endif
 
 //----------------------------------------------------------------------------------------
 
+#ifdef __cplusplus
 template <class T>
 void copy3D_HtoD(T* src_data, T* dst_data,
 		 int src_x0, int src_y0, int src_z0,
@@ -174,9 +194,11 @@ void copy3D_HtoD(T* src_data, T* dst_data,
 		width, height, depth,
 		dst_xsize, dst_ysize, sizeof(T));
 }
+#endif
 
 //----------------------------------------------------------------------------------------
 
+#ifdef __cplusplus
 template <class T>
 void copy3D_DtoH(T* src_data, T* dst_data,
 		 int src_x0, int src_y0, int src_z0,
@@ -190,6 +212,7 @@ void copy3D_DtoH(T* src_data, T* dst_data,
 		width, height, depth,
 		dst_xsize, dst_ysize, sizeof(T));
 }
+#endif
 
 //----------------------------------------------------------------------------------------
 void gpu_range_start(char *range_name);

@@ -103,8 +103,8 @@ void test() {
 
   // Create Bspline and Grid objects
   Bspline<float> bspline(ncoord, order, nfftx, nffty, nfftz);
-  Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
-  //Grid<int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
+  //Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
+  Grid<int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
 
   double tol = 1.0e-5;
   double max_diff;
