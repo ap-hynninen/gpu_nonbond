@@ -39,6 +39,7 @@ public:
 
   template <typename T2> void convert(Force<T2>* force);
   template <typename T2> void convert();
+  template <typename T2, typename T3> void convert_to(Force<T3> *force);
   template <typename T2, typename T3> void convert_add(Force<T3> *force);
 };
 

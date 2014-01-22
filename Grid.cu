@@ -2091,14 +2091,13 @@ void Grid<AT, CT, CT2>::r2c_fft() {
       cufftCheck(cufftXtExecDescriptorC2C(r2c_plan,
 					  multi_data,
 					  multi_data, CUFFT_FORWARD));
-
       // Copy data back to a single GPU buffer in fft_grid->data
       cufftCheck(cufftXtMemcpy(r2c_plan, host_data, multi_data, CUFFT_COPY_DEVICE_TO_HOST));
 
       CT2 *tmp = (CT2 *)host_tmp;
       for (int z=0;z < zsize;z++)
 	for (int y=0;y < ysize;y++)
-	  for (int x=0;x < xsize;x++) {
+	  for (int x=0;x < xsize/2+1;x++) {
 	    tmp[x + (y + z*ysize)*(xsize/2+1)].x = host_data[x + (y + z*ysize)*xsize].x;
 	    tmp[x + (y + z*ysize)*(xsize/2+1)].y = host_data[x + (y + z*ysize)*xsize].y;
 	  }

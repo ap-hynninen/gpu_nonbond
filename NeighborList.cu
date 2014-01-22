@@ -66,6 +66,207 @@ void NeighborList<tilesize>::set_ientry(int ni, ientry_t *h_ientry) {
   copy_HtoD<ientry_t>(h_ientry, ientry, ni, get_direct_nonbond_stream());
 }
 
+//----------------------------------------------------------------------------------------
+//
+// Builds neighborlist
+//
+
+/*
+struct cell_t {
+  int izone;
+  int icellx;
+  int icelly;
+  int icellz;
+};
+
+__forceinline__ __device__
+void get_cell_bounds(int izone, int jzone, int icell, int ncell,
+		     float x0, float x1, float *bx, float rcut,
+		     int& jcell0, int& jcell1, float *dist) {
+
+  for (int j=icell-1;j >= 1;j--) {
+    float d = x0 - bx[j];
+    if (d > rcut) break;
+    jcell0 = j;
+  }
+
+  for (int j=0;j < ncell;j++) {
+    float d = x0 - bx[j];
+  }
+
+  int jcell_start_left, jcell_start_right;
+
+  if (izone == jzone) {
+    // Search within a single zone (I)
+    if (icell < 0) {
+      // This is one of the image cells on the left =>
+      // set the left cell boundary (jcell0) to 1 and start looking for the right
+      // boundary from 1
+      jcell_start_left = 0;       // with this value, we don't look for cells on the left
+      jcell_start_right = 1;      // start looking for cells at right from 1
+      jcell0 = 1;                  // left boundary set to minimum value
+      jcell1 = 0;                    // set to "no cells" value
+      dist(1) = 0.0f;
+    } else if (icell >= ncell) {
+      // This is one of the image cells on the right =>
+      // set the right cell boundary (icell1) to ncell and start looking for the left
+      // boundary from ncell
+      jcell_start_left = ncell;      // start looking for cells at left from ncell
+      jcell_start_right = ncell + 1; // with this value, we don't look for cells on the right
+      jcell0 = ncell + 1;            // set to "no cells" value
+      jcell1 = ncell;                // right boundary set to maximum value
+      dist(ncell) = 0.0f;
+    } else {
+      jcell_start_left = icell - 1;
+      jcell_start_right = icell + 1;
+      jcell0 = icell;
+      jcell1 = icell;
+      dist(icell) = 0.0f;
+    }
+  } else {
+    if (bx(0) >= x1 || (bx(0) < x1 && bx(0) > x0)) {
+      // j-zone is to the right of i-zone
+      // => no left search, start right search from 1
+      jcell_start_left = 0;
+      jcell_start_right = 1;
+      jcell0 = 1;
+      jcell1 = 0;
+    } else if (bx[ncell] <= x0 || (bx[ncell] > x0 && bx[ncell] < x1)) {
+      // j-zone is to the left of i-zone
+      // => no right search, start left search from ncell
+      jcell_start_left = ncell;
+      jcell_start_right = ncell + 1;
+      jcell0 = ncell + 1;
+      jcell1 = ncell;
+    } else {
+      // i-zone is between j-zones
+      // => safe choice is to search the entire range
+      jcell_start_left = ncell;
+      jcell_start_right = 1;
+      jcell0 = ncell;
+      jcell1 = 1;
+    }
+  }
+
+  // Check cells at left, stop once the distance to the cell right boundary 
+  // is greater than the cutoff.
+  //
+  // Cell right boundary is at bx(i)
+  for (int j=jcell_start_left;j >= 1;j--) {
+    float d = x0 - bx[j];
+    if (d > cut) break;
+    dist(j) = max(0.0f, d);
+    jcell0 = j;
+  }
+
+  // Check cells at right, stop once the distance to the cell left boundary
+  // is greater than the cutoff.
+  //
+  // Cell left boundary is at bx(i-1)
+  for (int j=jcell_start_right;j <= ncell;j++) {
+    float d = bx[j-1] - x1;
+    if (d > cut) break;
+    dist(j) = max(0.0f, d);
+    jcell1 = j;
+  }
+
+  // Cell bounds are jcell0:jcell1
+      
+}
+
+//
+// Build neighborlist for one zone at the time
+//
+template < int tilesize >
+__global__
+void build_nlist_kernel(const int ncell, const int izone, const int n_jzone,
+			const int *cellx, const int *celly, const int *cellz,
+			const float *bbx0, const float *bby0, const float *bby0,
+			const float *bbxw, const float *bbyw, const float *bbyw,
+			const float *cellbx, const float *cellby, const float *cellbz) {
+
+  // Shared memory
+  extern __shared__ char shbuf[];
+  volatile int *jcellx0;
+  volatile int *jcelly0;
+  volatile int *jcellz0;
+  volatile int *jcellx1;
+  volatile int *jcelly1;
+  volatile int *jcellz1;
+
+  // Index of the i-cell
+  const int icell = threadId.x + blockIdx.x*blockDim.x;
+
+  if (icell >= ncell) return;
+
+  int icellx = cellx[icell];
+  int icelly = celly[icell];
+  int icellz = cellz[icell];
+
+  float ibbx0 = bbx0[icell];
+  float ibby0 = bby0[icell];
+  float ibbz0 = bbz0[icell];
+  float ibbxw = bbxw[icell];
+  float ibbyw = bbyw[icell];
+  float ibbzw = bbzw[icell];
+
+  for (int jjzone=0;jjzone < n_jzone;jjzone++) {
+    int jzone = int_zone[izone][jjzone];
+    int jcellx0_t, jcellx1_t;
+    get_cell_bounds(izone, jzone, icellx + imx*ncellx[izone], ncellx[jzone],
+		    imbbx0-ibbxw, imbbx0+ibbxw, cellbx[jzone], rcut,
+		    jcellx0_t, jcellx1_t);
+    n_jcellx += max(0, jcellx1_t-jcellx0_t+1);
+    jcellx0[jzone] = jcellx0_t;
+    jcellx1[jzone] = jcellx1_t;
+  }
+
+
+  for (int imx=imx_lo;imx <= imx_hi;imx++) {
+    float imbbx0 = ibbx0 + imx*boxx;
+    int n_jcellx = 0;
+    for (int jjzone=0;jjzone < n_jzone;jjzone++) {
+      int jzone = int_zone[izone][jjzone];
+      int jcellx0_t, jcellx1_t;
+      get_cell_bounds(izone, jzone, icellx + imx*ncellx[izone], ncellx[jzone],
+		      imbbx0-ibbxw, imbbx0+ibbxw, cellbx[jzone], rcut,
+		      jcellx0_t, jcellx1_t);
+      n_jcellx += max(0, jcellx1_t-jcellx0_t+1);
+      jcellx0[jzone] = jcellx0_t;
+      jcellx1[jzone] = jcellx1_t;
+    }
+
+    for (int imy=imy_lo;imy <= imy_hi;imy++) {
+      float imbby0 = ibby0 + imy*boxy;
+      int n_jcelly = 0;
+      for (int jjzone=0;jjzone < n_jzone;jjzone++) {
+	int jzone = int_zone[izone][jjzone];
+	int jcelly0_t, jcelly1_t;
+	get_cell_bounds(izone, jzone, icelly + imy*ncelly[izone], ncelly[jzone],
+			imbby0-ibbyw, imbby0+ibbyw, cellby[jzone], rcut,
+			jcelly0_t, jcelly1_t);
+	n_jcelly += max(0, jcelly1_t-jcelly0_t+1);
+	jcelly0[jzone] = jcelly0_t;
+	jcelly1[jzone] = jcelly1_t;
+      }
+    } // for (int imy=imy_lo;imy <= imy_hi;imy++)
+
+    for (int imz=imz_lo;imz <= imz_hi;imz++) {
+	float imbbz0 = ibbz0 + imz*boxz;
+	
+	int ish = imx+1 + 3*(imy+1 + 3*(imz+1));
+	
+	for (int jjzone=0;jjzone < n_jzone;jjzone++) {
+	  int jzone = int_zone[izone][jjzone];
+	}
+	
+    } // for (int imz=imz_lo;imz <= imz_hi;imz++)
+
+
+  } // for (int imx=imx_lo;imx <= imx_hi;imx++)
+
+}
+*/
 
 //----------------------------------------------------------------------------------------
 //

@@ -444,9 +444,9 @@ void MultiNodeMatrix3d<T>::transpose_xyz_yzx() {
     for (int i=0;i < nrecv;i++) {
       int k;
 #ifdef USE_MPI
-      range_start("MPI_Waitany");
+      //      range_start("MPI_Waitany");
       MPICheck(MPI_Waitany(nrecv, (MPI_Request *)recv_req, &k, (MPI_Status *)recv_stat));
-      range_stop();
+      //      range_stop();
 #else
       k = i;
 #endif

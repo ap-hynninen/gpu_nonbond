@@ -56,6 +56,21 @@ __global__ static void reduce_data<long long int, double>(const int nfft_tot,
 
 }
 
+// Convert "float" -> "double"
+template <>
+__global__ static void reduce_data<float, double>(const int nfft_tot,
+						  const float *data_in,
+						  double *data_out) {
+  unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
+  
+  while (pos < nfft_tot) {
+    float val = data_in[pos];
+    data_out[pos] = ((double)val);
+    pos += blockDim.x*gridDim.x;
+  }
+
+}
+
 template <typename AT, typename CT>
 __global__ static void reduce_data(const int nfft_tot,
 				   AT *data_in) {
