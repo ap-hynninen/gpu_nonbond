@@ -47,13 +47,8 @@ private:
   CT *ewald_force;
   int n_ewald_force;
 
-  // true if energy / virial was calculated when the calc_force was previously called
-  bool prev_calc_energy;
-  bool prev_calc_virial;
-
   void setup_ewald_force(CT h);
   void set_elec_model(int elec_model, CT h=0.01);
-  void clear_energy_virial();
 public:
 
   DirectForce();
@@ -80,8 +75,12 @@ public:
 		  const bool calc_virial,
 		  const int stride, AT *force);
 
+
+  void clear_energy_virial();
   
-  void get_energy_virial(double *energy_vdw, double *energy_elec);
+  void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
+			 double *energy_vdw, double *energy_elec,
+			 double *sforcex, double *sforcey, double *sforcez);
 };
 
 #endif // DIRECTFORCE_H

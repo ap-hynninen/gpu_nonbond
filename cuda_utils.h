@@ -227,6 +227,7 @@ int get_gpu_ind();
 
 #ifdef __CUDACC__
 cudaStream_t get_direct_nonbond_stream();
+int3 get_max_nblock();
 #endif
 
 #endif // CUDA_UTILS_H

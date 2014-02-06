@@ -556,6 +556,8 @@ void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, cons
 					const int *cell_start,
 					const float4 *xyzq) {
 
+  if (n_ijlist == 0) return;
+
   // Allocate & re-allocate (d_tile_indj, d_tile_excl)
   reallocate<int>(&tile_indj, &tile_indj_len, n_ijlist, 1.2f);
   reallocate<tile_excl_t<tilesize> >(&tile_excl, &tile_excl_len, n_ijlist, 1.2f);

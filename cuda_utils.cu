@@ -294,6 +294,14 @@ cudaStream_t get_direct_nonbond_stream() {
   return direct_nonbond_stream;
 }
 
+int3 get_max_nblock() {
+  int3 max_nblock;
+  max_nblock.x = gpu_prop.maxGridSize[0];
+  max_nblock.y = gpu_prop.maxGridSize[1];
+  max_nblock.z = gpu_prop.maxGridSize[2];
+  return max_nblock;
+}
+
 int get_gpu_ind() {
   return gpu_ind;
 }

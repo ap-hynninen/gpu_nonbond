@@ -278,7 +278,7 @@ __global__ void calc_force_kernel(const int ni, const ientry_t* __restrict__ ien
   volatile AT *fiz = &fiy[warpsize*blockDim.y];                    // WARPSIZE*blockDim.y
   volatile float *vdwparam_sh;
   
-  if (tex_vdwparam) {
+  if (!tex_vdwparam) {
     vdwparam_sh = (float *)&fiz[warpsize*blockDim.y];
   }
 
@@ -349,35 +349,6 @@ __global__ void calc_force_kernel(const int ni, const ientry_t* __restrict__ ien
   }
 
   __syncthreads();
-
-  //  float roff2 = roff*roff;
-
-  //  vdw.setup(ron2, roff2);
-
-  /*
-#if (VDWTYPE == VSH)
-  // roffinv6  = 1/roff^6
-  // roffinv12 = 1/roff^12
-  // roffinv18 = 1/roff^18
-  float roffinv6 = 1.0f/(roff2*roff2*roff2);
-  float roffinv12 = roffinv6*roffinv6;
-  float roffinv18 = roffinv12*roffinv6;
-#elif (VDWTYPE == VSW)
-  float ron2 = ron*ron;
-  //  inv_roff2_ron2 = 1.0/(roff2 - ron2)^3
-  float inv_roff2_ron2 = roff2 - ron2;
-  inv_roff2_ron2 = 1.0f/(inv_roff2_ron2*inv_roff2_ron2*inv_roff2_ron2);
-#endif
-
-#if (ELECTYPE == EWALD)
-  float kappa2 = kappa*kappa;
-#endif
-
-#ifdef CALC_ENERGY
-  double vdwpotl = 0.0;
-  double coulpotl = 0.0;
-#endif
-  */
 
   double vdwpotl;
   double coulpotl;
@@ -758,8 +729,6 @@ DirectForce<AT, CT>::DirectForce() {
   set_calc_elec(true);
 
   clear_energy_virial();
-  prev_calc_energy = false;
-  prev_calc_virial = false;
 }
 
 //
@@ -1021,6 +990,8 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 
   const int tilesize = 32;
 
+  if (nlist->ni == 0) return;
+
   dim3 nthread(32, 2, 1);
   dim3 nblock_tot((nlist->ni-1)/nthread.y+1, 1, 1);
 
@@ -1030,12 +1001,8 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
   int vdw_model_loc = calc_vdw ? vdw_model : NONE;
   int elec_model_loc = calc_elec ? elec_model : NONE;
 
-  unsigned int max_nblock = 2147483647;
-
-  prev_calc_energy = calc_energy;
-  prev_calc_virial = calc_virial;
-
-  if (calc_energy || calc_virial) clear_energy_virial();
+  int3 max_nblock3 = get_max_nblock();
+  unsigned int max_nblock = max_nblock3.x;
 
   while (nblock_tot.x != 0) {
 
@@ -1245,6 +1212,8 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 
   }
 
+  cudaCheck(cudaGetLastError());
+
 }
 
 //
@@ -1264,18 +1233,28 @@ void DirectForce<AT, CT>::clear_energy_virial() {
 
 //
 // Read Energies and virials
+// prev_calc_energy = true, if energy was calculated when the force kernel was last called
+// prev_calc_virial = true, if virial was calculated when the force kernel was last called
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::get_energy_virial(double *energy_vdw, double *energy_elec) {
+void DirectForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
+					    double *energy_vdw, double *energy_elec,
+					    double *sforcex, double *sforcey, double *sforcez) {
   if (prev_calc_energy && prev_calc_virial) {
     cudaCheck(cudaMemcpyFromSymbol(&h_energy_virial, d_energy_virial, sizeof(EnergyVirial_t)));
   } else if (prev_calc_energy) {
     cudaCheck(cudaMemcpyFromSymbol(&h_energy_virial, d_energy_virial, 2*sizeof(double)));
   } else if (prev_calc_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(&h_energy_virial, d_energy_virial, 27*3*sizeof(double), 2*sizeof(double)));
+    cudaCheck(cudaMemcpyFromSymbol(&h_energy_virial, d_energy_virial, 27*3*sizeof(double),
+				   2*sizeof(double)));
   }
   *energy_vdw = h_energy_virial.energy_vdw;
   *energy_elec = h_energy_virial.energy_elec;
+  for (int i=0;i < 27;i++) {
+    sforcex[i] = h_energy_virial.sforcex[i];
+    sforcey[i] = h_energy_virial.sforcey[i];
+    sforcez[i] = h_energy_virial.sforcez[i];
+  }
 }
 
 //
