@@ -18,6 +18,8 @@ OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o cuda
 
 OBJS_DIRECT = XYZQ.o Force.o cuda_utils.o mpi_utils.o DirectForce.o NeighborList.o gpu_direct.o
 
+OBJS_CONST = cuda_utils.o gpu_const.o HoloConst.o
+
 CUDAROOT := $(subst /bin/,,$(dir $(shell which nvcc)))
 
 ifeq ($(OS),Linux)
@@ -26,13 +28,16 @@ else
 LFLAGS = -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcuda -lstdc++.6 -lnvToolsExt
 endif
 
-all: gpu_recip gpu_direct
+all: gpu_recip gpu_direct gpu_const
 
 gpu_recip : $(OBJS_RECIP)
 	$(CL) $(LFLAGS) -o gpu_recip $(OBJS_RECIP)
 
 gpu_direct : $(OBJS_DIRECT)
 	$(CL) $(LFLAGS) -o gpu_direct $(OBJS_DIRECT)
+
+gpu_const : $(OBJS_CONST)
+	$(CL) $(LFLAGS) -o gpu_const $(OBJS_CONST)
 
 clean: 
 	rm -f *.o
