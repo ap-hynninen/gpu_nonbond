@@ -6,24 +6,387 @@
 #include "cuda_utils.h"
 #include "HoloConst.h"
 
+__global__ void shake_pair_kernel(const int nmol, const int2* __restrict__ indlist,
+				  const double* __restrict__ constr,
+				  const double* __restrict__ mass,
+				  const int stride,
+				  const double* __restrict__ xyz0,
+				  const double* __restrict__ xyz1, double *xyz2) {
+
+  const int imol = threadIdx.x + blockDim.x*blockIdx.x;
+  const int stride2 = stride*2;
+
+  if (imol < nmol) {
+    int2 ind = indlist[imol];
+
+    // Load coordinates
+    double x0i = xyz0[ind.x];
+    double y0i = xyz0[ind.x+stride];
+    double z0i = xyz0[ind.x+stride2];
+    double x0j = xyz0[ind.y];
+    double y0j = xyz0[ind.y+stride];
+    double z0j = xyz0[ind.y+stride2];
+
+    double x1i = xyz1[ind.x];
+    double y1i = xyz1[ind.x+stride];
+    double z1i = xyz1[ind.x+stride2];
+    double x1j = xyz1[ind.y];
+    double y1j = xyz1[ind.y+stride];
+    double z1j = xyz1[ind.y+stride2];
+
+    double xpij = x1i - x1j;
+    double ypij = y1i - y1j;
+    double zpij = z1i - z1j;
+    double rijsq = xpij*xpij + ypij*ypij + zpij*zpij;
+
+    double diff = constr[imol] - rijsq;
+
+    double xrij = x0i - x0j;
+    double yrij = y0i - y0j;
+    double zrij = z0i - z0j;
+
+    double rrijsq = xrij*xrij + yrij*yrij + zrij*zrij;
+    double rijrijp = xrij*xpij  + yrij*ypij  + zrij*zpij;
+    double lambda = 2.0*(-rijrijp + sqrt(rijrijp*rijrijp+rrijsq*diff))/(rrijsq);
+
+    double hmassi_val = mass[imol*2];
+    double hmassj_val = mass[imol*2+1];
+
+    x1i += hmassi_val*lambda*xrij;
+    y1i += hmassi_val*lambda*yrij;
+    z1i += hmassi_val*lambda*zrij;
+    x1j -= hmassj_val*lambda*xrij;
+    y1j -= hmassj_val*lambda*yrij;
+    z1j -= hmassj_val*lambda*zrij;
+
+    // Store results
+    xyz2[ind.x]         = x1i;
+    xyz2[ind.x+stride]  = y1i;
+    xyz2[ind.x+stride2] = z1i;
+    xyz2[ind.y]         = x1j;
+    xyz2[ind.y+stride]  = y1j;
+    xyz2[ind.y+stride2] = z1j;
+  }
+}
+
+__global__ void shake_trip_kernel(const int nmol,
+				  const int3* __restrict__ indlist,
+				  const double* __restrict__ constr,
+				  const double* __restrict__ mass,
+				  const double shake_tol,
+				  const int max_niter,
+				  const int stride,
+				  const double* __restrict__ xyz0,
+				  const double* __restrict__ xyz1, double *xyz2) {
+
+  const int imol = threadIdx.x + blockDim.x*blockIdx.x;
+  const int stride2 = stride*2;
+
+  if (imol < nmol) {
+    int3 ind = indlist[imol];
+
+    // Load coordinates
+    double x0i = xyz0[ind.x];
+    double y0i = xyz0[ind.x+stride];
+    double z0i = xyz0[ind.x+stride2];
+    double x0j = xyz0[ind.y];
+    double y0j = xyz0[ind.y+stride];
+    double z0j = xyz0[ind.y+stride2];
+    double x0k = xyz0[ind.z];
+    double y0k = xyz0[ind.z+stride];
+    double z0k = xyz0[ind.z+stride2];
+
+    double x1i = xyz1[ind.x];
+    double y1i = xyz1[ind.x+stride];
+    double z1i = xyz1[ind.x+stride2];
+    double x1j = xyz1[ind.y];
+    double y1j = xyz1[ind.y+stride];
+    double z1j = xyz1[ind.y+stride2];
+    double x1k = xyz1[ind.z];
+    double y1k = xyz1[ind.z+stride];
+    double z1k = xyz1[ind.z+stride2];
+
+    double xrij = x0i - x0j;
+    double yrij = y0i - y0j;
+    double zrij = z0i - z0j;
+    double xrik = x0i - x0k;
+    double yrik = y0i - y0k;
+    double zrik = z0i - z0k;
+
+    double rrijsq = xrij*xrij + yrij*yrij + zrij*zrij;
+    double rriksq = xrik*xrik + yrik*yrik + zrik*zrik;
+    double rijrik = xrij*xrik + yrij*yrik + zrij*zrik;
+
+    double mmi = mass[imol*5];
+    double mmj = mass[imol*5+1];
+    double mmk = mass[imol*5+2];
+    double mij = mass[imol*5+3];
+    double mik = mass[imol*5+4];
+
+    double acorr1 = mij*mij*rrijsq;
+    double acorr2 = mij*mmi*2.0*rijrik;
+    double acorr3 = mmi*mmi*rriksq;
+    double acorr4 = mmi*mmi*rrijsq;
+    double acorr5 = mik*mmi*2.0*rijrik;
+    double acorr6 = mik*mik*rriksq;
+
+    double xpij = x1i - x1j;
+    double ypij = y1i - y1j;
+    double zpij = z1i - z1j;
+    double xpik = x1i - x1k;
+    double ypik = y1i - y1k;
+    double zpik = z1i - z1k;
+
+    double rijsq = xpij*xpij + ypij*ypij + zpij*zpij;
+    double riksq = xpik*xpik + ypik*ypik + zpik*zpik;
+    double dij = constr[imol*2]   - rijsq;
+    double dik = constr[imol*2+1] - riksq;
+    double rijrijp = xrij*xpij + yrij*ypij + zrij*zpij;
+    double rijrikp = xrij*xpik + yrij*ypik + zrij*zpik;
+    double rikrijp = xpij*xrik + ypij*yrik + zpij*zrik;
+    double rikrikp = xrik*xpik + yrik*ypik + zrik*zpik;
+    double dinv=0.5/(rijrijp*rikrikp*mij*mik - rijrikp*rikrijp*mmi*mmi);
+    
+    double a12 = dinv*( rikrikp*mik*(dij) - rikrijp*mmi*(dik));
+    double a13 = dinv*(-mmi*rijrikp*(dij) + rijrijp*mij*(dik));
+
+    double a120 = 0.0;
+    double a130 = 0.0;
+
+    int niter = 0;
+    while ((fabs(a120-a12) > shake_tol || fabs(a130-a13) > shake_tol) && (niter < max_niter)) {
+      a120 = a12;
+      a130 = a13;
+      double a12corr = acorr1*a12*a12 + acorr2*a12*a13 + acorr3*a13*a13;
+      double a13corr = acorr4*a12*a12 + acorr5*a12*a13 + acorr6*a13*a13;
+      a12 = dinv*( rikrikp*mik*(dij-a12corr) - rikrijp*mmi*(dik-a13corr));
+      a13 = dinv*(-mmi*rijrikp*(dij-a12corr) + rijrijp*mij*(dik-a13corr));
+      niter++;
+    }
+
+    x1i += mmi*(xrij*a12+xrik*a13);
+    x1j -= mmj*(xrij*a12);
+    x1k -= mmk*(xrik*a13);
+    y1i += mmi*(yrij*a12+yrik*a13);
+    y1j -= mmj*(yrij*a12);
+    y1k -= mmk*(yrik*a13);
+    z1i += mmi*(zrij*a12+zrik*a13);
+    z1j -= mmj*(zrij*a12);
+    z1k -= mmk*(zrik*a13);
+
+    xyz2[ind.x]         = x1i;
+    xyz2[ind.x+stride]  = y1i;
+    xyz2[ind.x+stride2] = z1i;
+    xyz2[ind.y]         = x1j;
+    xyz2[ind.y+stride]  = y1j;
+    xyz2[ind.y+stride2] = z1j;
+    xyz2[ind.z]         = x1k;
+    xyz2[ind.z+stride]  = y1k;
+    xyz2[ind.z+stride2] = z1k;
+
+  }
+}
+
+__global__ void shake_quad_kernel(const int nmol, 
+				  const int4* __restrict__ indlist,
+				  const double* __restrict__ constr,
+				  const double* __restrict__ mass,
+				  const double shake_tol,
+				  const int max_niter,
+				  const int stride,
+				  const double* __restrict__ xyz0,
+				  const double* __restrict__ xyz1, double *xyz2) {
+
+  const int imol = threadIdx.x + blockDim.x*blockIdx.x;
+  const int stride2 = stride*2;
+
+  if (imol < nmol) {
+    int4 ind = indlist[imol];
+
+    // Load coordinates
+    double x0i = xyz0[ind.x];
+    double y0i = xyz0[ind.x+stride];
+    double z0i = xyz0[ind.x+stride2];
+    double x0j = xyz0[ind.y];
+    double y0j = xyz0[ind.y+stride];
+    double z0j = xyz0[ind.y+stride2];
+    double x0k = xyz0[ind.z];
+    double y0k = xyz0[ind.z+stride];
+    double z0k = xyz0[ind.z+stride2];
+    double x0l = xyz0[ind.w];
+    double y0l = xyz0[ind.w+stride];
+    double z0l = xyz0[ind.w+stride2];
+
+    double x1i = xyz1[ind.x];
+    double y1i = xyz1[ind.x+stride];
+    double z1i = xyz1[ind.x+stride2];
+    double x1j = xyz1[ind.y];
+    double y1j = xyz1[ind.y+stride];
+    double z1j = xyz1[ind.y+stride2];
+    double x1k = xyz1[ind.z];
+    double y1k = xyz1[ind.z+stride];
+    double z1k = xyz1[ind.z+stride2];
+    double x1l = xyz1[ind.w];
+    double y1l = xyz1[ind.w+stride];
+    double z1l = xyz1[ind.w+stride2];
+
+    double xrij = x0i - x0j;
+    double yrij = y0i - y0j;
+    double zrij = z0i - z0j;
+    double xrik = x0i - x0k;
+    double yrik = y0i - y0k;
+    double zrik = z0i - z0k;       
+    double xril = x0i - x0l;
+    double yril = y0i - y0l;
+    double zril = z0i - z0l;
+
+    //i2 = ammi_ind(iconst)
+
+    double rrijsq = xrij*xrij + yrij*yrij + zrij*zrij;
+    double rriksq = xrik*xrik + yrik*yrik + zrik*zrik;
+    double rrilsq = xril*xril + yril*yril + zril*zril;
+    double rijrik = xrij*xrik + yrij*yrik + zrij*zrik;
+    double rijril = xrij*xril + yrij*yril + zrij*zril;
+    double rikril = xrik*xril + yrik*yril + zrik*zril;
+
+    double mmi = mass[imol*7];
+    double mmj = mass[imol*7+1];
+    double mmk = mass[imol*7+2];
+    double mml = mass[imol*7+3];
+    double mij = mass[imol*7+4];
+    double mik = mass[imol*7+5];
+    double mil = mass[imol*7+6];
+
+    double acorr1  =     mij*mij*rrijsq;
+    double acorr2  = 2.0*mij*mmi*rijrik;
+    double acorr3  =     mmi*mmi*rriksq;
+    double acorr4  =     mmi*mmi*rrijsq;
+    double acorr5  = 2.0*mik*mmi*rijrik;
+    double acorr6  =     mik*mik*rriksq;
+    double acorr7  = 2.0*mij*mmi*rijril;
+    double acorr8  = 2.0*mmi*mmi*rikril;
+    double acorr9  =     mmi*mmi*rrilsq;
+    double acorr10 = 2.0*mmi*mmi*rijril;
+    double acorr11 = 2.0*mmi*mik*rikril;
+    double acorr12 = 2.0*mmi*mmi*rijrik;
+    double acorr13 = 2.0*mmi*mil*rijril;
+    double acorr14 = 2.0*mmi*mil*rikril;
+    double acorr15 =     mil*mil*rrilsq;
+
+    double xpij = x1i - x1j;
+    double ypij = y1i - y1j;
+    double zpij = z1i - z1j;
+    double xpik = x1i - x1k;
+    double ypik = y1i - y1k;
+    double zpik = z1i - z1k;
+    double xpil = x1i - x1l;
+    double ypil = y1i - y1l;
+    double zpil = z1i - z1l;
+
+    double rijsq = xpij*xpij + ypij*ypij + zpij*zpij;
+    double riksq = xpik*xpik + ypik*ypik + zpik*zpik;
+    double rilsq = xpil*xpil + ypil*ypil + zpil*zpil;
+    double dij = constr[imol*3]   - rijsq;
+    double dik = constr[imol*3+1] - riksq;
+    double dil = constr[imol*3+2] - rilsq;
+    double rijrijp = xrij*xpij + yrij*ypij + zrij*zpij;
+    double rijrikp = xrij*xpik + yrij*ypik + zrij*zpik;
+    double rijrilp = xrij*xpil + yrij*ypil + zrij*zpil;
+    double rikrijp = xrik*xpij + yrik*ypij + zrik*zpij;
+    double rikrikp = xrik*xpik + yrik*ypik + zrik*zpik;
+    double rikrilp = xrik*xpil + yrik*ypil + zrik*zpil;
+    double rilrijp = xril*xpij + yril*ypij + zril*zpij;
+    double rilrikp = xril*xpik + yril*ypik + zril*zpik;
+    double rilrilp = xril*xpil + yril*ypil + zril*zpil;
+    double d1 = mik*mil*rikrikp*rilrilp - mmi*mmi*rikrilp*rilrikp;
+    double d2 = mmi*mil*rikrijp*rilrilp - mmi*mmi*rikrilp*rilrijp;
+    double d3 = mmi*mmi*rikrijp*rilrikp - mik*mmi*rikrikp*rilrijp;
+    double d4 = mmi*mil*rijrikp*rilrilp - mmi*mmi*rijrilp*rilrikp;
+    double d5 = mij*mil*rijrijp*rilrilp - mmi*mmi*rijrilp*rilrijp;
+    double d6 = mij*mmi*rijrijp*rilrikp - mmi*mmi*rijrikp*rilrijp;
+    double d7 = mmi*mmi*rijrikp*rikrilp - mmi*mik*rijrilp*rikrikp;
+    double d8 = mij*mmi*rijrijp*rikrilp - mmi*mmi*rijrilp*rikrijp;
+    double d9 = mij*mik*rijrijp*rikrikp - mmi*mmi*rijrikp*rikrijp;
+
+    double dinv = 0.5/(rijrijp*mij*d1 - mmi*rijrikp*d2 + mmi*rijrilp*d3);
+    
+    double a12 = dinv*( d1*dij - d2*dik + d3*dil);
+    double a13 = dinv*(-d4*dij + d5*dik - d6*dil);
+    double a14 = dinv*( d7*dij - d8*dik + d9*dil);
+
+    double a120 = 0.0;
+    double a130 = 0.0;
+    double a140 = 0.0;
+    
+    int niter = 0;
+
+    while ((fabs(a120-a12) > shake_tol || fabs(a130-a13) > shake_tol || fabs(a140-a14) > shake_tol) &&
+	   (niter  <  max_niter)) {
+      a120 = a12;
+      a130 = a13;
+      a140 = a14;
+
+      double a12corr = acorr1*a12*a12 + acorr2*a12*a13 + acorr3*a13*a13
+	+ acorr7*a12*a14 + acorr8*a13*a14 + acorr9*a14*a14;
+      double a13corr = acorr4*a12*a12 + acorr5*a12*a13 + acorr6*a13*a13
+	+ acorr10*a12*a14 + acorr11*a13*a14 + acorr9*a14*a14;
+      double a14corr = acorr4*a12*a12 + acorr12*a12*a13 + acorr3*a13*a13
+	+ acorr13*a12*a14 + acorr14*a13*a14 + acorr15*a14*a14;
+
+      a12 = dinv*( d1*(dij-a12corr) - d2*(dik-a13corr) + d3*(dil-a14corr));
+      a13 = dinv*( -d4*(dij-a12corr) + d5*(dik-a13corr) - d6*(dil-a14corr));
+      a14 = dinv*( d7*(dij-a12corr) - d8*(dik-a13corr) + d9*(dil-a14corr));
+      niter++;
+    }
+
+    x1i  += mmi*(xrij*a12+xrik*a13+xril*a14);
+    y1i  += mmi*(yrij*a12+yrik*a13+yril*a14);
+    z1i  += mmi*(zrij*a12+zrik*a13+zril*a14);
+    x1j  -= mmj*(xrij*a12);
+    y1j  -= mmj*(yrij*a12);
+    z1j  -= mmj*(zrij*a12);
+    x1k  -= mmk*(xrik*a13);
+    y1k  -= mmk*(yrik*a13);
+    z1k  -= mmk*(zrik*a13);
+    x1l  -= mml*(xril*a14);
+    y1l  -= mml*(yril*a14);
+    z1l  -= mml*(zril*a14);
+
+    xyz2[ind.x]         = x1i;
+    xyz2[ind.x+stride]  = y1i;
+    xyz2[ind.x+stride2] = z1i;
+    xyz2[ind.y]         = x1j;
+    xyz2[ind.y+stride]  = y1j;
+    xyz2[ind.y+stride2] = z1j;
+    xyz2[ind.z]         = x1k;
+    xyz2[ind.z+stride]  = y1k;
+    xyz2[ind.z+stride2] = z1k;
+    xyz2[ind.w]         = x1l;
+    xyz2[ind.w+stride]  = y1l;
+    xyz2[ind.w+stride2] = z1l;
+
+  }
+}
+
 //
 // Runs the SETTLE algorithm on solvent molecules
 // xyz0 = coordinates at time t
 // xyz1 = coordinates at time t + delta t
 //
-__global__ void settle_solvent_kernel(const int nmol, const int3* __restrict__ solvent_ind,
+__global__ void settle_solvent_kernel(const int nmol, const int3* __restrict__ indlist,
 				      const double mO_div_mH2O, const double mH_div_mH2O,
 				      const double ra, const double rc, const double rb,
 				      const double ra_inv, const double rc2,
 				      const int stride,
-				      const double* __restrict__ xyz0, double *xyz1) {
+				      const double* __restrict__ xyz0,
+				      const double* __restrict__ xyz1, double *xyz2) {
 
   // Index of the solvent molecule
   const int imol = threadIdx.x + blockDim.x*blockIdx.x;
   const int stride2 = stride*2;
 
   if (imol < nmol) {
-    int3 ind = solvent_ind[imol];
+    int3 ind = indlist[imol];
 
     // Load coordinates
     double x0i = xyz0[ind.x];
@@ -148,15 +511,16 @@ __global__ void settle_solvent_kernel(const int nmol, const int3* __restrict__ s
     double yc3p = -xb2p * sintheta + yc2p * costheta;
     double zc3p =  zc1p;
 
-    xyz1[ind.x]         = xcm + trans11 * xa3p + trans12 * ya3p + trans13 * za3p;
-    xyz1[ind.x+stride]  = ycm + trans21 * xa3p + trans22 * ya3p + trans23 * za3p;
-    xyz1[ind.x+stride2] = zcm + trans31 * xa3p + trans32 * ya3p + trans33 * za3p;
-    xyz1[ind.y]         = xcm + trans11 * xb3p + trans12 * yb3p + trans13 * zb3p;
-    xyz1[ind.y+stride]  = ycm + trans21 * xb3p + trans22 * yb3p + trans23 * zb3p;
-    xyz1[ind.y+stride2] = zcm + trans31 * xb3p + trans32 * yb3p + trans33 * zb3p;
-    xyz1[ind.z]         = xcm + trans11 * xc3p + trans12 * yc3p + trans13 * zc3p;
-    xyz1[ind.z+stride]  = ycm + trans21 * xc3p + trans22 * yc3p + trans23 * zc3p;
-    xyz1[ind.z+stride2] = zcm + trans31 * xc3p + trans32 * yc3p + trans33 * zc3p;
+    xyz2[ind.x]         = xcm + trans11 * xa3p + trans12 * ya3p + trans13 * za3p;
+    xyz2[ind.x+stride]  = ycm + trans21 * xa3p + trans22 * ya3p + trans23 * za3p;
+    xyz2[ind.x+stride2] = zcm + trans31 * xa3p + trans32 * ya3p + trans33 * za3p;    
+    xyz2[ind.y]         = xcm + trans11 * xb3p + trans12 * yb3p + trans13 * zb3p;
+    xyz2[ind.y+stride]  = ycm + trans21 * xb3p + trans22 * yb3p + trans23 * zb3p;
+    xyz2[ind.y+stride2] = zcm + trans31 * xb3p + trans32 * yb3p + trans33 * zb3p;
+    xyz2[ind.z]         = xcm + trans11 * xc3p + trans12 * yc3p + trans13 * zc3p;
+    xyz2[ind.z+stride]  = ycm + trans21 * xc3p + trans22 * yc3p + trans23 * zc3p;
+    xyz2[ind.z+stride2] = zcm + trans31 * xc3p + trans32 * yc3p + trans33 * zc3p;
+
   }
 
 }
@@ -165,9 +529,37 @@ __global__ void settle_solvent_kernel(const int nmol, const int3* __restrict__ s
 // Class creator
 //
 HoloConst::HoloConst() {
+
+  max_niter = 1000;
+  shake_tol = 1.0e-8;
+
   nsolvent = 0;
   solvent_ind_len = 0;
   solvent_ind = NULL;
+
+  npair = 0;
+  pair_ind_len = 0;
+  pair_ind = NULL;
+  pair_constr_len = 0;
+  pair_constr = NULL;
+  pair_mass_len = 0;
+  pair_mass = NULL;
+
+  ntrip = 0;
+  trip_ind_len = 0;
+  trip_ind = NULL;
+  trip_constr_len = 0;
+  trip_constr = NULL;
+  trip_mass_len = 0;
+  trip_mass = NULL;
+
+  nquad = 0;
+  quad_ind_len = 0;
+  quad_ind = NULL;
+  quad_constr_len = 0;
+  quad_constr = NULL;
+  quad_mass_len = 0;
+  quad_mass = NULL;
 }
 
 //
@@ -175,6 +567,18 @@ HoloConst::HoloConst() {
 //
 HoloConst::~HoloConst() {
   if (solvent_ind != NULL) deallocate<int3>(&solvent_ind);
+
+  if (pair_ind != NULL) deallocate<int2>(&pair_ind);
+  if (pair_constr != NULL) deallocate<double>(&pair_constr);
+  if (pair_mass != NULL) deallocate<double>(&pair_mass);
+
+  if (trip_ind != NULL) deallocate<int3>(&trip_ind);
+  if (trip_constr != NULL) deallocate<double>(&trip_constr);
+  if (trip_mass != NULL) deallocate<double>(&trip_mass);
+
+  if (quad_ind != NULL) deallocate<int4>(&quad_ind);
+  if (quad_constr != NULL) deallocate<double>(&quad_constr);
+  if (quad_mass != NULL) deallocate<double>(&quad_mass);
 }
 
 //
@@ -192,6 +596,7 @@ void HoloConst::setup(double mO, double mH, double rOHsq, double rHHsq) {
   rb = ra*mO/(2.0*mH);
   rc = sqrt(rHHsq)/2.0;
   rc2 = 2.0*rc;
+
 }
 
 //
@@ -207,18 +612,109 @@ void HoloConst::set_solvent_ind(int nsolvent, int3 *h_solvent_ind) {
 }
 
 //
+// Setups pair_ind -table
+//
+void HoloConst::set_pair_ind(int npair, int2 *h_pair_ind,
+			     double *h_pair_constr, double *h_pair_mass) {
+
+  this->npair = npair;
+
+  reallocate<int2>(&pair_ind, &pair_ind_len, npair, 1.5f);
+  copy_HtoD<int2>(h_pair_ind, pair_ind, npair);
+
+  reallocate<double>(&pair_constr, &pair_constr_len, npair, 1.5f);
+  copy_HtoD<double>(h_pair_constr, pair_constr, npair);
+
+  reallocate<double>(&pair_mass, &pair_mass_len, npair*2, 1.5f);
+  copy_HtoD<double>(h_pair_mass, pair_mass, npair*2);
+
+}
+
+//
+// Setups trip_ind -table
+//
+void HoloConst::set_trip_ind(int ntrip, int3 *h_trip_ind,
+				double *h_trip_constr, double *h_trip_mass) {
+
+  this->ntrip = ntrip;
+
+  reallocate<int3>(&trip_ind, &trip_ind_len, ntrip, 1.5f);
+  copy_HtoD<int3>(h_trip_ind, trip_ind, ntrip);
+
+  reallocate<double>(&trip_constr, &trip_constr_len, ntrip*2, 1.5f);
+  copy_HtoD<double>(h_trip_constr, trip_constr, ntrip*2);
+
+  reallocate<double>(&trip_mass, &trip_mass_len, ntrip*5, 1.5f);
+  copy_HtoD<double>(h_trip_mass, trip_mass, ntrip*5);
+
+}
+
+//
+// Setups quad_ind -table
+//
+void HoloConst::set_quad_ind(int nquad, int4 *h_quad_ind,
+			     double *h_quad_constr, double *h_quad_mass) {
+
+  this->nquad = nquad;
+
+  reallocate<int4>(&quad_ind, &quad_ind_len, nquad, 1.5f);
+  copy_HtoD<int4>(h_quad_ind, quad_ind, nquad);
+
+  reallocate<double>(&quad_constr, &quad_constr_len, nquad*3, 1.5f);
+  copy_HtoD<double>(h_quad_constr, quad_constr, nquad*3);
+
+  reallocate<double>(&quad_mass, &quad_mass_len, nquad*7, 1.5f);
+  copy_HtoD<double>(h_quad_mass, quad_mass, nquad*7);
+
+}
+
+//
 // Apply constraints
 //
 void HoloConst::apply(double *xyz0, double *xyz1, int stride) {
 
-  if (nsolvent == 0) return;
+  int nthread, nblock;
 
-  int nthread = 512;
-  int nblock = (nsolvent-1)/nthread+1;
+  if (nsolvent > 0) {
+    nthread = 128;
+    nblock = (nsolvent-1)/nthread+1;
 
-  settle_solvent_kernel<<< nblock, nthread >>>(nsolvent, solvent_ind, mO_div_mH2O, mH_div_mH2O,
-					       ra, rc, rb, ra_inv, rc2, stride, xyz0, xyz1);
+    settle_solvent_kernel<<< nblock, nthread >>>(nsolvent, solvent_ind, mO_div_mH2O, mH_div_mH2O,
+						 ra, rc, rb, ra_inv, rc2, stride, xyz0, xyz1, xyz1);
+    cudaCheck(cudaGetLastError());  
+  }
 
-  cudaCheck(cudaGetLastError());  
+  if (npair > 0) {
+    nthread = 128;
+    nblock = (npair-1)/nthread+1;
+
+    shake_pair_kernel<<< nblock, nthread >>>(npair, pair_ind, pair_constr, pair_mass,
+					     stride, xyz0, xyz1, xyz1);
+
+    cudaCheck(cudaGetLastError());  
+  }
+
+  if (ntrip > 0) {
+    nthread = 128;
+    nblock = (ntrip-1)/nthread+1;
+
+    shake_trip_kernel<<< nblock, nthread >>>(ntrip, trip_ind, trip_constr, trip_mass,
+					     shake_tol, max_niter,
+					     stride, xyz0, xyz1, xyz1);
+
+    cudaCheck(cudaGetLastError());  
+  }
+
+  if (nquad > 0) {
+    nthread = 128;
+    nblock = (nquad-1)/nthread+1;
+
+    shake_quad_kernel<<< nblock, nthread >>>(nquad, quad_ind, quad_constr, quad_mass,
+					     shake_tol, max_niter,
+					     stride, xyz0, xyz1, xyz1);
+
+    cudaCheck(cudaGetLastError());  
+  }
+
 
 }
