@@ -736,6 +736,10 @@ DirectForce<AT, CT>::DirectForce() {
 //
 template <typename AT, typename CT>
 DirectForce<AT, CT>::~DirectForce() {
+  if (vdwparam_texref_bound) {
+    cudaCheck(cudaUnbindTexture(vdwparam_texref));
+    vdwparam_texref_bound = false;
+  }
   if (vdwparam != NULL) deallocate<CT>(&vdwparam);
   if (vdwtype != NULL) deallocate<int>(&vdwtype);
   if (ewald_force != NULL) deallocate<CT>(&ewald_force);
@@ -838,7 +842,7 @@ void DirectForce<AT, CT>::set_vdwparam(int nvdwparam, CT *h_vdwparam) {
     // Unbind texture
     if (vdwparam_texref_bound) {
       cudaCheck(cudaUnbindTexture(vdwparam_texref));
-      vdwparam_texref_bound = 0;
+      vdwparam_texref_bound = false;
     }
     // Bind texture
     vdwparam_texref.normalized = 0;

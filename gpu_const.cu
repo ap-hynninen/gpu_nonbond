@@ -220,6 +220,15 @@ void test() {
   // Apply holonomic constraints
   holoconst.apply(xyz0, xyz1, stride);
 
+  copy_HtoD<double>(h_xyz1, xyz1, stride*3);
+
+  holoconst.apply2(xyz0, xyz1, stride);
+
+  copy_HtoD<double>(h_xyz1, xyz1, stride*3);
+
+  holoconst.apply2(xyz0, xyz1, stride);
+
+
   //--------------------------------------------------------------------------
   // Check result
   //--------------------------------------------------------------------------
