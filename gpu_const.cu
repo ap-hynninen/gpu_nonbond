@@ -2,6 +2,8 @@
 #include <fstream>
 #include <cuda.h>
 #include "cuda_utils.h"
+#include "gpu_utils.h"
+#include "const_reduce_lists.h"
 #include "HoloConst.h"
 
 void test();
@@ -205,6 +207,42 @@ void test() {
   load_constr_mass(3, 7, "test_data/quad_constr_mass.txt", nquad, h_quad_constr, h_quad_mass);
 
   //--------------------------------------------------------------------------
+  // Reduce constr and mass lists to indexed lists
+  //--------------------------------------------------------------------------
+
+  /*
+  int npair_constr;
+  int npair_mass;
+  double *h_pair_constr_red = NULL;
+  double *h_pair_mass_red = NULL;
+  int *h_pair_constr_indlist = NULL;
+  int *h_pair_mass_indlist = NULL;
+
+  int ntrip_constr;
+  int ntrip_mass;
+  double *h_trip_constr_red = NULL;
+  double *h_trip_mass_red = NULL;
+  int *h_trip_constr_indlist = NULL;
+  int *h_trip_mass_indlist = NULL;
+
+  int nquad_constr;
+  int nquad_mass;
+  double *h_quad_constr_red = NULL;
+  double *h_quad_mass_red = NULL;
+  int *h_quad_constr_indlist = NULL;
+  int *h_quad_mass_indlist = NULL;
+
+  reduce_lists(npair, h_pair_constr, h_pair_mass, ntrip, h_trip_constr, h_trip_mass,
+	       nquad, h_quad_constr, h_quad_mass,
+	       &npair_constr, &h_pair_constr_red, &h_pair_constr_indlist,
+	       &npair_mass, &h_pair_mass_red, &h_pair_mass_indlist,
+	       &ntrip_constr, &h_trip_constr_red, &h_trip_constr_indlist,
+	       &ntrip_mass, &h_trip_mass_red, &h_trip_mass_indlist,
+	       &nquad_constr, &h_quad_constr_red, &h_quad_constr_indlist,
+	       &nquad_mass, &h_quad_mass_red, &h_quad_mass_indlist);
+  */
+
+  //--------------------------------------------------------------------------
   // Setup & Apply holonomic constraints
   //--------------------------------------------------------------------------
 
@@ -216,18 +254,23 @@ void test() {
   holoconst.set_pair_ind(npair, (int2 *)h_pair_ind, h_pair_constr, h_pair_mass);
   holoconst.set_trip_ind(ntrip, (int3 *)h_trip_ind, h_trip_constr, h_trip_mass);
   holoconst.set_quad_ind(nquad, (int4 *)h_quad_ind, h_quad_constr, h_quad_mass);
-  
+
+  /*
+  holoconst.set_pair_constr(npair_constr, h_pair_constr_red, h_pair_constr_indlist);
+  holoconst.set_pair_mass(npair_mass, h_pair_mass_red, h_pair_mass_indlist);
+  holoconst.set_trip_constr(ntrip_constr, h_trip_constr_red, h_trip_constr_indlist);
+  holoconst.set_trip_mass(ntrip_mass, h_trip_mass_red, h_trip_mass_indlist);
+  holoconst.set_quad_constr(nquad_constr, h_quad_constr_red, h_quad_constr_indlist);
+  holoconst.set_quad_mass(nquad_mass, h_quad_mass_red, h_quad_mass_indlist);
+  */
+
   // Apply holonomic constraints
   holoconst.apply(xyz0, xyz1, stride);
+  cudaCheck(cudaDeviceSynchronize());
 
   copy_HtoD<double>(h_xyz1, xyz1, stride*3);
-
-  holoconst.apply2(xyz0, xyz1, stride);
-
-  copy_HtoD<double>(h_xyz1, xyz1, stride*3);
-
-  holoconst.apply2(xyz0, xyz1, stride);
-
+  holoconst.apply(xyz0, xyz1, stride);
+  cudaCheck(cudaDeviceSynchronize());
 
   //--------------------------------------------------------------------------
   // Check result
@@ -277,6 +320,23 @@ void test() {
   free(h_trip_mass);
   free(h_quad_constr);
   free(h_quad_mass);
+
+  /*
+  free(h_pair_constr_red);
+  free(h_pair_mass_red);
+  free(h_pair_constr_indlist);
+  free(h_pair_mass_indlist);
+
+  free(h_trip_constr_red);
+  free(h_trip_mass_red);
+  free(h_trip_constr_indlist);
+  free(h_trip_mass_indlist);
+
+  free(h_quad_constr_red);
+  free(h_quad_mass_red);
+  free(h_quad_constr_indlist);
+  free(h_quad_mass_indlist);
+  */
 
   deallocate<double>(&xyz0);
   deallocate<double>(&xyz1);

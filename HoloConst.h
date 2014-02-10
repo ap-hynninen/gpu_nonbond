@@ -5,11 +5,6 @@ class HoloConst {
 
 private:
 
-  cudaStream_t solvent_stream;
-  cudaStream_t pair_stream;
-  cudaStream_t trip_stream;
-  cudaStream_t quad_stream;
-
   bool use_textures;
   void setup_textures(double *xyz0, double *xyz1, int stride);
 
@@ -83,7 +78,6 @@ public:
 		    double *h_quad_constr, double *h_quad_mass);
 
   void apply(double *xyz0, double *xyz1, int stride);
-  void apply2(double *xyz0, double *xyz1, int stride);
 
 };
 
