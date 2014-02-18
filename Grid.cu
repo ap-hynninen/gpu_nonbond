@@ -1435,9 +1435,9 @@ void Grid<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int
 //
 template <typename AT, typename CT, typename CT2>
 Grid<AT, CT, CT2>::Grid(int nfftx, int nffty, int nfftz, int order,
-			FFTtype fft_type=COLUMN,
-			int nnode=1,
-			int mynode=0) : nfftx(nfftx), nffty(nffty), nfftz(nfftz), fft_type(fft_type) {
+			FFTtype fft_type, int nnode, int mynode,
+			cudaStream_t stream) : nfftx(nfftx), nffty(nffty), nfftz(nfftz),
+					       fft_type(fft_type), stream(stream) {
 
     assert(nnode >= 1);
     assert(mynode >= 0 && mynode < nnode);
@@ -1515,6 +1515,7 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_R2C, batch));
     cufftCheck(cufftSetCompatibilityMode(x_r2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+    cufftCheck(cufftSetStream(x_r2c_plan, stream));
     
     batch = nfftz_local*(nfftx_local/2+1);
     cufftCheck(cufftPlanMany(&y_c2c_plan, 1, &nffty_local,
@@ -1522,20 +1523,23 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_C2C, batch));
     cufftCheck(cufftSetCompatibilityMode(y_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
-    
+    cufftCheck(cufftSetStream(y_c2c_plan, stream));
+
     batch = (nfftx_local/2+1)*nffty_local;
     cufftCheck(cufftPlanMany(&z_c2c_plan, 1, &nfftz_local,
 			     NULL, 0, 0,
 			     NULL, 0, 0, 
 			     CUFFT_C2C, batch));
     cufftCheck(cufftSetCompatibilityMode(z_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
-    
+    cufftCheck(cufftSetStream(z_c2c_plan, stream));    
+
     batch = nffty_local*nfftz_local;
     cufftCheck(cufftPlanMany(&x_c2r_plan, 1, &nfftx_local,
 			     NULL, 0, 0,
 			     NULL, 0, 0, 
 			     CUFFT_C2R, batch));
     cufftCheck(cufftSetCompatibilityMode(x_c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
+    cufftCheck(cufftSetStream(x_c2r_plan, stream));
   } else if (fft_type == SLAB) {
     int batch;
     int nfftx_local = x1 - x0 + 1;
@@ -1550,6 +1554,7 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_R2C, batch));
     cufftCheck(cufftSetCompatibilityMode(xy_r2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+    cufftCheck(cufftSetStream(xy_r2c_plan, stream));
 
     batch = (nfftx_local/2+1)*nffty_local;
     cufftCheck(cufftPlanMany(&z_c2c_plan, 1, &nfftz_local,
@@ -1557,6 +1562,7 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_C2C, batch));
     cufftCheck(cufftSetCompatibilityMode(z_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
+    cufftCheck(cufftSetStream(z_c2c_plan, stream));
 
     batch = nfftz_local;
     cufftCheck(cufftPlanMany(&xy_c2r_plan, 2, n,
@@ -1564,6 +1570,7 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_C2R, batch));
     cufftCheck(cufftSetCompatibilityMode(xy_c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
+    cufftCheck(cufftSetStream(xy_c2r_plan, stream));
     
   } else if (fft_type == BOX) {
     if (multi_gpu) {
@@ -1588,6 +1595,8 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
       cufftCheck(cufftPlan3d(&c2r_plan, nfftz, nffty, nfftx, CUFFT_C2R));
       cufftCheck(cufftSetCompatibilityMode(c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
     }
+    cufftCheck(cufftSetStream(r2c_plan, stream));
+    cufftCheck(cufftSetStream(c2r_plan, stream));
   }
 
 }
@@ -1662,6 +1671,9 @@ void Grid<AT, CT, CT2>::print_info() {
   std::cout << "data_size = " << data_size << std::endl;
 }
 
+//
+// Spreads charge on grid
+//
 template <typename AT, typename CT, typename CT2>
 void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspline) {
 
@@ -1680,14 +1692,15 @@ void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspli
 
   switch(order) {
   case 4:
-    spread_charge_4<AT> <<< nblock, nthread, shmem_size >>>(ncoord, 
-							    bspline.gix, bspline.giy, bspline.giz,
-							    bspline.charge,
-							    (float4 *)bspline.thetax,
-							    (float4 *)bspline.thetay,
-							    (float4 *)bspline.thetaz,
-							    nfftx, nffty, nfftz,
-							    (AT *)accum_grid->data);
+    spread_charge_4<AT> <<< nblock, nthread, shmem_size, stream >>>
+      (ncoord, 
+       bspline.gix, bspline.giy, bspline.giz,
+       bspline.charge,
+       (float4 *)bspline.thetax,
+       (float4 *)bspline.thetay,
+       (float4 *)bspline.thetaz,
+       nfftx, nffty, nfftz,
+       (AT *)accum_grid->data);
     break;
 
   default:
@@ -1710,6 +1723,9 @@ void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspli
 
 }
 
+//
+// Spreads charge on grid
+//
 template <typename AT, typename CT, typename CT2>
 void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, const double *recip) {
 
@@ -1730,9 +1746,10 @@ void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, cons
 
   switch(order) {
   case 4:
-    spread_charge_ortho_4<AT> <<< nblock, nthread >>>(xyzq, ncoord, recip1, recip2, recip3,
-						      nfftx, nffty, nfftz,
-						      (AT *)accum_grid->data);
+    spread_charge_ortho_4<AT> <<< nblock, nthread, 0, stream >>>
+      (xyzq, ncoord, recip1, recip2, recip3,
+       nfftx, nffty, nfftz,
+       (AT *)accum_grid->data);
     break;
 
   default:
@@ -1748,9 +1765,11 @@ void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, cons
   nblock.x = (nfftx*nffty*nfftz - 1)/nthread.x + 1;
   nblock.y = 1;
   nblock.z = 1;
-  reduce_data<AT, CT> <<< nblock, nthread >>>(xsize*ysize*zsize,
-					      (AT *)accum_grid->data,
-					      charge_grid->data);
+  reduce_data<AT, CT> <<< nblock, nthread, 0, stream >>>
+    (xsize*ysize*zsize,
+     (AT *)accum_grid->data,
+     charge_grid->data);
+
   cudaCheck(cudaGetLastError());
 
 }
@@ -1817,12 +1836,13 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa) {
 
   if (ortho) {
     scalar_sum_ortho_kernel<CT, CT2>
-      <<< nblock, nthread, shmem_size >>> (nfft1, nfft2, nfft3,
-					   size1, size2, size3,
-					   nf1, nf2, nf3,
-					   recip1, recip2, recip3,
-					   prefac1, prefac2, prefac3,
-					   fac, piv_inv, global_base, datap);
+      <<< nblock, nthread, shmem_size, stream >>>
+      (nfft1, nfft2, nfft3,
+       size1, size2, size3,
+       nf1, nf2, nf3,
+       recip1, recip2, recip3,
+       prefac1, prefac2, prefac3,
+       fac, piv_inv, global_base, datap);
   } else {
     std::cerr<<"Grid::scalar_sum: only orthorombic boxes are currently supported"<<std::endl;
     exit(1);
@@ -1876,18 +1896,19 @@ void Grid<AT, CT, CT2>::gather_force(const int ncoord, const double* recip,
     switch(order) {
     case 4:
       gather_force_4_ortho_kernel<AT, CT> 
-	<<< nblock, nthread, shmem_size >>>(ncoord,
-					    nfftx, nffty, nfftz,
-					    nfftx, nffty, nfftz,
-					    recip_loc[0], recip_loc[4], recip_loc[8],
-					    bspline.gix, bspline.giy, bspline.giz, bspline.charge,
-					    (float4 *)bspline.thetax,
-					    (float4 *)bspline.thetay,
-					    (float4 *)bspline.thetaz,
-					    (float4 *)bspline.dthetax,
-					    (float4 *)bspline.dthetay,
-					    (float4 *)bspline.dthetaz,
-					    stride, force);
+	<<< nblock, nthread, shmem_size, stream >>>
+	(ncoord,
+	 nfftx, nffty, nfftz,
+	 nfftx, nffty, nfftz,
+	 recip_loc[0], recip_loc[4], recip_loc[8],
+	 bspline.gix, bspline.giy, bspline.giz, bspline.charge,
+	 (float4 *)bspline.thetax,
+	 (float4 *)bspline.thetay,
+	 (float4 *)bspline.thetaz,
+	 (float4 *)bspline.dthetax,
+	 (float4 *)bspline.dthetay,
+	 (float4 *)bspline.dthetaz,
+	 stride, force);
       break;
     default:
       std::cerr<<"Grid::gather_force: order "<<order<<" not implemented"<<std::endl;
@@ -1953,12 +1974,13 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
     switch(order) {
     case 4:
       gather_force_4_ortho_kernel<AT, CT> 
-	<<< nblock, nthread >>>(xyzq, ncoord,
-				nfftx, nffty, nfftz,
-				nfftx, nffty, nfftz,
-				recip_loc[0], recip_loc[4], recip_loc[8],
-				ccelec_loc,
-				stride, force);
+	<<< nblock, nthread, 0, stream >>>
+	(xyzq, ncoord,
+	 nfftx, nffty, nfftz,
+	 nfftx, nffty, nfftz,
+	 recip_loc[0], recip_loc[4], recip_loc[8],
+	 ccelec_loc,
+	 stride, force);
       break;
     default:
       std::cerr<<"Grid::gather_force: order "<<order<<" not implemented"<<std::endl;

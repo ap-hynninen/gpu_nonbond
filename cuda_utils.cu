@@ -233,7 +233,6 @@ void gpu_range_stop() {
 
 //----------------------------------------------------------------------------------------
 
-static cudaStream_t direct_nonbond_stream = 0;
 static int gpu_ind = -1;
 static cudaDeviceProp gpu_prop;
 
@@ -279,19 +278,6 @@ void start_gpu(int numnode, int mynode) {
 void stop_gpu() {
   cudaCheck(cudaDeviceReset());
   gpu_ind = -1;
-}
-
-void start_streams() {
-  cudaCheck(cudaStreamCreate(&direct_nonbond_stream));
-}
-
-void stop_streams() {
-  cudaCheck(cudaStreamDestroy(direct_nonbond_stream));
-  direct_nonbond_stream = 0;
-}
-
-cudaStream_t get_direct_nonbond_stream() {
-  return direct_nonbond_stream;
 }
 
 int3 get_max_nblock() {

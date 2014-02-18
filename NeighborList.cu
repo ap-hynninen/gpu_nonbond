@@ -1,7 +1,5 @@
 #include <iostream>
 #include <fstream>
-#include <cassert>
-#include <cuda.h>
 #include "gpu_utils.h"
 #include "cuda_utils.h"
 #include "NeighborList.h"
@@ -55,7 +53,7 @@ NeighborList<tilesize>::~NeighborList() {
 // Sets ientry from host memory array
 //
 template <int tilesize>
-void NeighborList<tilesize>::set_ientry(int ni, ientry_t *h_ientry) {
+void NeighborList<tilesize>::set_ientry(int ni, ientry_t *h_ientry, cudaStream_t stream) {
 
   this->ni = ni;
 
@@ -63,7 +61,7 @@ void NeighborList<tilesize>::set_ientry(int ni, ientry_t *h_ientry) {
   reallocate<ientry_t>(&ientry, &ientry_len, ni, 1.4f);
 
   // Copy to device
-  copy_HtoD<ientry_t>(h_ientry, ientry, ni, get_direct_nonbond_stream());
+  copy_HtoD<ientry_t>(h_ientry, ientry, ni, stream);
 }
 
 //----------------------------------------------------------------------------------------
@@ -554,7 +552,8 @@ void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, cons
 					const float roff,
 					const int n_ijlist, const int3 *ijlist,
 					const int *cell_start,
-					const float4 *xyzq) {
+					const float4 *xyzq,
+					cudaStream_t stream) {
 
   if (n_ijlist == 0) return;
 
@@ -573,7 +572,7 @@ void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, cons
   }
 
   build_excl_kernel<tilesize>
-    <<< nblock, nthread, shmem_size, get_direct_nonbond_stream() >>>
+    <<< nblock, nthread, shmem_size, stream >>>
     (n_ijlist, ijlist, cell_start,
      xyzq, tile_indj, tile_excl,
      boxx, boxy, boxz,
@@ -623,12 +622,13 @@ __global__ void add_tile_top_kernel(const int ntile_top,
 //
 template <int tilesize>
 void NeighborList<tilesize>::add_tile_top(const int ntile_top, const int *tile_ind_top,
-					  const tile_excl_t<tilesize> *tile_excl_top) {
+					  const tile_excl_t<tilesize> *tile_excl_top,
+					  cudaStream_t stream) {
   int nthread = 256;
   int nblock = (ntile_top*(num_excl<tilesize>::val) - 1)/nthread + 1;
   
   add_tile_top_kernel<tilesize>
-    <<< nblock, nthread, 0, get_direct_nonbond_stream() >>>
+    <<< nblock, nthread, 0, stream >>>
     (ntile_top, tile_ind_top, tile_excl_top, tile_excl);
   
   cudaCheck(cudaGetLastError());

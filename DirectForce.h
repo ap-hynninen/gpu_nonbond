@@ -7,6 +7,17 @@
 // CT = calculation type
 //
 
+struct EnergyVirial_t {
+  // Energies
+  double energy_vdw;
+  double energy_elec;
+
+  // Shift forces for calculating virials
+  double sforcex[27];
+  double sforcey[27];
+  double sforcez[27];
+};
+
 #ifndef NEIGHBORLIST_H
 template <int tilesize> class NeighborList;
 #endif
@@ -47,6 +58,8 @@ private:
   CT *ewald_force;
   int n_ewald_force;
 
+  EnergyVirial_t *h_energy_virial;
+
   void setup_ewald_force(CT h);
   void set_elec_model(int elec_model, CT h=0.01);
 public:
@@ -73,7 +86,7 @@ public:
 		  const NeighborList<32> *nlist,
 		  const bool calc_energy,
 		  const bool calc_virial,
-		  const int stride, AT *force);
+		  const int stride, AT *force, cudaStream_t stream=0);
 
 
   void clear_energy_virial();

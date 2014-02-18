@@ -1,6 +1,8 @@
 #ifndef FORCE_H
 #define FORCE_H
 
+#include <cuda.h>
+
 //
 // Simple storage class for forces
 //
@@ -30,17 +32,18 @@ public:
   Force(const char *filename);
   ~Force();
 
-  void clear();
+
+  void clear(cudaStream_t stream=0);
   bool compare(Force<T>* force, const double tol, double& max_diff);
 
   void set_ncoord(int ncoord, float fac=1.0f);
   int get_stride();
-  void get_force(T *h_data);
+  void get_force(T *h_data, cudaStream_t stream=0);
 
-  template <typename T2> void convert(Force<T2>* force);
-  template <typename T2> void convert();
-  template <typename T2, typename T3> void convert_to(Force<T3> *force);
-  template <typename T2, typename T3> void convert_add(Force<T3> *force);
+  template <typename T2> void convert(Force<T2>* force, cudaStream_t stream=0);
+  template <typename T2> void convert(cudaStream_t stream=0);
+  template <typename T2, typename T3> void convert_to(Force<T3> *force, cudaStream_t stream=0);
+  template <typename T2, typename T3> void convert_add(Force<T3> *force, cudaStream_t stream=0);
 };
 
 

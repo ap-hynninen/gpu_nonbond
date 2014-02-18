@@ -1,7 +1,6 @@
 #include <iostream>
 #include <fstream>
 #include <cassert>
-#include <cuda.h>
 #include "gpu_utils.h"
 #include "reduce.h"
 #include "cuda_utils.h"
@@ -86,8 +85,8 @@ Force<T>::~Force() {
 // Sets force data to zero
 //
 template <typename T>
-void Force<T>::clear() {
-  clear_gpu_array<T>(data, 3*stride, get_direct_nonbond_stream());
+void Force<T>::clear(cudaStream_t stream) {
+  clear_gpu_array<T>(data, 3*stride, stream);
 }
 
 //
@@ -163,8 +162,8 @@ int Force<T>::get_stride() {
 // Copies force to host
 //
 template <typename T>
-void Force<T>::get_force(T *h_data) {
-  copy_DtoH<T>(data, h_data, 3*stride);
+void Force<T>::get_force(T *h_data, cudaStream_t stream) {
+  copy_DtoH<T>(data, h_data, 3*stride, stream);
 }
 
 //
@@ -172,7 +171,7 @@ void Force<T>::get_force(T *h_data) {
 //
 template <typename T>
 template <typename T2>
-void Force<T>::convert(Force<T2>* force) {
+void Force<T>::convert(Force<T2>* force, cudaStream_t stream) {
 
   assert(force->ncoord == ncoord);
   assert(force->stride == stride);
@@ -181,7 +180,7 @@ void Force<T>::convert(Force<T2>* force) {
   int nblock = (3*stride - 1)/nthread + 1;
 
   reduce_data<T, T2>
-    <<< nblock, nthread >>>(3*stride, this->data, force->data);
+    <<< nblock, nthread, 0, stream >>>(3*stride, this->data, force->data);
 }
 
 //
@@ -189,7 +188,7 @@ void Force<T>::convert(Force<T2>* force) {
 //
 template <typename T>
 template <typename T2, typename T3>
-void Force<T>::convert_to(Force<T3>* force) {
+void Force<T>::convert_to(Force<T3>* force, cudaStream_t stream) {
 
   assert(force->ncoord == ncoord);
   assert(force->stride == stride);
@@ -199,7 +198,7 @@ void Force<T>::convert_to(Force<T3>* force) {
   int nblock = (3*stride - 1)/nthread + 1;
 
   reduce_data<T, T2>
-    <<< nblock, nthread >>>(3*stride, this->data, (T2 *)force->data);
+    <<< nblock, nthread, 0, stream >>>(3*stride, this->data, (T2 *)force->data);
 }
 
 //
@@ -208,7 +207,7 @@ void Force<T>::convert_to(Force<T3>* force) {
 //
 template <typename T>
 template <typename T2>
-void Force<T>::convert() {
+void Force<T>::convert(cudaStream_t stream) {
 
   assert(sizeof(T) == sizeof(T2));
 
@@ -216,7 +215,7 @@ void Force<T>::convert() {
   int nblock = (3*stride - 1)/nthread + 1;
 
   reduce_data<T, T2>
-    <<< nblock, nthread >>>(3*stride, this->data);
+    <<< nblock, nthread, 0, stream >>>(3*stride, this->data);
 }
 
 //
@@ -226,7 +225,7 @@ void Force<T>::convert() {
 //
 template <typename T>
 template <typename T2, typename T3>
-void Force<T>::convert_add(Force<T3> *force) {
+void Force<T>::convert_add(Force<T3> *force, cudaStream_t stream) {
 
   assert(sizeof(T) == sizeof(T2));
 
@@ -234,7 +233,7 @@ void Force<T>::convert_add(Force<T3> *force) {
   int nblock = (3*stride - 1)/nthread + 1;
 
   reduce_add_data<T, T2, T3>
-    <<< nblock, nthread >>>(3*stride, force->data, this->data);
+    <<< nblock, nthread, 0, stream >>>(3*stride, force->data, this->data);
 }
 
 //
@@ -243,8 +242,8 @@ void Force<T>::convert_add(Force<T3> *force) {
 template class Force<long long int>;
 template class Force<double>;
 template class Force<float>;
-template void Force<long long int>::convert<double>();
-template void Force<long long int>::convert_add<double>(Force<float> *force);
-template void Force<long long int>::convert<float>(Force<float>* force);
-template void Force<float>::convert_to<double>(Force<long long int> *force);
+template void Force<long long int>::convert<double>(cudaStream_t stream);
+template void Force<long long int>::convert_add<double>(Force<float> *force, cudaStream_t stream);
+template void Force<long long int>::convert<float>(Force<float>* force, cudaStream_t stream);
+template void Force<float>::convert_to<double>(Force<long long int> *force, cudaStream_t stream);
 

@@ -121,23 +121,11 @@ struct DirectSettings_t {
 
 };
 
-struct EnergyVirial_t {
-  // Energies
-  double energy_vdw;
-  double energy_elec;
-
-  // Shift forces for calculating virials
-  double sforcex[27];
-  double sforcey[27];
-  double sforcez[27];
-};
-
 // Settings for direct computation in host and device memory
 static DirectSettings_t h_setup;
 static __constant__ DirectSettings_t d_setup;
 
 // Energy and virial in host and device memory
-static EnergyVirial_t h_energy_virial;
 static __device__ EnergyVirial_t d_energy_virial;
 
 // VdW parameter texture reference
@@ -728,6 +716,8 @@ DirectForce<AT, CT>::DirectForce() {
   set_calc_vdw(true);
   set_calc_elec(true);
 
+  allocate_host<EnergyVirial_t>(&h_energy_virial, 1);
+
   clear_energy_virial();
 }
 
@@ -743,6 +733,7 @@ DirectForce<AT, CT>::~DirectForce() {
   if (vdwparam != NULL) deallocate<CT>(&vdwparam);
   if (vdwtype != NULL) deallocate<int>(&vdwtype);
   if (ewald_force != NULL) deallocate<CT>(&ewald_force);
+  if (h_energy_virial != NULL) deallocate_host<EnergyVirial_t>(&h_energy_virial);
 }
 
 //
@@ -990,7 +981,7 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 				     const NeighborList<32> *nlist,
 				     const bool calc_energy,
 				     const bool calc_virial,
-				     const int stride, AT *force) {
+				     const int stride, AT *force, cudaStream_t stream) {
 
   const int tilesize = 32;
 
@@ -1019,60 +1010,68 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 	if (calc_energy) {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, true, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, true, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	} else {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, false, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, false, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	}
       } else if (elec_model_loc == EWALD_LOOKUP) {
 	if (calc_energy) {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD_LOOKUP, true, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD_LOOKUP, true, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	} else {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD_LOOKUP, false, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD_LOOKUP, false, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	}
       } else {
@@ -1084,60 +1083,68 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 	if (calc_energy) {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD, true, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD, true, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	} else {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD, false, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD, false, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	}
       } else if (elec_model_loc == EWALD_LOOKUP) {
 	if (calc_energy) {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD_LOOKUP, true, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD_LOOKUP, true, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	} else {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD_LOOKUP, false, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSW, EWALD_LOOKUP, false, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	}
       } else {
@@ -1149,60 +1156,68 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 	if (calc_energy) {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD, true, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD, true, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	} else {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD, false, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD, false, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	}
       } else if (elec_model_loc == EWALD_LOOKUP) {
 	if (calc_energy) {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD_LOOKUP, true, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD_LOOKUP, true, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	} else {
 	  if (calc_virial) {
 	    calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD_LOOKUP, false, true, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  } else {
 	    calc_force_kernel <AT, CT, tilesize, VDW_CUT, EWALD_LOOKUP, false, false, true>
-	      <<< nblock, nthread, shmem_size >>>(nlist->ni, nlist->ientry, nlist->tile_indj,
-						  nlist->tile_excl,
-						  stride, vdwparam, nvdwparam, xyzq, vdwtype,
-						  force);
+	      <<< nblock, nthread, shmem_size, stream >>>
+	      (nlist->ni, nlist->ientry, nlist->tile_indj,
+	       nlist->tile_excl,
+	       stride, vdwparam, nvdwparam, xyzq, vdwtype,
+	       force);
 	  }
 	}
       } else {
@@ -1225,14 +1240,14 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 //
 template <typename AT, typename CT>
 void DirectForce<AT, CT>::clear_energy_virial() {
-  h_energy_virial.energy_vdw = 0.0;
-  h_energy_virial.energy_elec = 0.0;
+  h_energy_virial->energy_vdw = 0.0;
+  h_energy_virial->energy_elec = 0.0;
   for (int i=0;i < 27;i++) {
-    h_energy_virial.sforcex[i] = 0.0;
-    h_energy_virial.sforcey[i] = 0.0;
-    h_energy_virial.sforcez[i] = 0.0;
+    h_energy_virial->sforcex[i] = 0.0;
+    h_energy_virial->sforcey[i] = 0.0;
+    h_energy_virial->sforcez[i] = 0.0;
   }
-  cudaCheck(cudaMemcpyToSymbol(d_energy_virial, &h_energy_virial, sizeof(EnergyVirial_t)));
+  cudaCheck(cudaMemcpyToSymbol(d_energy_virial, h_energy_virial, sizeof(EnergyVirial_t)));
 }
 
 //
@@ -1245,19 +1260,19 @@ void DirectForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_cal
 					    double *energy_vdw, double *energy_elec,
 					    double *sforcex, double *sforcey, double *sforcez) {
   if (prev_calc_energy && prev_calc_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(&h_energy_virial, d_energy_virial, sizeof(EnergyVirial_t)));
+    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(EnergyVirial_t)));
   } else if (prev_calc_energy) {
-    cudaCheck(cudaMemcpyFromSymbol(&h_energy_virial, d_energy_virial, 2*sizeof(double)));
+    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 2*sizeof(double)));
   } else if (prev_calc_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(&h_energy_virial, d_energy_virial, 27*3*sizeof(double),
+    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 27*3*sizeof(double),
 				   2*sizeof(double)));
   }
-  *energy_vdw = h_energy_virial.energy_vdw;
-  *energy_elec = h_energy_virial.energy_elec;
+  *energy_vdw = h_energy_virial->energy_vdw;
+  *energy_elec = h_energy_virial->energy_elec;
   for (int i=0;i < 27;i++) {
-    sforcex[i] = h_energy_virial.sforcex[i];
-    sforcey[i] = h_energy_virial.sforcey[i];
-    sforcez[i] = h_energy_virial.sforcez[i];
+    sforcex[i] = h_energy_virial->sforcex[i];
+    sforcey[i] = h_energy_virial->sforcey[i];
+    sforcez[i] = h_energy_virial->sforcez[i];
   }
 }
 

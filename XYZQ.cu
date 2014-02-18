@@ -1,6 +1,5 @@
 #include <iostream>
 #include <fstream>
-#include <cuda.h>
 #include "cuda_utils.h"
 #include "XYZQ.h"
 
@@ -85,10 +84,8 @@ void XYZQ::set_ncoord(int ncoord, float fac) {
 
 //
 // Copies xyzq from host
+// NOTE: Does not reallocate xyzq
 //
-void XYZQ::set_xyzq(int ncoord, float4 *h_xyzq) {
-
-  set_ncoord(ncoord);
-
-  copy_HtoD<float4>(h_xyzq, xyzq, ncoord, get_direct_nonbond_stream());
+void XYZQ::set_xyzq(int ncopy, float4 *h_xyzq, size_t offset, cudaStream_t stream) {
+  copy_HtoD<float4>(&h_xyzq[offset], &xyzq[offset], ncopy, stream);
 }

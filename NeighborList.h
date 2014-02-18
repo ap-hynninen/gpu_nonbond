@@ -1,6 +1,8 @@
 #ifndef NEIGHBORLIST_H
 #define NEIGHBORLIST_H
 
+#include <cuda.h>
+
 template <int tilesize>
 struct num_excl {
   static const int val = ((tilesize*tilesize-1)/32 + 1);
@@ -68,12 +70,14 @@ public:
 		  const float roff,
 		  const int n_ijlist, const int3 *ijlist,
 		  const int *cell_start,
-		  const float4 *xyzq);
+		  const float4 *xyzq,
+		  cudaStream_t stream=0);
   
   void add_tile_top(const int ntile_top, const int *tile_ind_top,
-		    const tile_excl_t<tilesize> *tile_excl_top);
+		    const tile_excl_t<tilesize> *tile_excl_top,
+		    cudaStream_t stream=0);
 
-  void set_ientry(int ni, ientry_t *h_ientry);
+  void set_ientry(int ni, ientry_t *h_ientry, cudaStream_t stream=0);
 
   void split_dense_sparse(int npair_cutoff);
   void remove_empty_tiles();

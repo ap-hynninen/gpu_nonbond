@@ -1,6 +1,7 @@
 #ifndef GRID_H
 #define GRID_H
 
+#include <cuda.h>
 #include <cufft.h>
 #include "Bspline.h"
 #include "Matrix3d.h"
@@ -94,6 +95,9 @@ private:
   CT *host_tmp;
 #endif
 
+  // Stream where all computation takes place
+  cudaStream_t stream;
+
   // Prefactor arrays
   CT* prefac_x;
   CT* prefac_y;
@@ -107,7 +111,8 @@ private:
   void calc_prefac();
 
  public:
-  Grid(int nfftx, int nffty, int nfftz, int order, FFTtype fft_type, int nnode, int mynode);
+  Grid(int nfftx, int nffty, int nfftz, int order, FFTtype fft_type, int nnode, int mynode, 
+       cudaStream_t stream=0);
   ~Grid();
 
   void print_info();

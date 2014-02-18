@@ -221,12 +221,9 @@ void gpu_range_stop();
 
 void start_gpu(int numnode, int mynode);
 void stop_gpu();
-void start_streams();
-void stop_streams();
 int get_gpu_ind();
 
 #ifdef __CUDACC__
-cudaStream_t get_direct_nonbond_stream();
 int3 get_max_nblock();
 int get_major();
 #endif

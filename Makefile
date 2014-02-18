@@ -44,6 +44,7 @@ clean:
 	rm -f *~
 	rm -f gpu_recip
 	rm -f gpu_direct
+	rm -f gpu_const
 
 %.o : %.cu
 	nvcc -c -O3 -arch=sm_35 -fmad=true -use_fast_math -lineinfo -D$(DEFS) $<
