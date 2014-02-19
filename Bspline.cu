@@ -223,6 +223,7 @@ void Bspline<T>::fill_bspline(const float4 *xyzq, const int ncoord) {
 					      dthetax, dthetay, dthetaz);
     break;
   default:
+    std::cerr << "Bspline::fill_bspline: order != 4 not implemented" << std::endl;
     exit(1);
   }
   
