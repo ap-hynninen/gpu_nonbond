@@ -23,6 +23,9 @@
 // Note that usually x0=0, x1=nfftx-1
 //
 
+// Energy and virial in device memory
+static __device__ RecipEnergyVirial_t d_energy_virial;
+
 template <typename T>
 __forceinline__ __device__ void write_grid(const float val, const int ind,
 					   T* data) {
@@ -279,11 +282,13 @@ __forceinline__ __device__ void calc_theta_dtheta(T wx, T wy, T wz, T3 *theta, T
   theta[0].y = ((T)1) - wy;
   theta[0].z = ((T)1) - wz;
 
+#pragma unroll
   for (int k=3;k <= order-1;k++) {
     T div = ((T)1) / (T)(k-1);
     theta[k-1].x = div*wx*theta[k-2].x;
     theta[k-1].y = div*wy*theta[k-2].y;
     theta[k-1].z = div*wz*theta[k-2].z;
+#pragma unroll
     for (int j=1;j <= k-2;j++) {
       theta[k-j-1].x = div*((wx + j)*theta[k-j-2].x + (k-j-wx)*theta[k-j-1].x);
       theta[k-j-1].y = div*((wy + j)*theta[k-j-2].y + (k-j-wy)*theta[k-j-1].y);
@@ -298,6 +303,7 @@ __forceinline__ __device__ void calc_theta_dtheta(T wx, T wy, T wz, T3 *theta, T
   dtheta[0].x = -theta[0].x;
   dtheta[0].y = -theta[0].y;
   dtheta[0].z = -theta[0].z;
+#pragma unroll
   for (int j=2;j <= order;j++) {
     dtheta[j-1].x = theta[j-2].x - theta[j-1].x;
     dtheta[j-1].y = theta[j-2].y - theta[j-1].y;
@@ -309,6 +315,7 @@ __forceinline__ __device__ void calc_theta_dtheta(T wx, T wy, T wz, T3 *theta, T
   theta[order-1].x = div*wx*theta[order-2].x;
   theta[order-1].y = div*wy*theta[order-2].y;
   theta[order-1].z = div*wz*theta[order-2].z;
+#pragma unroll
   for (int j=1;j <= order-2;j++) {
     theta[order-j-1].x = div*((wx + j)*theta[order-j-2].x + (order-j-wx)*theta[order-j-1].x);
     theta[order-j-1].y = div*((wy + j)*theta[order-j-2].y + (order-j-wy)*theta[order-j-1].y);
@@ -402,9 +409,11 @@ __forceinline__ __device__ void calc_one_theta(const T w, T *theta) {
   theta[1] = w;
   theta[0] = ((T)1) - w;
 
+#pragma unroll
   for (int k=3;k <= order-1;k++) {
     T div = ((T)1) / (T)(k-1);
     theta[k-1] = div*w*theta[k-2];
+#pragma unroll
     for (int j=1;j <= k-2;j++) {
       theta[k-j-1] = div*((w+j)*theta[k-j-2] + (k-j-w)*theta[k-j-1]);
     }
@@ -414,6 +423,7 @@ __forceinline__ __device__ void calc_one_theta(const T w, T *theta) {
   //--- one more recursion
   T div = ((T)1) / (T)(order-1);
   theta[order-1] = div*w*theta[order-2];
+#pragma unroll
   for (int j=1;j <= order-2;j++) {
     theta[order-j-1] = div*((w+j)*theta[order-j-2] + (order-j-w)*theta[order-j-1]);
   }
@@ -807,10 +817,10 @@ spread_charge_ortho_6(const float4 *xyzq, const int ncoord,
 
 //
 // Performs scalar sum on data(nfft1, nfft2, nfft3)
-// T = {float, double}
-// T2 = {float2, double2}
+// T = float or double
+// T2 = float2 or double2
 //
-template <typename T, typename T2>
+template <typename T, typename T2, bool calc_energy_virial>
 __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const int nfft3,
 					const int size1, const int size2, const int size3,
 					const int nf1, const int nf2, const int nf3,
@@ -857,6 +867,14 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
   }
   __syncthreads();
 
+  double energy = 0.0;
+  double virial0 = 0.0;
+  double virial1 = 0.0;
+  double virial2 = 0.0;
+  double virial3 = 0.0;
+  double virial4 = 0.0;
+  double virial5 = 0.0;
+
   while (k3 < size3) {
 
     int pos = k1 + (k2 + k3*size2)*size1;
@@ -879,6 +897,20 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
     // NOTE: check if it's faster to pre-calculate exp()
     T eterm = exp(-fac*msq)*piv_inv*sh_prefac1[k1]*sh_prefac2[k2]*sh_prefac3[k3]*msq_inv;
 
+    if (calc_energy_virial) {
+      T tmp1  = eterm*(q.x*q.x + q.y*q.y);
+      T vterm  = ((T)2)*(fac*msq  + ((T)1))*msq_inv;
+      T tmp2   = tmp1*vterm;
+      energy += (double)tmp1;
+      
+      virial0 += (double)(tmp1*(vterm*mhat1*mhat1 - ((T)1)));
+      virial1 += (double)(tmp2*mhat1*mhat2);
+      virial2 += (double)(tmp2*mhat1*mhat3);
+      virial3 += (double)(tmp1*(vterm*mhat2*mhat2 - ((T)1)));
+      virial4 += (double)(tmp2*mhat2*mhat3);
+      virial5 += (double)(tmp1*(vterm*mhat3*mhat3 - ((T)1)));
+    }
+
     q.x *= eterm;
     q.y *= eterm;
     data[pos] = q;
@@ -896,6 +928,90 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
     }
     k3 += k3_inc;
   }
+
+  // Reduce energy and virial
+  if (calc_energy_virial) {
+    // Reduce within warp to minimize shared memory usage
+    const int tid = threadIdx.x % warpsize;
+#if __CUDA_ARCH__ < 300
+    // Requires (blockDim.x/32)*sizeof(RecipEnergyVirial_t) amount of shared memory
+    __syncthreads();
+    const int base = (threadIdx.x/warpsize)*warpsize;
+    volatile RecipEnergyVirial_t* sh_ev = &((RecipEnergyVirial_t *)&sh_prefac[0])[base];
+    sh_ev[tid].energy  = energy;
+    sh_ev[tid].virial[0] = virial0;
+    sh_ev[tid].virial[1] = virial1;
+    sh_ev[tid].virial[2] = virial2;
+    sh_ev[tid].virial[3] = virial3;
+    sh_ev[tid].virial[4] = virial4;
+    sh_ev[tid].virial[5] = virial5;
+    __syncthreads();
+#endif
+#pragma unroll
+    for (int d=warpsize/2;d >= 1;d /= 2) {
+#if __CUDA_ARCH__ < 300
+      double energy_val = sh_ev[(tid+d) % warpsize].energy;
+      double virial0_val = sh_ev[(tid+d) % warpsize].virial[0];
+      double virial1_val = sh_ev[(tid+d) % warpsize].virial[1];
+      double virial2_val = sh_ev[(tid+d) % warpsize].virial[2];
+      double virial3_val = sh_ev[(tid+d) % warpsize].virial[3];
+      double virial4_val = sh_ev[(tid+d) % warpsize].virial[4];
+      double virial5_val = sh_ev[(tid+d) % warpsize].virial[5];
+      __syncthreads();
+      sh_ev[tid].energy += energy_val;
+      sh_ev[tid].virial[0] += virial0_val;
+      sh_ev[tid].virial[1] += virial1_val;
+      sh_ev[tid].virial[2] += virial2_val;
+      sh_ev[tid].virial[3] += virial3_val;
+      sh_ev[tid].virial[4] += virial4_val;
+      sh_ev[tid].virial[5] += virial5_val;
+      __syncthreads();
+#else
+      energy += __hiloint2double(__shfl(__double2hiint(energy), tid+d),
+				 __shfl(__double2loint(energy), tid+d));
+
+      /*
+      energy  += __shfl(energy,  tid+d);
+      virial0 += __shfl(virial0, tid+d);
+      virial1 += __shfl(virial1, tid+d);
+      virial2 += __shfl(virial2, tid+d);
+      virial3 += __shfl(virial3, tid+d);
+      virial4 += __shfl(virial4, tid+d);
+      virial5 += __shfl(virial5, tid+d);
+      */
+#endif
+    }
+
+    if (tid == 0) {
+#if __CUDA_ARCH__ < 300
+      energy = sh_ev[0].energy;
+      virial0 = sh_ev[0].virial[0];
+      virial1 = sh_ev[0].virial[1];
+      virial2 = sh_ev[0].virial[2];
+      virial3 = sh_ev[0].virial[3];
+      virial4 = sh_ev[0].virial[4];
+      virial5 = sh_ev[0].virial[5];
+#endif
+      atomicAdd(&d_energy_virial.energy, energy);
+      atomicAdd(&d_energy_virial.virial[0], virial0);
+      atomicAdd(&d_energy_virial.virial[1], virial1);
+      atomicAdd(&d_energy_virial.virial[2], virial2);
+      atomicAdd(&d_energy_virial.virial[3], virial3);
+      atomicAdd(&d_energy_virial.virial[4], virial4);
+      atomicAdd(&d_energy_virial.virial[5], virial5);
+    }
+
+  }
+
+  /*
+  atomicAdd(&d_energy_virial.energy, energy);
+  atomicAdd(&d_energy_virial.virial[0], virial0);
+  atomicAdd(&d_energy_virial.virial[1], virial1);
+  atomicAdd(&d_energy_virial.virial[2], virial2);
+  atomicAdd(&d_energy_virial.virial[3], virial3);
+  atomicAdd(&d_energy_virial.virial[4], virial4);
+  atomicAdd(&d_energy_virial.virial[5], virial5);
+  */
 
   // Set data[0] = 0 for the global (0,0,0)
   if (global_base && (blockIdx.x + threadIdx.x == 0)) {
@@ -1614,6 +1730,7 @@ __global__ void gather_force_6_ortho_kernel(const float4 *xyzq, const int ncoord
     int iz0 = shmem[base].iz;
 
     // Each thread calculates a 3x3x3 sub-cube
+#pragma unroll
     for (int i=0;i < 27;i++) {
       int tz = tz0 + (i/9);
       int ty = ty0 + ((i/3) % 3);
@@ -1964,6 +2081,8 @@ Grid<AT, CT, CT2>::Grid(int nfftx, int nffty, int nfftz, int order,
     allocate<CT>(&prefac_y, nffty);
     allocate<CT>(&prefac_z, nfftz);
     calc_prefac();
+
+    allocate_host<RecipEnergyVirial_t>(&h_energy_virial, 1);
 }
 
 //
@@ -2117,6 +2236,8 @@ Grid<AT, CT, CT2>::~Grid() {
   deallocate<CT>(&prefac_x);
   deallocate<CT>(&prefac_y);
   deallocate<CT>(&prefac_z);
+
+  if (h_energy_virial != NULL) deallocate_host<RecipEnergyVirial_t>(&h_energy_virial);
 }
 
 template <typename AT, typename CT, typename CT2>
@@ -2257,15 +2378,22 @@ void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, cons
 }
 
 //
-// Perform scalar sum without calculating virial or energy (faster)
+// Perform scalar sum
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa) {
+void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
+				   const bool calc_energy, const bool calc_virial) {
 
   const double pi = 3.14159265358979323846;
+
+  bool calc_energy_virial = (calc_energy || calc_virial);
+
   int nthread = 512;
   int nblock = 10;
   int shmem_size = sizeof(CT)*(nfftx + nffty + nfftz);
+  if (calc_energy_virial && get_cuda_arch() < 300) {
+    shmem_size = max(shmem_size, (int)((nthread/warpsize)*sizeof(RecipEnergyVirial_t)));
+  }
 
   int nfft1, nfft2, nfft3;
   int size1, size2, size3;
@@ -2317,14 +2445,25 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa) {
   int nf3 = nfft3/2 + (nfft3 % 2);
 
   if (ortho) {
-    scalar_sum_ortho_kernel<CT, CT2>
-      <<< nblock, nthread, shmem_size, stream >>>
-      (nfft1, nfft2, nfft3,
-       size1, size2, size3,
-       nf1, nf2, nf3,
-       recip1, recip2, recip3,
-       prefac1, prefac2, prefac3,
-       fac, piv_inv, global_base, datap);
+    if (calc_energy_virial) {
+      scalar_sum_ortho_kernel<CT, CT2, true>
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nfft1, nfft2, nfft3,
+	 size1, size2, size3,
+	 nf1, nf2, nf3,
+	 recip1, recip2, recip3,
+	 prefac1, prefac2, prefac3,
+	 fac, piv_inv, global_base, datap);
+    } else {
+      scalar_sum_ortho_kernel<CT, CT2, false>
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nfft1, nfft2, nfft3,
+	 size1, size2, size3,
+	 nf1, nf2, nf3,
+	 recip1, recip2, recip3,
+	 prefac1, prefac2, prefac3,
+	 fac, piv_inv, global_base, datap);
+    }
   } else {
     std::cerr<<"Grid::scalar_sum: only orthorombic boxes are currently supported"<<std::endl;
     exit(1);

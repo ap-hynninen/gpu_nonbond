@@ -99,34 +99,12 @@ public:
 //#define NUM_EXCL ((32*32-1)/32 + 1) // Number of exclusion mask integers
 //#define NUM_THREAD_PER_EXCL (32/NUM_EXCL)       // Number of threads per exclusion mask integer
 
-struct DirectSettings_t {
-  float kappa;
-  float kappa2;
-
-  float boxx;
-  float boxy;
-  float boxz;
-
-  float roff2;
-  float ron2;
-
-  float roffinv6;
-  float roffinv12;
-  float roffinv18;
-
-  float inv_roff2_ron2;
-
-  float hinv;
-  float *ewald_force;
-
-};
-
-// Settings for direct computation in host and device memory
-static DirectSettings_t h_setup;
+// Settings for direct computation in device memory
+//static DirectSettings_t h_setup;
 static __constant__ DirectSettings_t d_setup;
 
-// Energy and virial in host and device memory
-static __device__ EnergyVirial_t d_energy_virial;
+// Energy and virial in device memory
+static __device__ DirectEnergyVirial_t d_energy_virial;
 
 // VdW parameter texture reference
 static texture<float2, 1, cudaReadModeElementType> vdwparam_texref;
@@ -716,7 +694,8 @@ DirectForce<AT, CT>::DirectForce() {
   set_calc_vdw(true);
   set_calc_elec(true);
 
-  allocate_host<EnergyVirial_t>(&h_energy_virial, 1);
+  allocate_host<DirectEnergyVirial_t>(&h_energy_virial, 1);
+  allocate_host<DirectSettings_t>(&h_setup, 1);
 
   clear_energy_virial();
 }
@@ -733,14 +712,16 @@ DirectForce<AT, CT>::~DirectForce() {
   if (vdwparam != NULL) deallocate<CT>(&vdwparam);
   if (vdwtype != NULL) deallocate<int>(&vdwtype);
   if (ewald_force != NULL) deallocate<CT>(&ewald_force);
-  if (h_energy_virial != NULL) deallocate_host<EnergyVirial_t>(&h_energy_virial);
+  if (h_energy_virial != NULL) deallocate_host<DirectEnergyVirial_t>(&h_energy_virial);
+  if (h_setup != NULL) deallocate_host<DirectSettings_t>(&h_setup);
 }
 
 //
 // Copies h_setup -> d_setup
 //
-void update_setup() {
-  cudaCheck(cudaMemcpyToSymbol(d_setup, &h_setup, sizeof(DirectSettings_t)));
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::update_setup() {
+  cudaCheck(cudaMemcpyToSymbol(d_setup, h_setup, sizeof(DirectSettings_t)));
 }
 
 //
@@ -752,20 +733,20 @@ void DirectForce<AT, CT>::setup(CT boxx, CT boxy, CT boxz,
 				CT roff, CT ron,
 				int vdw_model, int elec_model,
 				bool calc_vdw, bool calc_elec) {
-  h_setup.boxx = boxx;
-  h_setup.boxy = boxy;
-  h_setup.boxz = boxz;
-  h_setup.kappa = kappa;
-  h_setup.kappa2 = kappa*kappa;
-  h_setup.roff2 = roff*roff;
-  h_setup.ron2 = ron*ron;
+  h_setup->boxx = boxx;
+  h_setup->boxy = boxy;
+  h_setup->boxz = boxz;
+  h_setup->kappa = kappa;
+  h_setup->kappa2 = kappa*kappa;
+  h_setup->roff2 = roff*roff;
+  h_setup->ron2 = ron*ron;
 
-  h_setup.roffinv6 = ((CT)1.0)/(h_setup.roff2*h_setup.roff2*h_setup.roff2);
-  h_setup.roffinv12 = h_setup.roffinv6*h_setup.roffinv6;
-  h_setup.roffinv18 = h_setup.roffinv12*h_setup.roffinv6;
+  h_setup->roffinv6 = ((CT)1.0)/(h_setup->roff2*h_setup->roff2*h_setup->roff2);
+  h_setup->roffinv12 = h_setup->roffinv6*h_setup->roffinv6;
+  h_setup->roffinv18 = h_setup->roffinv12*h_setup->roffinv6;
 
-  h_setup.inv_roff2_ron2 = h_setup.roff2 - h_setup.ron2;
-  h_setup.inv_roff2_ron2 = ((CT)1.0)/(h_setup.inv_roff2_ron2*h_setup.inv_roff2_ron2*h_setup.inv_roff2_ron2);
+  h_setup->inv_roff2_ron2 = h_setup->roff2 - h_setup->ron2;
+  h_setup->inv_roff2_ron2 = ((CT)1.0)/(h_setup->inv_roff2_ron2*h_setup->inv_roff2_ron2*h_setup->inv_roff2_ron2);
 
   this->vdw_model = vdw_model;
   set_elec_model(elec_model);
@@ -773,6 +754,27 @@ void DirectForce<AT, CT>::setup(CT boxx, CT boxy, CT boxz,
   set_calc_vdw(calc_vdw);
   set_calc_elec(calc_elec);
 
+  update_setup();
+}
+
+//
+// Returns box sizes
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::get_box_size(CT &boxx, CT &boxy, CT &boxz) {
+  boxx = h_setup->boxx;
+  boxy = h_setup->boxy;
+  boxz = h_setup->boxz;
+}
+
+//
+// Sets box sizes
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::set_box_size(CT boxx, CT boxy, CT boxz) {
+  h_setup->boxx = boxx;
+  h_setup->boxy = boxy;
+  h_setup->boxz = boxz;
   update_setup();
 }
 
@@ -790,17 +792,6 @@ void DirectForce<AT, CT>::set_calc_vdw(bool calc_vdw) {
 template <typename AT, typename CT>
 void DirectForce<AT, CT>::set_calc_elec(bool calc_elec) {
   this->calc_elec = calc_elec;
-}
-
-//
-// Sets box size
-//
-template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_box_size(CT boxx, CT boxy, CT boxz) {
-  h_setup.boxx = boxx;
-  h_setup.boxy = boxy;
-  h_setup.boxz = boxz;
-  update_setup();
 }
 
 //
@@ -937,9 +928,9 @@ void DirectForce<AT, CT>::set_vdwtype(const char *filename) {
 template <typename AT, typename CT>
 void DirectForce<AT, CT>::setup_ewald_force(CT h) {
 
-  h_setup.hinv = ((CT)1.0)/h;
+  h_setup->hinv = ((CT)1.0)/h;
 
-  n_ewald_force = (int)(sqrt(h_setup.roff2)*h_setup.hinv) + 2;
+  n_ewald_force = (int)(sqrt(h_setup->roff2)*h_setup->hinv) + 2;
 
   CT *h_ewald_force = new CT[n_ewald_force];
 
@@ -947,15 +938,15 @@ void DirectForce<AT, CT>::setup_ewald_force(CT h) {
     const CT two_sqrtpi = (CT)1.12837916709551;    // 2/sqrt(pi)
     CT r = i*h;
     CT r2 = r*r;
-    h_ewald_force[i] = two_sqrtpi*((CT)h_setup.kappa)*exp(-((CT)h_setup.kappa2)*r2) + 
-      erfc(((CT)h_setup.kappa)*r)/r;
+    h_ewald_force[i] = two_sqrtpi*((CT)h_setup->kappa)*exp(-((CT)h_setup->kappa2)*r2) + 
+      erfc(((CT)h_setup->kappa)*r)/r;
   }
   h_ewald_force[0] = h_ewald_force[1];
 
   allocate<CT>(&ewald_force, n_ewald_force);
   copy_HtoD<CT>(h_ewald_force, ewald_force, n_ewald_force);
 
-  h_setup.ewald_force = ewald_force;
+  h_setup->ewald_force = ewald_force;
 
   delete [] h_ewald_force;
 
@@ -1229,9 +1220,8 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
       exit(1);
     }
 
+    cudaCheck(cudaGetLastError());
   }
-
-  cudaCheck(cudaGetLastError());
 
 }
 
@@ -1247,7 +1237,7 @@ void DirectForce<AT, CT>::clear_energy_virial() {
     h_energy_virial->sforcey[i] = 0.0;
     h_energy_virial->sforcez[i] = 0.0;
   }
-  cudaCheck(cudaMemcpyToSymbol(d_energy_virial, h_energy_virial, sizeof(EnergyVirial_t)));
+  cudaCheck(cudaMemcpyToSymbol(d_energy_virial, h_energy_virial, sizeof(DirectEnergyVirial_t)));
 }
 
 //
@@ -1260,7 +1250,7 @@ void DirectForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_cal
 					    double *energy_vdw, double *energy_elec,
 					    double *sforcex, double *sforcey, double *sforcez) {
   if (prev_calc_energy && prev_calc_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(EnergyVirial_t)));
+    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(DirectEnergyVirial_t)));
   } else if (prev_calc_energy) {
     cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 2*sizeof(double)));
   } else if (prev_calc_virial) {

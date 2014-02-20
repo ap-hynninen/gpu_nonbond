@@ -8,6 +8,15 @@
 
 enum FFTtype {COLUMN, SLAB, BOX};
 
+struct RecipEnergyVirial_t {
+  // Energy
+  double energy;
+
+  // Virials
+  double virial[6];
+};
+
+
 //
 // AT  = Accumulation Type
 // CT  = Calculation Type (real)
@@ -103,6 +112,8 @@ private:
   CT* prefac_y;
   CT* prefac_z;
 
+  RecipEnergyVirial_t *h_energy_virial;
+
   void init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 	  bool y_land_locked, bool z_land_locked);
 
@@ -120,7 +131,8 @@ private:
   void spread_charge(const int ncoord, const Bspline<CT> &bspline);
   void spread_charge(const float4 *xyzq, const int ncoord, const double *recip);
 
-  void scalar_sum(const double* recip, const double kappa);
+  void scalar_sum(const double* recip, const double kappa,
+		  const bool calc_energy, const bool calc_virial);
 
   void gather_force(const int ncoord, const double* recip, const Bspline<CT> &bspline,
 		    const int stride, CT* force);

@@ -124,7 +124,7 @@ void test4() {
   //grid.spread_charge(xyzq.ncoord, bspline);
   grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
   grid.r2c_fft();
-  grid.scalar_sum(recip, kappa);
+  grid.scalar_sum(recip, kappa, true, false);
   grid.c2r_fft();
   //grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
   grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
@@ -164,7 +164,7 @@ void test4() {
   */
 
   tol = 1.0e-6;
-  grid.scalar_sum(recip, kappa);
+  grid.scalar_sum(recip, kappa, false, false);
   /*
   if (fft_type == BOX) {
     Matrix3d<float2> q_zfft_summed_t(nfftx/2+1, nffty, nfftz);
@@ -302,7 +302,7 @@ void test6() {
   //grid.spread_charge(xyzq.ncoord, bspline);
   grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
   grid.r2c_fft();
-  grid.scalar_sum(recip, kappa);
+  grid.scalar_sum(recip, kappa, false, false);
   grid.c2r_fft();
   //grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
   grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
@@ -343,7 +343,7 @@ void test6() {
   */
 
   tol = 1.0e-6;
-  grid.scalar_sum(recip, kappa);
+  grid.scalar_sum(recip, kappa, false, false);
   /*
   if (fft_type == BOX) {
     Matrix3d<float2> q_zfft_summed_t(nfftx/2+1, nffty, nfftz);

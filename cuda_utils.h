@@ -222,6 +222,7 @@ void gpu_range_stop();
 void start_gpu(int numnode, int mynode);
 void stop_gpu();
 int get_gpu_ind();
+int get_cuda_arch();
 
 #ifdef __CUDACC__
 int3 get_max_nblock();

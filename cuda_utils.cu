@@ -233,8 +233,53 @@ void gpu_range_stop() {
 
 //----------------------------------------------------------------------------------------
 
+__global__ void read_CUDA_ARCH_kernel(int *cuda_arch) {
+  if (threadIdx.x == 0) {
+
+#if __CUDA_ARCH__ == 100
+    *cuda_arch = 100;
+#elif __CUDA_ARCH__ == 110
+    *cuda_arch = 110;
+#elif __CUDA_ARCH__ == 120
+    *cuda_arch = 120;
+#elif __CUDA_ARCH__ == 130
+    *cuda_arch = 130;
+#elif __CUDA_ARCH__ == 200
+    *cuda_arch = 200;
+#elif __CUDA_ARCH__ == 210
+    *cuda_arch = 210;
+#elif __CUDA_ARCH__ == 300
+    *cuda_arch = 300;
+#elif __CUDA_ARCH__ == 350
+    *cuda_arch = 350;
+#else
+    *cuda_arch = 350;
+#endif
+
+  }
+}
+
+//
+// Reads the value of __CUDA_ARCH__ from device code
+//
+int read_CUDA_ARCH() {
+  int *d_cuda_arch;
+  int h_cuda_arch;
+  allocate<int>(&d_cuda_arch, 1);
+  
+  read_CUDA_ARCH_kernel <<< 1, 1 >>> (d_cuda_arch);
+
+  copy_DtoH<int>(d_cuda_arch, &h_cuda_arch, 1);
+
+  deallocate<int>(&d_cuda_arch);
+
+  return h_cuda_arch;
+}
+//----------------------------------------------------------------------------------------
+
 static int gpu_ind = -1;
 static cudaDeviceProp gpu_prop;
+static int cuda_arch;
 
 void start_gpu(int numnode, int mynode) {
   int devices[4] = {2, 3, 0, 1};
@@ -264,10 +309,13 @@ void start_gpu(int numnode, int mynode) {
   int cuda_rt_version;
   cudaCheck(cudaRuntimeGetVersion(&cuda_rt_version));
 
+  cuda_arch = read_CUDA_ARCH();
+
   if (mynode == 0) {
     std::cout << "Number of CUDA devices found " << device_count << std::endl;
     std::cout << "Using CUDA driver version " << cuda_driver_version << std::endl;
     std::cout << "Using CUDA runtime version " << cuda_rt_version << std::endl;
+    std::cout << "Compiled using CUDA_ARCH " << cuda_arch << std::endl;
   }
 
   std::cout << "Node " << mynode << " uses CUDA device " << gpu_ind << 
@@ -294,4 +342,8 @@ int get_major() {
 
 int get_gpu_ind() {
   return gpu_ind;
+}
+
+int get_cuda_arch() {
+  return cuda_arch;
 }

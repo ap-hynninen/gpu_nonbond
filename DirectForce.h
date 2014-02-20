@@ -7,7 +7,7 @@
 // CT = calculation type
 //
 
-struct EnergyVirial_t {
+struct DirectEnergyVirial_t {
   // Energies
   double energy_vdw;
   double energy_elec;
@@ -16,6 +16,28 @@ struct EnergyVirial_t {
   double sforcex[27];
   double sforcey[27];
   double sforcez[27];
+};
+
+struct DirectSettings_t {
+  float kappa;
+  float kappa2;
+
+  float boxx;
+  float boxy;
+  float boxz;
+
+  float roff2;
+  float ron2;
+
+  float roffinv6;
+  float roffinv12;
+  float roffinv18;
+
+  float inv_roff2_ron2;
+
+  float hinv;
+  float *ewald_force;
+
 };
 
 #ifndef NEIGHBORLIST_H
@@ -58,10 +80,13 @@ private:
   CT *ewald_force;
   int n_ewald_force;
 
-  EnergyVirial_t *h_energy_virial;
+  DirectSettings_t *h_setup;
+  DirectEnergyVirial_t *h_energy_virial;
 
   void setup_ewald_force(CT h);
   void set_elec_model(int elec_model, CT h=0.01);
+  void update_setup();
+
 public:
 
   DirectForce();
@@ -72,9 +97,12 @@ public:
 	     CT roff, CT ron,
 	     int vdw_model, int elec_model,
 	     bool calc_vdw, bool calc_elec);
+
+  void get_box_size(CT &boxx, CT &boxy, CT &boxz);
+  void set_box_size(CT boxx, CT boxy, CT boxz);
+
   void set_calc_vdw(bool calc_vdw);
   void set_calc_elec(bool calc_elec);
-  void set_box_size(CT boxx, CT boxy, CT boxz);
 
   void set_vdwparam(int nvdwparam, CT *h_vdwparam);
   void set_vdwparam(const char *filename);

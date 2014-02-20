@@ -564,19 +564,30 @@ void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, cons
   float roff2 = roff*roff;
 
   int nthread = nwarp_build_excl_dist*warpsize;
-  int nblock = (n_ijlist-1)/(nthread/warpsize) + 1;
+  int nblock_tot = (n_ijlist-1)/(nthread/warpsize) + 1;
   size_t shmem_size = nwarp_build_excl_dist*tilesize*sizeof(float3); 
 
   if (tilesize == 16) {
     shmem_size += nwarp_build_excl_dist*(num_excl<tilesize>::val)*sizeof(unsigned int);
   }
 
-  build_excl_kernel<tilesize>
-    <<< nblock, nthread, shmem_size, stream >>>
-    (n_ijlist, ijlist, cell_start,
-     xyzq, tile_indj, tile_excl,
-     boxx, boxy, boxz,
-     roff2);
+  int3 max_nblock3 = get_max_nblock();
+  unsigned int max_nblock = max_nblock3.x;
+
+  while (nblock_tot != 0) {
+
+    int nblock = (nblock_tot > max_nblock) ? max_nblock : nblock_tot;
+    nblock_tot -= nblock;
+
+    build_excl_kernel<tilesize>
+      <<< nblock, nthread, shmem_size, stream >>>
+      (n_ijlist, ijlist, cell_start,
+       xyzq, tile_indj, tile_excl,
+       boxx, boxy, boxz,
+       roff2);
+
+    cudaCheck(cudaGetLastError());
+  }
 
   /*
   if (mdsim.q_test != 0) {
@@ -587,7 +598,6 @@ void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, cons
   }
   */
 
-  cudaCheck(cudaGetLastError());
 }
 
 //----------------------------------------------------------------------------------------
