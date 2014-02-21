@@ -3,6 +3,7 @@
 
 #include <cuda.h>
 #include <cufft.h>
+#include <cufftXt.h>
 #include "Bspline.h"
 #include "Matrix3d.h"
 
@@ -138,6 +139,10 @@ private:
 		    const int stride, CT* force);
   void gather_force(const float4 *xyzq, const int ncoord, const double* recip,
 		    const int stride, CT* force);
+
+  void clear_energy_virial();
+  void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
+			 double *energy, double *virial);
 
   void x_fft_r2c(CT2 *data);
   void x_fft_c2r(CT2 *data);

@@ -832,8 +832,8 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
 
   // Create pointers to shared memory
   T* sh_prefac1 = (T *)&sh_prefac[0];
-  T* sh_prefac2 = (T *)&sh_prefac[size1];
-  T* sh_prefac3 = (T *)&sh_prefac[size1+size2];
+  T* sh_prefac2 = (T *)&sh_prefac[nfft1];
+  T* sh_prefac3 = (T *)&sh_prefac[nfft1 + nfft2];
 
   // Calculate start position (k1, k2, k3) for each thread
   unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
@@ -849,19 +849,39 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
   int k2_inc = tot_inc/size1;
   int k1_inc = tot_inc - k2_inc*size1;
 
+  // Set data[0] = 0 for the global (0,0,0)
+  if (global_base && (blockIdx.x + threadIdx.x == 0)) {
+    T2 zero;
+    zero.x = (T)0;
+    zero.y = (T)0;
+    data[0] = zero;
+    // Increment position
+    k1 += k1_inc;
+    if (k1 >= size1) {
+      k1 -= size1;
+      k2++;
+    }
+    k2 += k2_inc;
+    if (k2 >= size2) {
+      k2 -= size2;
+      k3++;
+    }
+    k3 += k3_inc;
+  }
+
   // Load prefac data into shared memory
   int pos = threadIdx.x;
-  while (pos < size1) {
+  while (pos < nfft1) {
     sh_prefac1[pos] = prefac1[pos];
     pos += blockDim.x;
   }
   pos = threadIdx.x;
-  while (pos < size2) {
+  while (pos < nfft2) {
     sh_prefac2[pos] = prefac2[pos];
     pos += blockDim.x;
   }
   pos = threadIdx.x;
-  while (pos < size3) {
+  while (pos < nfft3) {
     sh_prefac3[pos] = prefac3[pos];
     pos += blockDim.x;
   }
@@ -899,16 +919,54 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
 
     if (calc_energy_virial) {
       T tmp1  = eterm*(q.x*q.x + q.y*q.y);
-      T vterm  = ((T)2)*(fac*msq  + ((T)1))*msq_inv;
+      T vterm  = ((T)2)*(fac + msq_inv);
       T tmp2   = tmp1*vterm;
+
       energy += (double)tmp1;
-      
       virial0 += (double)(tmp1*(vterm*mhat1*mhat1 - ((T)1)));
       virial1 += (double)(tmp2*mhat1*mhat2);
       virial2 += (double)(tmp2*mhat1*mhat3);
       virial3 += (double)(tmp1*(vterm*mhat2*mhat2 - ((T)1)));
       virial4 += (double)(tmp2*mhat2*mhat3);
       virial5 += (double)(tmp1*(vterm*mhat3*mhat3 - ((T)1)));
+
+      // The following is put into a separate if {} -block to avoid divergence within warp and
+      // save registers
+      if (k1 >= 1 && k1 < nfft1) {
+
+	int k1s = nfft1 - (k1+1) + 1;
+	int k2s = ((nfft2-(k2+1)+1) % nfft2);
+	int k3s = ((nfft3-(k3+1)+1) % nfft3);
+
+	int m1s = k1s;
+	int m2s = k2s;
+	int m3s = k3s;
+
+	if (k1s >= nf1) m1s -= nfft1;
+	if (k2s >= nf2) m2s -= nfft2;
+	if (k3s >= nf3) m3s -= nfft3;
+
+	T mhat1s = recip11*m1s;
+	T mhat2s = recip22*m2s;
+	T mhat3s = recip33*m3s;
+
+	T msqs = mhat1s*mhat1s + mhat2s*mhat2s + mhat3s*mhat3s;
+	T msqs_inv = ((T)1)/msqs;
+
+	T eterms = exp(-fac*msqs)*piv_inv*sh_prefac1[k1s]*sh_prefac2[k2s]*sh_prefac3[k3s]*msqs_inv;
+
+	T tmp1s  = eterms*(q.x*q.x + q.y*q.y);
+	T vterms  = ((T)2)*(fac + msqs_inv);
+	T tmp2s   = tmp1s*vterms;
+
+	energy += (double)tmp1s;
+	virial0 += (double)(tmp1s*(vterms*mhat1s*mhat1s - ((T)1)));
+	virial1 += (double)(tmp2s*mhat1s*mhat2s);
+	virial2 += (double)(tmp2s*mhat1s*mhat3s);
+	virial3 += (double)(tmp1s*(vterms*mhat2s*mhat2s - ((T)1)));
+	virial4 += (double)(tmp2s*mhat2s*mhat3s);
+	virial5 += (double)(tmp1s*(vterms*mhat3s*mhat3s - ((T)1)));
+      }
     }
 
     q.x *= eterm;
@@ -931,6 +989,7 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
 
   // Reduce energy and virial
   if (calc_energy_virial) {
+    /*
     // Reduce within warp to minimize shared memory usage
     const int tid = threadIdx.x % warpsize;
 #if __CUDA_ARCH__ < 300
@@ -967,18 +1026,9 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
       sh_ev[tid].virial[5] += virial5_val;
       __syncthreads();
 #else
-      energy += __hiloint2double(__shfl(__double2hiint(energy), tid+d),
-				 __shfl(__double2loint(energy), tid+d));
+      //      energy += __hiloint2double(__shfl(__double2hiint(energy), tid+d),
+      //				 __shfl(__double2loint(energy), tid+d));
 
-      /*
-      energy  += __shfl(energy,  tid+d);
-      virial0 += __shfl(virial0, tid+d);
-      virial1 += __shfl(virial1, tid+d);
-      virial2 += __shfl(virial2, tid+d);
-      virial3 += __shfl(virial3, tid+d);
-      virial4 += __shfl(virial4, tid+d);
-      virial5 += __shfl(virial5, tid+d);
-      */
 #endif
     }
 
@@ -1000,19 +1050,19 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
       atomicAdd(&d_energy_virial.virial[4], virial4);
       atomicAdd(&d_energy_virial.virial[5], virial5);
     }
+*/
+
+    atomicAdd(&d_energy_virial.energy, energy);
+    atomicAdd(&d_energy_virial.virial[0], virial0);
+    atomicAdd(&d_energy_virial.virial[1], virial1);
+    atomicAdd(&d_energy_virial.virial[2], virial2);
+    atomicAdd(&d_energy_virial.virial[3], virial3);
+    atomicAdd(&d_energy_virial.virial[4], virial4);
+    atomicAdd(&d_energy_virial.virial[5], virial5);
 
   }
 
   /*
-  atomicAdd(&d_energy_virial.energy, energy);
-  atomicAdd(&d_energy_virial.virial[0], virial0);
-  atomicAdd(&d_energy_virial.virial[1], virial1);
-  atomicAdd(&d_energy_virial.virial[2], virial2);
-  atomicAdd(&d_energy_virial.virial[3], virial3);
-  atomicAdd(&d_energy_virial.virial[4], virial4);
-  atomicAdd(&d_energy_virial.virial[5], virial5);
-  */
-
   // Set data[0] = 0 for the global (0,0,0)
   if (global_base && (blockIdx.x + threadIdx.x == 0)) {
     T2 zero;
@@ -1020,6 +1070,8 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
     zero.y = (T)0;
     data[0] = zero;
   }
+  */
+
 }
 
 texture<float, 1, cudaReadModeElementType> grid_texref;
@@ -2083,6 +2135,8 @@ Grid<AT, CT, CT2>::Grid(int nfftx, int nffty, int nfftz, int order,
     calc_prefac();
 
     allocate_host<RecipEnergyVirial_t>(&h_energy_virial, 1);
+
+    clear_energy_virial();
 }
 
 //
@@ -2633,6 +2687,38 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
 
   cudaCheck(cudaGetLastError());
 }
+
+//
+// Sets Energies and virials to zero
+//
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::clear_energy_virial() {
+  h_energy_virial->energy = 0.0;
+  for (int i=0;i < 6;i++) {
+    h_energy_virial->virial[i] = 0.0;
+  }
+  cudaCheck(cudaMemcpyToSymbol(d_energy_virial, h_energy_virial, sizeof(RecipEnergyVirial_t)));
+}
+
+//
+// Returns energy and virial of the reciprocal
+//
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
+					  double *energy, double *virial) {
+
+  bool prev_calc_energy_virial = (prev_calc_energy || prev_calc_virial);
+
+  if (prev_calc_energy_virial) {
+    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(RecipEnergyVirial_t)));
+  }
+  *energy = 0.5*h_energy_virial->energy;
+  for (int i=0;i < 6;i++) {
+    virial[i] = 0.5*h_energy_virial->virial[i];
+  }
+
+}
+
 
 //
 // FFT x coordinate Real -> Complex
