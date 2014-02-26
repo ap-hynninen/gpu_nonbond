@@ -2539,20 +2539,6 @@ void Grid<AT, CT, CT2>::gather_force(const int ncoord, const double* recip,
   dim3 nblock((ncoord - 1)/nthread.x + 1, 1, 1);
   size_t shmem_size = sizeof(gather_t<CT, 4>)*nthread.x + sizeof(float3)*nthread.x*nthread.y;
 
-  // CCELEC is 1/ (4 pi eps ) in AKMA units, conversion from SI
-  // units: CCELEC = e*e*Na / (4*pi*eps*1Kcal*1A)
-  //
-  //      parameter :: CCELEC=332.0636D0 ! old value of dubious origin
-  //      parameter :: CCELEC=331.843D0  ! value from 1986-1987 CRC Handbook
-  //                                   ! of Chemistry and Physics
-  //  real(chm_real), parameter ::  &
-  //       CCELEC_amber    = 332.0522173D0, &
-  //       CCELEC_charmm   = 332.0716D0   , &
-  //       CCELEC_discover = 332.054D0    , &
-  //       CCELEC_namd     = 332.0636D0   
-
-  const double ccelec = 332.0716;
-
   CT recip_loc[9];
   recip_loc[0] = (CT)(recip[0]*(double)nfftx*ccelec);
   recip_loc[1] = (CT)(recip[1]*(double)nfftx*ccelec);
@@ -2615,20 +2601,6 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
   dim3 nblock((ncoord - 1)/nthread.x + 1, 1, 1);
   //size_t shmem_size = sizeof(gather_t<CT>)*nthread.x;// + sizeof(float3)*nthread.x*nthread.y;
 
-  // CCELEC is 1/ (4 pi eps ) in AKMA units, conversion from SI
-  // units: CCELEC = e*e*Na / (4*pi*eps*1Kcal*1A)
-  //
-  //      parameter :: CCELEC=332.0636D0 ! old value of dubious origin
-  //      parameter :: CCELEC=331.843D0  ! value from 1986-1987 CRC Handbook
-  //                                   ! of Chemistry and Physics
-  //  real(chm_real), parameter ::  &
-  //       CCELEC_amber    = 332.0522173D0, &
-  //       CCELEC_charmm   = 332.0716D0   , &
-  //       CCELEC_discover = 332.054D0    , &
-  //       CCELEC_namd     = 332.0636D0   
-
-  const double ccelec = 332.0716;
-
   CT recip_loc[9];
   recip_loc[0] = (CT)(recip[0]);
   recip_loc[1] = (CT)(recip[1]);
@@ -2641,7 +2613,6 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
   recip_loc[8] = (CT)(recip[8]);
 
   CT ccelec_loc = (CT)ccelec;
-  //CT ccelec_loc = (CT)(1.0);
 
   bool ortho = (recip[1] == 0.0 && recip[2] == 0.0 && recip[3] == 0.0 &&
 		recip[5] == 0.0 && recip[6] == 0.0 && recip[7] == 0.0);
@@ -2712,11 +2683,20 @@ void Grid<AT, CT, CT2>::get_energy_virial(bool prev_calc_energy, bool prev_calc_
   if (prev_calc_energy_virial) {
     cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(RecipEnergyVirial_t)));
   }
-  *energy = 0.5*h_energy_virial->energy;
-  for (int i=0;i < 6;i++) {
-    virial[i] = 0.5*h_energy_virial->virial[i];
-  }
 
+  double cfact = 0.5*ccelec;
+
+  *energy = h_energy_virial->energy*cfact;
+  // add in pressure contributions
+  virial[0] -= h_energy_virial->virial[0]*cfact;
+  virial[1] -= h_energy_virial->virial[1]*cfact;
+  virial[2] -= h_energy_virial->virial[2]*cfact;
+  virial[3] -= h_energy_virial->virial[1]*cfact;
+  virial[4] -= h_energy_virial->virial[3]*cfact;
+  virial[5] -= h_energy_virial->virial[4]*cfact;
+  virial[6] -= h_energy_virial->virial[2]*cfact;
+  virial[7] -= h_energy_virial->virial[4]*cfact;
+  virial[8] -= h_energy_virial->virial[5]*cfact;
 }
 
 

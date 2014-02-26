@@ -35,6 +35,9 @@ struct DirectSettings_t {
 
   float inv_roff2_ron2;
 
+  float k6, k12, dv6, dv12;
+  float roffinv3;
+
   float hinv;
   float *ewald_force;
 

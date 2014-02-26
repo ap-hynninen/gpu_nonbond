@@ -276,7 +276,7 @@ void build_nlist_kernel(const int ncell, const int izone, const int n_jzone,
 const int nwarp_build_excl_dist = 8;
 
 template < int tilesize >
-__global__ void build_excl_kernel(const int n_ijlist, const int3 *ijlist,
+__global__ void build_excl_kernel(const unsigned int base_tid, const int n_ijlist, const int3 *ijlist,
 				  const int *cell_start, const float4 *xyzq,
 				  int *tile_indj,
 				  tile_excl_t<tilesize> *tile_excl,
@@ -285,7 +285,7 @@ __global__ void build_excl_kernel(const int n_ijlist, const int3 *ijlist,
   const int num_thread_per_excl = (32/(num_excl<tilesize>::val));
 
   // Global thread index
-  const unsigned int gtid = threadIdx.x + blockDim.x*blockIdx.x;
+  const unsigned int gtid = threadIdx.x + blockDim.x*blockIdx.x + base_tid;
   // Global warp index
   const unsigned int wid = gtid / warpsize;
   // Local thread index (0...warpsize-1)
@@ -573,6 +573,7 @@ void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, cons
 
   int3 max_nblock3 = get_max_nblock();
   unsigned int max_nblock = max_nblock3.x;
+  unsigned int base_tid = 0;
 
   while (nblock_tot != 0) {
 
@@ -581,10 +582,12 @@ void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, cons
 
     build_excl_kernel<tilesize>
       <<< nblock, nthread, shmem_size, stream >>>
-      (n_ijlist, ijlist, cell_start,
+      (base_tid, n_ijlist, ijlist, cell_start,
        xyzq, tile_indj, tile_excl,
        boxx, boxy, boxz,
        roff2);
+
+    base_tid += nblock*nthread;
 
     cudaCheck(cudaGetLastError());
   }

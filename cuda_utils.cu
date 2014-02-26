@@ -282,7 +282,8 @@ static cudaDeviceProp gpu_prop;
 static int cuda_arch;
 
 void start_gpu(int numnode, int mynode) {
-  int devices[4] = {2, 3, 0, 1};
+  //int devices[4] = {2, 3, 0, 1};
+  int devices[4] = {0, 1, 2, 3};
 
   int device_count;
   cudaCheck(cudaGetDeviceCount(&device_count));
@@ -291,7 +292,7 @@ void start_gpu(int numnode, int mynode) {
     exit(1);
   }
 
-  gpu_ind = devices[mynode % 4];
+  gpu_ind = devices[mynode % device_count];
   cudaCheck(cudaSetDevice(gpu_ind));
 
   cudaCheck(cudaThreadSynchronize());
@@ -310,6 +311,11 @@ void start_gpu(int numnode, int mynode) {
   cudaCheck(cudaRuntimeGetVersion(&cuda_rt_version));
 
   cuda_arch = read_CUDA_ARCH();
+
+  if (cuda_arch < 200) {
+    std::cout << "Code must be compiled with compute capability 2.0 or higher" << std::endl;
+    exit(1);
+  }
 
   if (mynode == 0) {
     std::cout << "Number of CUDA devices found " << device_count << std::endl;
@@ -333,6 +339,11 @@ int3 get_max_nblock() {
   max_nblock.x = gpu_prop.maxGridSize[0];
   max_nblock.y = gpu_prop.maxGridSize[1];
   max_nblock.z = gpu_prop.maxGridSize[2];
+  if (cuda_arch <= 200) {
+    max_nblock.x = min(65535, max_nblock.x);
+    max_nblock.y = min(65535, max_nblock.y);
+    max_nblock.z = min(65535, max_nblock.z);
+  }
   return max_nblock;
 }
 
