@@ -989,51 +989,104 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
 
   // Reduce energy and virial
   if (calc_energy_virial) {
-    /*
-    // Reduce within warp to minimize shared memory usage
-    const int tid = threadIdx.x % warpsize;
 #if __CUDA_ARCH__ < 300
-    // Requires (blockDim.x/32)*sizeof(RecipEnergyVirial_t) amount of shared memory
+    // Requires blockDim.x*sizeof(RecipEnergyVirial_t) amount of shared memory
+    volatile RecipEnergyVirial_t* sh_ev = (RecipEnergyVirial_t *)sh_prefac;
+    // NOTE: this __syncthreads() is needed because we're using a single shared memory buffer
     __syncthreads();
-    const int base = (threadIdx.x/warpsize)*warpsize;
-    volatile RecipEnergyVirial_t* sh_ev = &((RecipEnergyVirial_t *)&sh_prefac[0])[base];
-    sh_ev[tid].energy  = energy;
-    sh_ev[tid].virial[0] = virial0;
-    sh_ev[tid].virial[1] = virial1;
-    sh_ev[tid].virial[2] = virial2;
-    sh_ev[tid].virial[3] = virial3;
-    sh_ev[tid].virial[4] = virial4;
-    sh_ev[tid].virial[5] = virial5;
+    sh_ev[threadIdx.x].energy  = energy;
+    sh_ev[threadIdx.x].virial[0] = virial0;
+    sh_ev[threadIdx.x].virial[1] = virial1;
+    sh_ev[threadIdx.x].virial[2] = virial2;
+    sh_ev[threadIdx.x].virial[3] = virial3;
+    sh_ev[threadIdx.x].virial[4] = virial4;
+    sh_ev[threadIdx.x].virial[5] = virial5;
     __syncthreads();
 #endif
-#pragma unroll
-    for (int d=warpsize/2;d >= 1;d /= 2) {
 #if __CUDA_ARCH__ < 300
-      double energy_val = sh_ev[(tid+d) % warpsize].energy;
-      double virial0_val = sh_ev[(tid+d) % warpsize].virial[0];
-      double virial1_val = sh_ev[(tid+d) % warpsize].virial[1];
-      double virial2_val = sh_ev[(tid+d) % warpsize].virial[2];
-      double virial3_val = sh_ev[(tid+d) % warpsize].virial[3];
-      double virial4_val = sh_ev[(tid+d) % warpsize].virial[4];
-      double virial5_val = sh_ev[(tid+d) % warpsize].virial[5];
+    for (int d=1;d < blockDim.x;d *= 2) {
+      int t = threadIdx.x + d;
+      double energy_val = (t < blockDim.x) ? sh_ev[t].energy : 0.0;
+      double virial0_val = (t < blockDim.x) ? sh_ev[t].virial[0] : 0.0;
+      double virial1_val = (t < blockDim.x) ? sh_ev[t].virial[1] : 0.0;
+      double virial2_val = (t < blockDim.x) ? sh_ev[t].virial[2] : 0.0;
+      double virial3_val = (t < blockDim.x) ? sh_ev[t].virial[3] : 0.0;
+      double virial4_val = (t < blockDim.x) ? sh_ev[t].virial[4] : 0.0;
+      double virial5_val = (t < blockDim.x) ? sh_ev[t].virial[5] : 0.0;
       __syncthreads();
-      sh_ev[tid].energy += energy_val;
-      sh_ev[tid].virial[0] += virial0_val;
-      sh_ev[tid].virial[1] += virial1_val;
-      sh_ev[tid].virial[2] += virial2_val;
-      sh_ev[tid].virial[3] += virial3_val;
-      sh_ev[tid].virial[4] += virial4_val;
-      sh_ev[tid].virial[5] += virial5_val;
+      sh_ev[threadIdx.x].energy += energy_val;
+      sh_ev[threadIdx.x].virial[0] += virial0_val;
+      sh_ev[threadIdx.x].virial[1] += virial1_val;
+      sh_ev[threadIdx.x].virial[2] += virial2_val;
+      sh_ev[threadIdx.x].virial[3] += virial3_val;
+      sh_ev[threadIdx.x].virial[4] += virial4_val;
+      sh_ev[threadIdx.x].virial[5] += virial5_val;
       __syncthreads();
-#else
-      //      energy += __hiloint2double(__shfl(__double2hiint(energy), tid+d),
-      //				 __shfl(__double2loint(energy), tid+d));
-
-#endif
     }
-
+#else
+    const int tid = threadIdx.x & (warpsize-1);
+    const int base = (threadIdx.x/warpsize);
+    volatile RecipEnergyVirial_t* sh_ev = (RecipEnergyVirial_t *)sh_prefac;
+    // Reduce within warps
+    for (int d=warpsize/2;d >= 1;d /= 2) {
+      energy += __hiloint2double(__shfl(__double2hiint(energy), tid+d),
+				 __shfl(__double2loint(energy), tid+d));
+      virial0 += __hiloint2double(__shfl(__double2hiint(virial0), tid+d),
+				  __shfl(__double2loint(virial0), tid+d));
+      virial1 += __hiloint2double(__shfl(__double2hiint(virial1), tid+d),
+				  __shfl(__double2loint(virial1), tid+d));
+      virial2 += __hiloint2double(__shfl(__double2hiint(virial2), tid+d),
+				  __shfl(__double2loint(virial2), tid+d));
+      virial3 += __hiloint2double(__shfl(__double2hiint(virial3), tid+d),
+				  __shfl(__double2loint(virial3), tid+d));
+      virial4 += __hiloint2double(__shfl(__double2hiint(virial4), tid+d),
+				  __shfl(__double2loint(virial4), tid+d));
+      virial5 += __hiloint2double(__shfl(__double2hiint(virial5), tid+d),
+				  __shfl(__double2loint(virial5), tid+d));
+    }
+    // Reduce between warps
+    // NOTE: this __syncthreads() is needed because we're using a single shared memory buffer
+    __syncthreads();
     if (tid == 0) {
+      sh_ev[base].energy = energy;
+      sh_ev[base].virial[0] = virial0;
+      sh_ev[base].virial[1] = virial1;
+      sh_ev[base].virial[2] = virial2;
+      sh_ev[base].virial[3] = virial3;
+      sh_ev[base].virial[4] = virial4;
+      sh_ev[base].virial[5] = virial5;
+    }
+    __syncthreads();
+    if (base == 0) {
+      energy = (tid < blockDim.x/warpsize) ? sh_ev[tid].energy : 0.0;
+      virial0 = (tid < blockDim.x/warpsize) ? sh_ev[tid].virial[0] : 0.0;
+      virial1 = (tid < blockDim.x/warpsize) ? sh_ev[tid].virial[1] : 0.0;
+      virial2 = (tid < blockDim.x/warpsize) ? sh_ev[tid].virial[2] : 0.0;
+      virial3 = (tid < blockDim.x/warpsize) ? sh_ev[tid].virial[3] : 0.0;
+      virial4 = (tid < blockDim.x/warpsize) ? sh_ev[tid].virial[4] : 0.0;
+      virial5 = (tid < blockDim.x/warpsize) ? sh_ev[tid].virial[5] : 0.0;
+      for (int d=warpsize/2;d >= 1;d /= 2) {
+	energy += __hiloint2double(__shfl(__double2hiint(energy), tid+d),
+				   __shfl(__double2loint(energy), tid+d));
+	virial0 += __hiloint2double(__shfl(__double2hiint(virial0), tid+d),
+				    __shfl(__double2loint(virial0), tid+d));
+	virial1 += __hiloint2double(__shfl(__double2hiint(virial1), tid+d),
+				    __shfl(__double2loint(virial1), tid+d));
+	virial2 += __hiloint2double(__shfl(__double2hiint(virial2), tid+d),
+				    __shfl(__double2loint(virial2), tid+d));
+	virial3 += __hiloint2double(__shfl(__double2hiint(virial3), tid+d),
+				    __shfl(__double2loint(virial3), tid+d));
+	virial4 += __hiloint2double(__shfl(__double2hiint(virial4), tid+d),
+				    __shfl(__double2loint(virial4), tid+d));
+	virial5 += __hiloint2double(__shfl(__double2hiint(virial5), tid+d),
+				    __shfl(__double2loint(virial5), tid+d));
+      }
+    }
+    
+#endif
+
 #if __CUDA_ARCH__ < 300
+    if (threadIdx.x == 0) {
       energy = sh_ev[0].energy;
       virial0 = sh_ev[0].virial[0];
       virial1 = sh_ev[0].virial[1];
@@ -1041,7 +1094,6 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
       virial3 = sh_ev[0].virial[3];
       virial4 = sh_ev[0].virial[4];
       virial5 = sh_ev[0].virial[5];
-#endif
       atomicAdd(&d_energy_virial.energy, energy);
       atomicAdd(&d_energy_virial.virial[0], virial0);
       atomicAdd(&d_energy_virial.virial[1], virial1);
@@ -1050,15 +1102,17 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
       atomicAdd(&d_energy_virial.virial[4], virial4);
       atomicAdd(&d_energy_virial.virial[5], virial5);
     }
-*/
-
-    atomicAdd(&d_energy_virial.energy, energy);
-    atomicAdd(&d_energy_virial.virial[0], virial0);
-    atomicAdd(&d_energy_virial.virial[1], virial1);
-    atomicAdd(&d_energy_virial.virial[2], virial2);
-    atomicAdd(&d_energy_virial.virial[3], virial3);
-    atomicAdd(&d_energy_virial.virial[4], virial4);
-    atomicAdd(&d_energy_virial.virial[5], virial5);
+#else
+    if (threadIdx.x == 0) {
+      atomicAdd(&d_energy_virial.energy, energy);
+      atomicAdd(&d_energy_virial.virial[0], virial0);
+      atomicAdd(&d_energy_virial.virial[1], virial1);
+      atomicAdd(&d_energy_virial.virial[2], virial2);
+      atomicAdd(&d_energy_virial.virial[3], virial3);
+      atomicAdd(&d_energy_virial.virial[4], virial4);
+      atomicAdd(&d_energy_virial.virial[5], virial5);
+    }
+#endif
 
   }
 
@@ -2442,12 +2496,42 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
 
   bool calc_energy_virial = (calc_energy || calc_virial);
 
+  // Best performance:
+  // cuda_arch = 200:
+  // energy & virial & (C2075 | K40c) & 512x14: 102.7 (C2075) | 70.4 (K240c)
+  // C2075 & 768x12: 27.4
+
   int nthread = 512;
   int nblock = 10;
-  int shmem_size = sizeof(CT)*(nfftx + nffty + nfftz);
-  if (calc_energy_virial && get_cuda_arch() < 300) {
-    shmem_size = max(shmem_size, (int)((nthread/warpsize)*sizeof(RecipEnergyVirial_t)));
+
+  if (get_cuda_arch() < 300) {
+    if (calc_energy_virial) {
+      nthread = 512;
+      nblock = 14;
+    } else {
+      nthread = 768;
+      nblock = 12;
+    }
+  } else {
+    if (calc_energy_virial) {
+      nthread = 1024;
+      nblock = 14;
+    } else {
+      nthread = 1024;
+      nblock = 14;
+    }
   }
+
+  int shmem_size = sizeof(CT)*(nfftx + nffty + nfftz);
+  if (calc_energy_virial) {
+    if (get_cuda_arch() < 300) {
+      shmem_size = max(shmem_size, (int)(nthread*sizeof(RecipEnergyVirial_t)));
+    } else {
+      shmem_size = max(shmem_size, (int)((nthread/warpsize)*sizeof(RecipEnergyVirial_t)));
+    }
+  }
+
+  std::cout << "shmem_size = " << shmem_size << std::endl;
 
   int nfft1, nfft2, nfft3;
   int size1, size2, size3;

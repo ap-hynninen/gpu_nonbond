@@ -80,9 +80,10 @@ void test4() {
   const int nfftz = 64;
   const int order = 4;
   const FFTtype fft_type = BOX;
-  const double energy_comp = 0.1788689629E+01;
-  const double virial_comp[6] = {0.1590723538E+01, -0.1685219089E-01, 0.1883465240E-01,
-				 0.1522135965E+01, 0.2304416459E-03, 0.1678928956E+01};
+  const double energy_comp = 0.5939730270E+03;
+  const double virial_comp[9] = {-0.5282341105E+03, 0.5596133994E+01, -0.6254453157E+01,
+				 0.5596133994E+01, -0.5054581254E+03, -0.7652312605E-01,
+				 -0.6254453157E+01, -0.7652312605E-01, -0.5575246246E+03};
   /*
 0.1788697374E+01
 0.1590726511E+01   -0.1685194095E-01    0.1883435446E-01    0.1522137390E+01    0.2322833086E-03    0.1678929560E+01
@@ -136,9 +137,9 @@ void test4() {
   //grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
   grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
 
-  double energy, virial[6];
+  double energy, virial[9];
   grid.get_energy_virial(true, true, &energy, virial);
-  tol = 3.6e-6;
+  tol = 1.2e-3;
   max_diff = fabs(energy_comp - energy);
   if (isnan(energy) || max_diff > tol) {
     std::cout<< "energy comparison FAILED" << std::endl;
@@ -149,18 +150,18 @@ void test4() {
     std::cout<< "energy comparison OK (tolerance " << tol << " max difference "
 	     << max_diff << ")" << std::endl;
   }
-  tol = 5.55e-6;
+  tol = 2.0e-3;
   max_diff = 0.0;
   bool vir_nan = false;
-  for (int i=0;i < 6;i++) {
+  for (int i=0;i < 9;i++) {
     max_diff = max(max_diff, fabs(virial_comp[i] - virial[i]));
     vir_nan = vir_nan | isnan(virial[i]);
   }
   if (max_diff > tol) {
     std::cout<< "virial comparison FAILED" << std::endl;
     std::cout<< "virial_comp | virial" << std::endl;
-    for (int i=0;i < 6;i++) {
-      std::cout << virial_comp[0] << " " << virial[0] << std::endl;
+    for (int i=0;i < 9;i++) {
+      std::cout << virial_comp[i] << " " << virial[i] << std::endl;
     }
     return;
   } else {
@@ -305,9 +306,10 @@ void test6() {
   const int nfftz = 64;
   const int order = 6;
   const FFTtype fft_type = BOX;
-  const double energy_comp = 0.1792127058E+01;
-  const double virial_comp[6] = {0.1600491131E+01, -0.1707650754E-01, 0.1859676239E-01,
-				 0.1531642625E+01, 0.3090453058E-03,  0.1688328405E+01};
+  const double energy_comp = 0.5951144996E+03;
+  const double virial_comp[9] = {-0.5314776507E+03, 0.5670623182E+01, -0.6175456643E+01,
+				 0.5670623182E+01, -0.5086150173E+03, -0.1026251692E+00,
+				 -0.6175456643E+01, -0.1026251692E+00, -0.5606459148E+03};
 
   /*
  0.1792135021E+01
@@ -354,9 +356,9 @@ void test6() {
   //grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
   grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
 
-  double energy, virial[6];
+  double energy, virial[9];
   grid.get_energy_virial(true, true, &energy, virial);
-  tol = 3.8e-6;
+  tol = 1.3e-3;
   max_diff = fabs(energy_comp - energy);
   if (isnan(energy) || max_diff > tol) {
     std::cout<< "energy comparison FAILED" << std::endl;
@@ -367,18 +369,18 @@ void test6() {
     std::cout<< "energy comparison OK (tolerance " << tol << " max difference "
 	     << max_diff << ")" << std::endl;
   }
-  tol = 5.55e-6;
+  tol = 2.0e-3;
   max_diff = 0.0;
   bool vir_nan = false;
-  for (int i=0;i < 6;i++) {
+  for (int i=0;i < 9;i++) {
     max_diff = max(max_diff, fabs(virial_comp[i] - virial[i]));
     vir_nan = vir_nan | isnan(virial[i]);
   }
   if (max_diff > tol) {
     std::cout<< "virial comparison FAILED" << std::endl;
     std::cout<< "virial_comp | virial" << std::endl;
-    for (int i=0;i < 6;i++) {
-      std::cout << virial_comp[0] << " " << virial[0] << std::endl;
+    for (int i=0;i < 9;i++) {
+      std::cout << virial_comp[i] << " " << virial[i] << std::endl;
     }
     return;
   } else {
