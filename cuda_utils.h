@@ -24,6 +24,12 @@ void copy_DtoH_async_T(void *d_array, void *h_array, const int array_len, cudaSt
 void copy_DtoH_T(void *d_array, void *h_array, const int array_len, const size_t sizeofT);
 
 #ifdef __CUDACC__
+void copy_DtoD_async_T(void *d_src, void *d_dst, const int array_len, cudaStream_t stream,
+		       const size_t sizeofT);
+#endif
+void copy_DtoD_T(void *d_src, void *d_dst, const int array_len, const size_t sizeofT);
+
+#ifdef __CUDACC__
 void clear_gpu_array_async_T(void *data, const int ndata, cudaStream_t stream, const size_t sizeofT);
 #endif
 void clear_gpu_array_T(void *data, const int ndata, const size_t sizeofT);
@@ -157,6 +163,25 @@ void copy_DtoH(T *d_array, T *h_array, const int array_len
   copy_DtoH_async_T(d_array, h_array, array_len, stream, sizeof(T));
 #else
   copy_DtoH_T(d_array, h_array, array_len, sizeof(T));
+#endif
+}
+#endif
+
+//----------------------------------------------------------------------------------------
+//
+// Copies memory Device -> Device
+//
+#ifdef __cplusplus
+template <class T>
+void copy_DtoD(T *d_src, T *h_dst, const int array_len
+#ifdef __CUDACC__
+	       , cudaStream_t stream=0
+#endif
+	       ) {
+#ifdef __CUDACC__
+  copy_DtoD_async_T(d_src, h_dst, array_len, stream, sizeof(T));
+#else
+  copy_DtoD_T(d_src, h_dst, array_len, sizeof(T));
 #endif
 }
 #endif

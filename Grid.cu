@@ -1085,8 +1085,8 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
     
 #endif
 
-#if __CUDA_ARCH__ < 300
     if (threadIdx.x == 0) {
+#if __CUDA_ARCH__ < 300
       energy = sh_ev[0].energy;
       virial0 = sh_ev[0].virial[0];
       virial1 = sh_ev[0].virial[1];
@@ -1094,25 +1094,15 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
       virial3 = sh_ev[0].virial[3];
       virial4 = sh_ev[0].virial[4];
       virial5 = sh_ev[0].virial[5];
-      atomicAdd(&d_energy_virial.energy, energy);
-      atomicAdd(&d_energy_virial.virial[0], virial0);
-      atomicAdd(&d_energy_virial.virial[1], virial1);
-      atomicAdd(&d_energy_virial.virial[2], virial2);
-      atomicAdd(&d_energy_virial.virial[3], virial3);
-      atomicAdd(&d_energy_virial.virial[4], virial4);
-      atomicAdd(&d_energy_virial.virial[5], virial5);
-    }
-#else
-    if (threadIdx.x == 0) {
-      atomicAdd(&d_energy_virial.energy, energy);
-      atomicAdd(&d_energy_virial.virial[0], virial0);
-      atomicAdd(&d_energy_virial.virial[1], virial1);
-      atomicAdd(&d_energy_virial.virial[2], virial2);
-      atomicAdd(&d_energy_virial.virial[3], virial3);
-      atomicAdd(&d_energy_virial.virial[4], virial4);
-      atomicAdd(&d_energy_virial.virial[5], virial5);
-    }
 #endif
+      atomicAdd(&d_energy_virial.energy, energy);
+      atomicAdd(&d_energy_virial.virial[0], virial0);
+      atomicAdd(&d_energy_virial.virial[1], virial1);
+      atomicAdd(&d_energy_virial.virial[2], virial2);
+      atomicAdd(&d_energy_virial.virial[3], virial3);
+      atomicAdd(&d_energy_virial.virial[4], virial4);
+      atomicAdd(&d_energy_virial.virial[5], virial5);
+    }
 
   }
 
@@ -2530,8 +2520,6 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
       shmem_size = max(shmem_size, (int)((nthread/warpsize)*sizeof(RecipEnergyVirial_t)));
     }
   }
-
-  std::cout << "shmem_size = " << shmem_size << std::endl;
 
   int nfft1, nfft2, nfft3;
   int size1, size2, size3;

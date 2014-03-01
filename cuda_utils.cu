@@ -123,6 +123,19 @@ void copy_DtoH_T(void *d_array, void *h_array, const int array_len, const size_t
 }
 
 //----------------------------------------------------------------------------------------
+//
+// Copies memory Device -> Device
+//
+void copy_DtoD_async_T(void *d_src, void *d_dst, const int array_len, cudaStream_t stream,
+		       const size_t sizeofT) {
+  cudaCheck(cudaMemcpyAsync(d_dst, d_src, sizeofT*array_len, cudaMemcpyDeviceToDevice, stream));
+}
+
+void copy_DtoD_T(void *d_src, void *d_dst, const int array_len, const size_t sizeofT) {
+  cudaCheck(cudaMemcpy(d_dst, d_src, sizeofT*array_len, cudaMemcpyDeviceToDevice));
+}
+
+//----------------------------------------------------------------------------------------
 
 void clear_gpu_array_async_T(void *data, const int ndata, cudaStream_t stream, const size_t sizeofT) {
   cudaCheck(cudaMemsetAsync(data, 0, sizeofT*ndata, stream));

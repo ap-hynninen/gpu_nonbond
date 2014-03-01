@@ -672,7 +672,7 @@ void HoloConst::set_pair_ind(int npair, int2 *h_pair_ind,
 // Setups trip_ind -table
 //
 void HoloConst::set_trip_ind(int ntrip, int3 *h_trip_ind,
-				double *h_trip_constr, double *h_trip_mass) {
+			     double *h_trip_constr, double *h_trip_mass) {
 
   this->ntrip = ntrip;
 
