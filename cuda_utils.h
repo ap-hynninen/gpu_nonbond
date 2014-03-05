@@ -5,9 +5,9 @@
 // Returns stride that aligns with 256 byte boundaries
 template <typename T>
 inline int calc_stride(int ncoord) {
-  const int sizeof_T = 4;
-  //return ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
-  return ((ncoord*sizeof_T - 1)/256 + 1)*256/sizeof_T;
+  //const int sizeof_T = 4;
+  return ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
+  //return ((ncoord*sizeof_T - 1)/256 + 1)*256/sizeof_T;
 }
 
 void deallocate_host_T(void **pp);
