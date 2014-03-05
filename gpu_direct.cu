@@ -64,7 +64,7 @@ void test() {
   dir.setup(boxx, boxy, boxz, kappa, roff, ron, VDW_VSH, EWALD, true, true);
   dir.set_vdwparam("test_data/vdwparam.txt");
   dir.set_vdwtype("test_data/vdwtype.txt");
-  dir.calc_force(ncoord, xyzq.xyzq, &nlist, false, false, force_fp.stride, force_fp.data);
+  dir.calc_force(ncoord, xyzq.xyzq, &nlist, false, false, force_fp.xyz.stride, force_fp.xyz.data);
 
   force_fp.convert(&force);
 

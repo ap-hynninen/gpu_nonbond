@@ -2,6 +2,14 @@
 #ifndef CUDA_UTILS_H
 #define CUDA_UTILS_H
 
+// Returns stride that aligns with 256 byte boundaries
+template <typename T>
+inline int calc_stride(int ncoord) {
+  const int sizeof_T = 4;
+  //return ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
+  return ((ncoord*sizeof_T - 1)/256 + 1)*256/sizeof_T;
+}
+
 void deallocate_host_T(void **pp);
 void allocate_host_T(void **pp, const int len, const size_t sizeofT);
 void reallocate_host_T(void **pp, int *curlen, const int newlen, const float fac, const size_t sizeofT);
@@ -150,6 +158,17 @@ void copy_HtoD(T *h_array, T *d_array, int array_len
 
 //----------------------------------------------------------------------------------------
 //
+// Copies memory Host -> Device using synchronous calls
+//
+#ifdef __cplusplus
+template <class T>
+void copy_HtoD_sync(T *h_array, T *d_array, int array_len) {
+  copy_HtoD_T(h_array, d_array, array_len, sizeof(T));
+}
+#endif
+
+//----------------------------------------------------------------------------------------
+//
 // Copies memory Device -> Host
 //
 #ifdef __cplusplus
@@ -164,6 +183,16 @@ void copy_DtoH(T *d_array, T *h_array, const int array_len
 #else
   copy_DtoH_T(d_array, h_array, array_len, sizeof(T));
 #endif
+}
+#endif
+//----------------------------------------------------------------------------------------
+//
+// Copies memory Device -> Host using synchronous calls
+//
+#ifdef __cplusplus
+template <class T>
+void copy_DtoH_sync(T *d_array, T *h_array, const int array_len) {
+  copy_DtoH_T(d_array, h_array, array_len, sizeof(T));
 }
 #endif
 
@@ -183,6 +212,16 @@ void copy_DtoD(T *d_src, T *h_dst, const int array_len
 #else
   copy_DtoD_T(d_src, h_dst, array_len, sizeof(T));
 #endif
+}
+#endif
+//----------------------------------------------------------------------------------------
+//
+// Copies memory Device -> Device using synchronous calls
+//
+#ifdef __cplusplus
+template <class T>
+void copy_DtoD_sync(T *d_src, T *h_dst, const int array_len) {
+  copy_DtoD_T(d_src, h_dst, array_len, sizeof(T));
 }
 #endif
 

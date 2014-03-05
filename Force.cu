@@ -5,31 +5,18 @@
 #include "reduce.h"
 #include "cuda_utils.h"
 #include "Force.h"
-
-
-template <typename T>
-int Force<T>::calc_stride() {
-  const int sizeof_T = 4;
-  //return ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
-  return ((ncoord*sizeof_T - 1)/256 + 1)*256/sizeof_T;
-}
+#include "hostXYZ.h"
 
 //
 // Class creators
 //
 template <typename T>
 Force<T>::Force() {
-  ncoord = 0;
-  stride = 0;
-  data_len = 0;
-  data = NULL;
 }
 
 template <typename T>
-Force<T>::Force(const int ncoord) : ncoord(ncoord) {
-  stride = calc_stride();
-  data_len = 3*stride;
-  allocate<T>(&data, data_len);
+Force<T>::Force(const int ncoord) {
+  xyz.resize(ncoord);
 }
 
 template <typename T>
@@ -40,32 +27,28 @@ Force<T>::Force(const char *filename) {
     T fx, fy, fz;
     
     // Count number of coordinates
-    ncoord = 0;
+    int ncoord = 0;
     while (file >> fx >> fy >> fz) ncoord++;
-
-    stride = calc_stride();
 
     // Rewind
     file.clear();
     file.seekg(0, std::ios::beg);
     
     // Allocate CPU memory
-    T *data_cpu = new T[3*stride];
+    hostXYZ<T> xyz_cpu(ncoord, NON_PINNED);
     
     // Read coordinates
     int i=0;
-    while (file >> data_cpu[i] >> data_cpu[i+stride] >> data_cpu[i+stride*2]) i++;
-    
+    while (file >> xyz_cpu.data[i] 
+	   >> xyz_cpu.data[i+xyz_cpu.stride] 
+	   >> xyz_cpu.data[i+xyz_cpu.stride*2]) i++;
+
     // Allocate GPU memory
-    data_len = 3*stride;
-    allocate<T>(&data, data_len);
+    xyz.resize(ncoord);
 
     // Copy coordinates from CPU to GPU
-    copy_HtoD<T>(data_cpu, data, 3*stride);
+    xyz.set_data_sync(xyz_cpu);
 
-    // Deallocate CPU memory
-    delete [] data_cpu;
-    
   } else {
     std::cerr<<"Error opening file "<<filename<<std::endl;
     exit(1);
@@ -78,7 +61,6 @@ Force<T>::Force(const char *filename) {
 //
 template <typename T>
 Force<T>::~Force() {
-  if (data != NULL) deallocate<T>(&data);
 }
 
 //
@@ -86,7 +68,7 @@ Force<T>::~Force() {
 //
 template <typename T>
 void Force<T>::clear(cudaStream_t stream) {
-  clear_gpu_array<T>(data, 3*stride, stream);
+  xyz.clear(stream);
 }
 
 //
@@ -96,13 +78,14 @@ void Force<T>::clear(cudaStream_t stream) {
 template <typename T>
 bool Force<T>::compare(Force<T>* force, const double tol, double& max_diff) {
 
-  assert(force->ncoord == ncoord);
+  //assert(force->ncoord == ncoord);
+  assert(force->xyz.n == xyz.n);
 
-  T *h_data1 = new T[3*stride];
-  T *h_data2 = new T[3*force->stride];
+  hostXYZ<T> xyz1(xyz.n, NON_PINNED);
+  hostXYZ<T> xyz2(force->xyz.n, NON_PINNED);
 
-  copy_DtoH<T>(data,        h_data1, 3*stride);
-  copy_DtoH<T>(force->data, h_data2, 3*force->stride);
+  xyz1.set_data(xyz);
+  xyz2.set_data(force->xyz);
 
   bool ok = true;
 
@@ -113,13 +96,13 @@ bool Force<T>::compare(Force<T>* force, const double tol, double& max_diff) {
   double fx2, fy2, fz2;
   double diff;
   try {
-    for (i=0;i < ncoord;i++) {
-      fx1 = (double)h_data1[i];
-      fy1 = (double)h_data1[i + stride];
-      fz1 = (double)h_data1[i + 2*stride];
-      fx2 = (double)h_data2[i];
-      fy2 = (double)h_data2[i + force->stride];
-      fz2 = (double)h_data2[i + 2*force->stride];
+    for (i=0;i < xyz.n;i++) {
+      fx1 = (double)xyz1.data[i];
+      fy1 = (double)xyz1.data[i + xyz1.stride];
+      fz1 = (double)xyz1.data[i + xyz1.stride*2];
+      fx2 = (double)xyz2.data[i];
+      fy2 = (double)xyz2.data[i + xyz2.stride];
+      fz2 = (double)xyz2.data[i + xyz2.stride*2];
       if (isnan(fx1) || isnan(fy1) || isnan(fz1) || isnan(fx2) || isnan(fy2) || isnan(fz2)) throw 1;
       diff = max(fabs(fx1-fx2), max(fabs(fy1-fy2), fabs(fz1-fz2)));
       max_diff = max(diff, max_diff);
@@ -134,9 +117,6 @@ bool Force<T>::compare(Force<T>* force, const double tol, double& max_diff) {
     ok = false;
   }
 
-  delete [] h_data1;
-  delete [] h_data2;
-  
   return ok;
 }
 
@@ -145,9 +125,7 @@ bool Force<T>::compare(Force<T>* force, const double tol, double& max_diff) {
 //
 template <typename T>
 void Force<T>::set_ncoord(int ncoord, float fac) {
-  this->ncoord = ncoord;
-  stride = calc_stride();
-  reallocate<T>(&data, &data_len, 3*stride, fac);
+  xyz.resize(ncoord, fac);
 }
 
 //
@@ -155,15 +133,15 @@ void Force<T>::set_ncoord(int ncoord, float fac) {
 //
 template <typename T>
 int Force<T>::get_stride() {
-  return stride;
+  return xyz.stride;
 }
 
 //
-// Copies force to host
+// Copies force to hostXYZ object
 //
 template <typename T>
-void Force<T>::get_force(T *h_data, cudaStream_t stream) {
-  copy_DtoH<T>(data, h_data, 3*stride, stream);
+void Force<T>::get_force(hostXYZ<T> &h_xyz, cudaStream_t stream) {
+  h_xyz.set_data(xyz, stream);
 }
 
 //
@@ -173,14 +151,20 @@ template <typename T>
 template <typename T2>
 void Force<T>::convert(Force<T2>* force, cudaStream_t stream) {
 
-  assert(force->ncoord == ncoord);
-  assert(force->stride == stride);
+  assert(force->xyz.n == xyz.n);
 
-  int nthread = 512;
-  int nblock = (3*stride - 1)/nthread + 1;
-
-  reduce_data<T, T2>
-    <<< nblock, nthread, 0, stream >>>(3*stride, this->data, force->data);
+  if (force->xyz.stride == xyz.stride) {
+    int nthread = 512;
+    int nblock = (3*xyz.stride - 1)/nthread + 1;
+    reduce_data<T, T2>
+      <<< nblock, nthread, 0, stream >>>(3*xyz.stride, xyz.data, force->xyz.data);
+  } else {
+    int nthread = 512;
+    int nblock = (xyz.n - 1)/nthread + 1;
+    reduce_data<T, T2>
+      <<< nblock, nthread, 0, stream >>>(xyz.n, xyz.stride, xyz.data,
+					 force->xyz.stride, force->xyz.data);
+  }
 }
 
 //
@@ -190,15 +174,15 @@ template <typename T>
 template <typename T2, typename T3>
 void Force<T>::convert_to(Force<T3>* force, cudaStream_t stream) {
 
-  assert(force->ncoord == ncoord);
-  assert(force->stride == stride);
+  assert(force->xyz.n == xyz.n);
+  assert(force->xyz.stride == xyz.stride);
   assert(sizeof(T2) == sizeof(T3));
 
   int nthread = 512;
-  int nblock = (3*stride - 1)/nthread + 1;
+  int nblock = (3*xyz.stride - 1)/nthread + 1;
 
   reduce_data<T, T2>
-    <<< nblock, nthread, 0, stream >>>(3*stride, this->data, (T2 *)force->data);
+    <<< nblock, nthread, 0, stream >>>(3*xyz.stride, xyz.data, (T2 *)force->xyz.data);
 }
 
 //
@@ -212,10 +196,10 @@ void Force<T>::convert(cudaStream_t stream) {
   assert(sizeof(T) == sizeof(T2));
 
   int nthread = 512;
-  int nblock = (3*stride - 1)/nthread + 1;
+  int nblock = (3*xyz.stride - 1)/nthread + 1;
 
   reduce_data<T, T2>
-    <<< nblock, nthread, 0, stream >>>(3*stride, this->data);
+    <<< nblock, nthread, 0, stream >>>(3*xyz.stride, xyz.data);
 }
 
 //
@@ -227,13 +211,14 @@ template <typename T>
 template <typename T2, typename T3>
 void Force<T>::convert_add(Force<T3> *force, cudaStream_t stream) {
 
+  assert(force->xyz.stride == xyz.stride);
   assert(sizeof(T) == sizeof(T2));
 
   int nthread = 512;
-  int nblock = (3*stride - 1)/nthread + 1;
+  int nblock = (3*xyz.stride - 1)/nthread + 1;
 
   reduce_add_data<T, T2, T3>
-    <<< nblock, nthread, 0, stream >>>(3*stride, force->data, this->data);
+    <<< nblock, nthread, 0, stream >>>(3*xyz.stride, force->xyz.data, xyz.data);
 }
 
 //

@@ -43,7 +43,11 @@ void reallocate_host_T(void **pp, int *curlen, const int newlen, const float fac
   }
 
   if (*pp == NULL) {
-    *curlen = (int)(float(newlen)*fac);
+    if (fac > 1.0f) {
+      *curlen = (int)(((double)(newlen))*(double)fac);
+    } else {
+      *curlen = newlen;
+    }
     allocate_host_T(pp, *curlen, sizeofT);
   }
 
@@ -88,7 +92,11 @@ void reallocate_T(void **pp, int *curlen, const int newlen, const float fac, con
   }
 
   if (*pp == NULL) {
-    *curlen = (int)(float(newlen)*fac);
+    if (fac > 1.0f) {
+      *curlen = (int)(((double)(newlen))*(double)fac);
+    } else {
+      *curlen = newlen;
+    }
     allocate_T(pp, *curlen, sizeofT);
   }
 

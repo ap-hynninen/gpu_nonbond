@@ -135,7 +135,7 @@ void test4() {
   grid.scalar_sum(recip, kappa, true, true);
   grid.c2r_fft();
   //grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
+  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.xyz.stride, force.xyz.data);
 
   double energy, virial[9];
   grid.get_energy_virial(true, true, &energy, virial);
@@ -279,7 +279,7 @@ void test4() {
 
   // Calculate forces
   //  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
+  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.xyz.stride, force.xyz.data);
 
   tol = 3.3e-4;
   if (!force_comp.compare(&force, tol, max_diff)) {
@@ -354,7 +354,7 @@ void test6() {
   grid.scalar_sum(recip, kappa, true, true);
   grid.c2r_fft();
   //grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
+  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.xyz.stride, force.xyz.data);
 
   double energy, virial[9];
   grid.get_energy_virial(true, true, &energy, virial);
@@ -498,7 +498,7 @@ void test6() {
 
   // Calculate forces
   //  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride, force.data);
+  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.xyz.stride, force.xyz.data);
 
   tol = 3.6e-4;
   if (!force_comp.compare(&force, tol, max_diff)) {
