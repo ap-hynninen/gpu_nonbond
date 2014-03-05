@@ -749,7 +749,10 @@ void HoloConst::setup_textures(double *xyz0, double *xyz1, int stride) {
 //
 // Apply constraints
 //
-void HoloConst::apply(double *xyz0, double *xyz1, int stride) {
+void HoloConst::apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1) {
+
+  assert(xyz0->n == xyz1->n);
+  assert(xyz0->stride == xyz1->stride);
 
   h_setup.nsolvent = nsolvent;
   h_setup.solvent_ind = solvent_ind;
@@ -779,15 +782,16 @@ void HoloConst::apply(double *xyz0, double *xyz1, int stride) {
   h_setup.shake_tol = shake_tol;
   h_setup.max_niter = max_niter;
 
+  int stride = xyz0->stride;
   h_setup.stride = stride;
   h_setup.stride2 = stride*2;
-  h_setup.xyz0 = xyz0;
-  h_setup.xyz1 = xyz1;
-  h_setup.xyz2 = xyz1;
+  h_setup.xyz0 = xyz0->data;
+  h_setup.xyz1 = xyz1->data;
+  h_setup.xyz2 = xyz1->data;
 
   cudaCheck(cudaMemcpyToSymbol(d_setup, &h_setup, sizeof(HoloConstSettings_t)));
 
-  if (use_textures) setup_textures(xyz0, xyz1, stride);
+  if (use_textures) setup_textures(xyz0->data, xyz1->data, stride);
 
   int nthread, nblock;
 

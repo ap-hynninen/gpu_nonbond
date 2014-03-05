@@ -38,33 +38,44 @@ public:
     reallocate<T>(&this->data, &this->size, 3*this->stride, fac);
   }
 
-  // Sets data from hostXYZ
-  void set_data(hostXYZ<T> &xyz, cudaStream_t stream=0) {
-    assert(this->stride == xyz.stride);
-    copy_HtoD<T>(xyz.data, this->data, 3*this->stride, stream);
-  }
-
-  // Sets data from cudaXYZ
-  void set_data(cudaXYZ<T> &xyz, cudaStream_t stream=0) {
-    assert(this->stride == xyz.stride);
-    copy_DtoD<T>(xyz.data, this->data, 3*this->stride, stream);
-  }
-
   // Clears the data array
   void clear(cudaStream_t stream=0) {
     clear_gpu_array<T>(this->data, 3*this->stride, stream);
   }
 
+  //--------------------------------------------------------------------------
+
+  // Sets data from hostXYZ
+  void set_data(hostXYZ<T> &xyz, cudaStream_t stream=0) {
+    assert(this->match(xyz));
+    copy_HtoD<T>(xyz.data, this->data, 3*this->stride, stream);
+  }
+
+  // Sets data from cudaXYZ
+  void set_data(cudaXYZ<T> &xyz, cudaStream_t stream=0) {
+    assert(this->match(xyz));
+    copy_DtoD<T>(xyz.data, this->data, 3*this->stride, stream);
+  }
+
   // Sets data from hostXYZ
   void set_data_sync(hostXYZ<T> &xyz) {
-    assert(this->stride == xyz.stride);
+    assert(this->match(xyz));
     copy_HtoD_sync<T>(xyz.data, this->data, 3*this->stride);
   }
 
   // Sets data from cudaXYZ
   void set_data_sync(cudaXYZ<T> &xyz) {
-    assert(this->stride == xyz.stride);
+    assert(this->match(xyz));
     copy_DtoD_sync<T>(xyz.data, this->data, 3*this->stride);
+  }
+
+  //--------------------------------------------------------------------------
+
+  // Sets data from (int n, int stride, T *xyz)
+  void set_data_sync(int n, int stride, T *xyz) {
+    assert(this->n == n);
+    assert(this->stride == stride);
+    copy_HtoD_sync<T>(xyz, this->data, 3*this->stride);
   }
 
 };

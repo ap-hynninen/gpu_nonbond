@@ -137,14 +137,6 @@ int Force<T>::get_stride() {
 }
 
 //
-// Copies force to hostXYZ object
-//
-template <typename T>
-void Force<T>::get_force(hostXYZ<T> &h_xyz, cudaStream_t stream) {
-  h_xyz.set_data(xyz, stream);
-}
-
-//
 // Converts one type of force array to another. Result is in "force"
 //
 template <typename T>

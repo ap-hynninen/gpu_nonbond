@@ -9,7 +9,7 @@ template<typename T> class cudaXYZ;
 
 //
 // Host XYZ strided array class
-// By default host array is allocated non-pinned (NON_PINNED)
+// By default host array is allocated pinned (PINNED)
 //
 // (c) Antti-Pekka Hynninen, 2014, aphynninen@hotmail.com
 //
@@ -25,10 +25,10 @@ private:
 public:
 
   hostXYZ() {
-    this->type = NON_PINNED;
+    this->type = PINNED;
   }
 
-  hostXYZ(int n, int type=NON_PINNED) {
+  hostXYZ(int n, int type=PINNED) {
     this->type = type;
     this->resize(n);
   }
@@ -68,14 +68,21 @@ public:
   }
 
   // Sets data from cudaXYZ object
-  void set_data(cudaXYZ<T> &xyz, cudaStream_t stream=0) {
-    assert(this->stride == xyz.stride);
-    copy_DtoH<T>(xyz.data, this->data, 3*this->stride, stream);
+  //  void set_data(cudaXYZ<T> &xyz, cudaStream_t stream=0) {
+  //    assert(this->stride == xyz.stride);
+  //    copy_DtoH<T>(xyz.data, this->data, 3*this->stride, stream);
+  //  }
+
+  // Sets data from cudaXYZ object
+  template <typename P>
+  void set_data(cudaXYZ<P> &xyz, cudaStream_t stream=0) {
+    assert(this->match(xyz));
+    copy_DtoH<T>((T *)xyz.data, this->data, 3*this->stride, stream);
   }
 
   // Sets data from cudaXYZ object
   void set_data_sync(cudaXYZ<T> &xyz) {
-    assert(this->stride == xyz.stride);
+    assert(this->match(xyz));
     copy_DtoH_sync<T>(xyz.data, this->data, 3*this->stride);
   }
 

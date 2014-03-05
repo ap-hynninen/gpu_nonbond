@@ -1,5 +1,6 @@
 #ifndef HOLOCONST_H
 #define HOLOCONST_H
+#include "cudaXYZ.h"
 
 class HoloConst {
 
@@ -77,7 +78,7 @@ public:
   void set_quad_ind(int nquad, int4 *h_quad_ind,
 		    double *h_quad_constr, double *h_quad_mass);
 
-  void apply(double *xyz0, double *xyz1, int stride);
+  void apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1);
 
 };
 

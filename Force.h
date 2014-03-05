@@ -39,7 +39,6 @@ public:
 
   void set_ncoord(int ncoord, float fac=1.0f);
   int get_stride();
-  void get_force(hostXYZ<T> &h_xyz, cudaStream_t stream=0);
 
   template <typename T2> void convert(Force<T2>* force, cudaStream_t stream=0);
   template <typename T2> void convert(cudaStream_t stream=0);

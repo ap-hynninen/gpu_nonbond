@@ -23,6 +23,12 @@ public:
     data = NULL;
   }
 
+  // Returns true if the XYZ strided arrays match in data content sizes
+  template <typename P>
+  bool match(XYZ<P> &xyz) {
+    return ((sizeof(T) == sizeof(P)) && (this->n == xyz.n) && (this->stride == xyz.stride));
+  }
+
   // Resizes array to contain n entries with reallocation factor "fac"
   virtual void resize(int n, float fac=1.0f) = 0;
 

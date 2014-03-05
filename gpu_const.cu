@@ -158,11 +158,15 @@ void test() {
   const double rOHsq = 0.91623184;
   const double rHHsq = 2.29189321;
   const int ncoord = 23558;
-  const int stride = ((ncoord-1)/32+1)*32;
+  //const int stride = ((ncoord-1)/32+1)*32;
   const int nsolvent = 7023;
   const int npair = 458;
   const int ntrip = 233;
   const int nquad = 99;
+
+  cudaXYZ<double> xyz0(ncoord);
+  cudaXYZ<double> xyz1(ncoord);
+  int stride = xyz0.stride;
 
   // Load coordinates
   double *h_xyz0 = (double *)malloc(stride*3*sizeof(double));
@@ -172,13 +176,8 @@ void test() {
   load_coord("test_data/xyz1.txt", stride, h_xyz1);
   load_coord("test_data/xyz_ref.txt", stride, h_xyz_ref);
 
-  double *xyz0;
-  double *xyz1;
-  allocate<double>(&xyz0, stride*3);
-  allocate<double>(&xyz1, stride*3);
-
-  copy_HtoD<double>(h_xyz0, xyz0, stride*3);
-  copy_HtoD<double>(h_xyz1, xyz1, stride*3);
+  xyz0.set_data_sync(ncoord, stride, h_xyz0);
+  xyz1.set_data_sync(ncoord, stride, h_xyz1);
 
   // Load constraint indices
   int *h_solvent_ind = (int *)malloc(nsolvent*3*sizeof(int));
@@ -265,17 +264,18 @@ void test() {
   */
 
   // Apply holonomic constraints
-  holoconst.apply(xyz0, xyz1, stride);
+  holoconst.apply(&xyz0, &xyz1);
   cudaCheck(cudaDeviceSynchronize());
 
-  copy_HtoD<double>(h_xyz1, xyz1, stride*3);
-  holoconst.apply(xyz0, xyz1, stride);
+  //copy_HtoD<double>(h_xyz1, xyz1, stride*3);
+  xyz1.set_data_sync(ncoord, stride, h_xyz1);
+  holoconst.apply(&xyz0, &xyz1);
   cudaCheck(cudaDeviceSynchronize());
 
   //--------------------------------------------------------------------------
   // Check result
   //--------------------------------------------------------------------------
-  copy_DtoH<double>(xyz1, h_xyz1, stride*3);
+  copy_DtoH<double>(xyz1.data, h_xyz1, stride*3);
 
   double max_diff;
   double tol = 5.0e-14;
@@ -338,7 +338,4 @@ void test() {
   free(h_quad_mass_indlist);
   */
 
-  deallocate<double>(&xyz0);
-  deallocate<double>(&xyz1);
-  
 }
