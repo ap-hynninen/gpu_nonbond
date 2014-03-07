@@ -33,6 +33,13 @@ public:
     this->resize(n);
   }
 
+  hostXYZ(int n, int stride, T *data, int type=PINNED) {
+    this->n = n;
+    this->stride = stride;
+    this->data = data;
+    this->type = type;
+  }
+
   ~hostXYZ() {
     this->n = 0;
     this->stride = 0;
@@ -81,9 +88,10 @@ public:
   }
 
   // Sets data from cudaXYZ object
-  void set_data_sync(cudaXYZ<T> &xyz) {
+  template <typename P>
+  void set_data_sync(cudaXYZ<P> &xyz) {
     assert(this->match(xyz));
-    copy_DtoH_sync<T>(xyz.data, this->data, 3*this->stride);
+    copy_DtoH_sync<T>((T *)xyz.data, this->data, 3*this->stride);
   }
 
 };

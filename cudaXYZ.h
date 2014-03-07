@@ -46,37 +46,34 @@ public:
   //--------------------------------------------------------------------------
 
   // Sets data from hostXYZ
-  void set_data(hostXYZ<T> &xyz, cudaStream_t stream=0) {
+  template <typename P>
+  void set_data(hostXYZ<P> &xyz, cudaStream_t stream=0) {
     assert(this->match(xyz));
-    copy_HtoD<T>(xyz.data, this->data, 3*this->stride, stream);
+    copy_HtoD<T>((T *)xyz.data, this->data, 3*this->stride, stream);
   }
 
   // Sets data from cudaXYZ
-  void set_data(cudaXYZ<T> &xyz, cudaStream_t stream=0) {
+  template <typename P>
+  void set_data(cudaXYZ<P> &xyz, cudaStream_t stream=0) {
     assert(this->match(xyz));
-    copy_DtoD<T>(xyz.data, this->data, 3*this->stride, stream);
+    copy_DtoD<T>((T *)xyz.data, this->data, 3*this->stride, stream);
   }
 
   // Sets data from hostXYZ
-  void set_data_sync(hostXYZ<T> &xyz) {
+  template <typename P>
+  void set_data_sync(hostXYZ<P> &xyz) {
     assert(this->match(xyz));
-    copy_HtoD_sync<T>(xyz.data, this->data, 3*this->stride);
+    copy_HtoD_sync<T>((T *)xyz.data, this->data, 3*this->stride);
   }
 
   // Sets data from cudaXYZ
-  void set_data_sync(cudaXYZ<T> &xyz) {
+  template <typename P>
+  void set_data_sync(cudaXYZ<P> &xyz) {
     assert(this->match(xyz));
-    copy_DtoD_sync<T>(xyz.data, this->data, 3*this->stride);
+    copy_DtoD_sync<T>((T *)xyz.data, this->data, 3*this->stride);
   }
 
   //--------------------------------------------------------------------------
-
-  // Sets data from (int n, int stride, T *xyz)
-  void set_data_sync(int n, int stride, T *xyz) {
-    assert(this->n == n);
-    assert(this->stride == stride);
-    copy_HtoD_sync<T>(xyz, this->data, 3*this->stride);
-  }
 
 };
 

@@ -289,6 +289,13 @@ int read_CUDA_ARCH() {
   allocate<int>(&d_cuda_arch, 1);
   
   read_CUDA_ARCH_kernel <<< 1, 1 >>> (d_cuda_arch);
+  cudaError_t err = cudaGetLastError();
+  if (err != cudaSuccess) {
+    std::cout << "Error executing CUDA kernel read_CUDA_ARCH_kernel in file " << __FILE__ << std::endl;
+    std::cout << "Error string: " << cudaGetErrorString(err) << std::endl;
+    std::cout << "Possible cause: Device compute capability is less than the compute capability the code was compiled for." << std::endl;
+    exit(1);	
+  }
 
   copy_DtoH<int>(d_cuda_arch, &h_cuda_arch, 1);
 
@@ -303,8 +310,8 @@ static cudaDeviceProp gpu_prop;
 static int cuda_arch;
 
 void start_gpu(int numnode, int mynode) {
-  //int devices[4] = {2, 3, 0, 1};
-  int devices[4] = {0, 1, 2, 3};
+  int devices[4] = {2, 3, 0, 1};
+  //int devices[4] = {0, 1, 2, 3};
 
   int device_count;
   cudaCheck(cudaGetDeviceCount(&device_count));
@@ -345,9 +352,9 @@ void start_gpu(int numnode, int mynode) {
     std::cout << "Compiled using CUDA_ARCH " << cuda_arch << std::endl;
   }
 
-  std::cout << "Node " << mynode << " uses CUDA device " << gpu_ind << 
-    " " << gpu_prop.name << std::endl;
-  
+  std::cout << "Node " << mynode << " uses CUDA device " << gpu_ind 
+	    << " " << gpu_prop.name << std::endl;
+
 }
 
 void stop_gpu() {
