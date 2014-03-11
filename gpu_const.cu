@@ -5,6 +5,7 @@
 #include "gpu_utils.h"
 #include "const_reduce_lists.h"
 #include "HoloConst.h"
+#include "hostXYZ.h"
 
 void test();
 
@@ -169,15 +170,15 @@ void test() {
   int stride = xyz0.stride;
 
   // Load coordinates
-  double *h_xyz0 = (double *)malloc(stride*3*sizeof(double));
-  double *h_xyz1 = (double *)malloc(stride*3*sizeof(double));
-  double *h_xyz_ref = (double *)malloc(stride*3*sizeof(double));
-  load_coord("test_data/xyz0.txt", stride, h_xyz0);
-  load_coord("test_data/xyz1.txt", stride, h_xyz1);
-  load_coord("test_data/xyz_ref.txt", stride, h_xyz_ref);
+  hostXYZ<double> h_xyz0(ncoord, NON_PINNED);
+  hostXYZ<double> h_xyz1(ncoord, NON_PINNED);
+  hostXYZ<double> h_xyz_ref(ncoord, NON_PINNED);
+  load_coord("test_data/xyz0.txt", stride, h_xyz0.data);
+  load_coord("test_data/xyz1.txt", stride, h_xyz1.data);
+  load_coord("test_data/xyz_ref.txt", stride, h_xyz_ref.data);
 
-  xyz0.set_data_sync(ncoord, stride, h_xyz0);
-  xyz1.set_data_sync(ncoord, stride, h_xyz1);
+  xyz0.set_data_sync(h_xyz0);
+  xyz1.set_data_sync(h_xyz1);
 
   // Load constraint indices
   int *h_solvent_ind = (int *)malloc(nsolvent*3*sizeof(int));
@@ -268,45 +269,41 @@ void test() {
   cudaCheck(cudaDeviceSynchronize());
 
   //copy_HtoD<double>(h_xyz1, xyz1, stride*3);
-  xyz1.set_data_sync(ncoord, stride, h_xyz1);
+  xyz1.set_data_sync(h_xyz1);
   holoconst.apply(&xyz0, &xyz1);
   cudaCheck(cudaDeviceSynchronize());
 
   //--------------------------------------------------------------------------
   // Check result
   //--------------------------------------------------------------------------
-  copy_DtoH<double>(xyz1.data, h_xyz1, stride*3);
+  copy_DtoH<double>(xyz1.data, h_xyz1.data, stride*3);
 
   double max_diff;
   double tol = 5.0e-14;
 
   max_diff = 0.0;
-  if (check_result(3, nsolvent, h_solvent_ind, h_xyz1, h_xyz_ref, stride, tol, max_diff)) {
+  if (check_result(3, nsolvent, h_solvent_ind, h_xyz1.data, h_xyz_ref.data, stride, tol, max_diff)) {
     std::cout<<"solvent SETTLE OK (tolerance " << tol << " max difference " << 
       max_diff << ")" << std::endl;
   }
 
   max_diff = 0.0;
-  if (check_result(2, npair, h_pair_ind, h_xyz1, h_xyz_ref, stride, tol, max_diff)) {
+  if (check_result(2, npair, h_pair_ind, h_xyz1.data, h_xyz_ref.data, stride, tol, max_diff)) {
     std::cout<<"pair SHAKE OK (tolerance " << tol << " max difference " << 
       max_diff << ")" << std::endl;
   }
 
   max_diff = 0.0;
-  if (check_result(3, ntrip, h_trip_ind, h_xyz1, h_xyz_ref, stride, tol, max_diff)) {
+  if (check_result(3, ntrip, h_trip_ind, h_xyz1.data, h_xyz_ref.data, stride, tol, max_diff)) {
     std::cout<<"trip SHAKE OK (tolerance " << tol << " max difference " << 
       max_diff << ")" << std::endl;
   }
 
   max_diff = 0.0;
-  if (check_result(4, nquad, h_quad_ind, h_xyz1, h_xyz_ref, stride, tol, max_diff)) {
+  if (check_result(4, nquad, h_quad_ind, h_xyz1.data, h_xyz_ref.data, stride, tol, max_diff)) {
     std::cout<<"quad SHAKE OK (tolerance " << tol << " max difference " << 
       max_diff << ")" << std::endl;
   }
-
-  free(h_xyz0);
-  free(h_xyz1);
-  free(h_xyz_ref);
 
   free(h_solvent_ind);
 

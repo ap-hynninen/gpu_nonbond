@@ -14,7 +14,7 @@ endif
 
 OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o cuda_utils.o gpu_recip.o mpi_utils.o
 
-OBJS_DIRECT = XYZQ.o Force.o cuda_utils.o mpi_utils.o DirectForce.o NeighborList.o gpu_direct.o
+OBJS_DIRECT = XYZQ.o Force.o cuda_utils.o mpi_utils.o DirectForce.o NeighborList.o VirialPressure.o gpu_direct.o
 
 OBJS_CONST = cuda_utils.o gpu_const.o HoloConst.o const_reduce_lists.o
 

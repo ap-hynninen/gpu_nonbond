@@ -8,6 +8,7 @@
 #include "Force.h"
 #include "NeighborList.h"
 #include "DirectForce.h"
+#include "VirialPressure.h"
 
 void test();
 
@@ -44,6 +45,7 @@ void test() {
   const double roff = 9.0;
   const double ron = 7.5;
   const int ncoord = 23558;
+  const double ref_vpress[9] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
   Force<float> force_comp("test_data/force_direct.txt");
   Force<long long int> force_fp(ncoord);
@@ -73,8 +75,27 @@ void test() {
   if (!force_comp.compare(&force, tol, max_diff)) {
     std::cout<<"force comparison FAILED"<<std::endl;
   } else {
-    std::cout<<"force comparison OK (tolerance " << tol << " max difference " << 
-      max_diff << ")" << std::endl;
+    std::cout<<"force comparison OK (tolerance " << tol << " max difference " 
+	     << max_diff << ")" << std::endl;
+  }
+
+  VirialPressure vir;
+  double vpress[9];
+  cudaXYZ<double> coord;
+  cudaXYZ<double> disp;
+  vir.calc_virial(&coord, &disp, force_fp, vpress);
+  
+  tol = 1.0e-5;
+  max_diff = 0.0;
+  for (int i=0;i < 9;i++) {
+    double diff = fabs(ref_vpress[i] - vpress[i]);
+    max_diff = max(max_diff, diff);
+  }
+  if (max_diff > tol) {
+    std::cout<<"vpress comparison FAILED"<<std::endl;
+  } else {
+    std::cout<<"vpress comparison OK (tolerance " << tol << " max difference "
+	     << max_diff << ")" << std::endl;
   }
 
 }

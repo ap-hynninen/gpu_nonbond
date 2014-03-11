@@ -25,6 +25,12 @@ public:
     this->resize(n);
   }
 
+  cudaXYZ(int n, int stride, T *data) {
+    this->n = n;
+    this->stride = stride;
+    this->data = data;
+  }
+
   ~cudaXYZ() {
     this->n = 0;
     this->stride = 0;

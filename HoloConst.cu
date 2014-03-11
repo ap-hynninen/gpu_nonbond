@@ -38,7 +38,7 @@ struct HoloConstSettings_t {
   int stride2;
   const double* __restrict__ xyz0;
   const double* __restrict__ xyz1;
-  double *xyz2;
+  double* __restrict__ xyz2;
 };
 
 static HoloConstSettings_t h_setup;
@@ -394,7 +394,7 @@ __forceinline__ __device__ void quad_calc(int imol) {
     d_setup.xyz2[ind.w+d_setup.stride2] = z1l;
 }
 
-__forceinline__ __device__ void solvent_calc(int imol) {
+__forceinline__ __device__ void solvent_calc(int imol, double *xyz2) {
 
     int3 ind = d_setup.solvent_ind[imol];
 
@@ -521,29 +521,46 @@ __forceinline__ __device__ void solvent_calc(int imol) {
     double yc3p = -xb2p * sintheta + yc2p * costheta;
     double zc3p =  zc1p;
 
+    /*
     d_setup.xyz2[ind.x]         = xcm + trans11 * xa3p + trans12 * ya3p + trans13 * za3p;
     d_setup.xyz2[ind.x+d_setup.stride]  = ycm + trans21 * xa3p + trans22 * ya3p + trans23 * za3p;
-    d_setup.xyz2[ind.x+d_setup.stride2] = zcm + trans31 * xa3p + trans32 * ya3p + trans33 * za3p;    
+    d_setup.xyz2[ind.x+d_setup.stride2] = zcm + trans31 * xa3p + trans32 * ya3p + trans33 * za3p;
     d_setup.xyz2[ind.y]         = xcm + trans11 * xb3p + trans12 * yb3p + trans13 * zb3p;
     d_setup.xyz2[ind.y+d_setup.stride]  = ycm + trans21 * xb3p + trans22 * yb3p + trans23 * zb3p;
     d_setup.xyz2[ind.y+d_setup.stride2] = zcm + trans31 * xb3p + trans32 * yb3p + trans33 * zb3p;
     d_setup.xyz2[ind.z]         = xcm + trans11 * xc3p + trans12 * yc3p + trans13 * zc3p;
     d_setup.xyz2[ind.z+d_setup.stride]  = ycm + trans21 * xc3p + trans22 * yc3p + trans23 * zc3p;
     d_setup.xyz2[ind.z+d_setup.stride2] = zcm + trans31 * xc3p + trans32 * yc3p + trans33 * zc3p;
+    */
+
+    if (ind.x > 23558) printf("%d %d\n",imol,ind.x);
+    //xyz2[ind.x]         = xcm + trans11 * xa3p + trans12 * ya3p + trans13 * za3p;
+    /*
+    xyz2[ind.x+d_setup.stride]  = ycm + trans21 * xa3p + trans22 * ya3p + trans23 * za3p;
+    xyz2[ind.x+d_setup.stride2] = zcm + trans31 * xa3p + trans32 * ya3p + trans33 * za3p;
+    xyz2[ind.y]         = xcm + trans11 * xb3p + trans12 * yb3p + trans13 * zb3p;
+    xyz2[ind.y+d_setup.stride]  = ycm + trans21 * xb3p + trans22 * yb3p + trans23 * zb3p;
+    xyz2[ind.y+d_setup.stride2] = zcm + trans31 * xb3p + trans32 * yb3p + trans33 * zb3p;
+    xyz2[ind.z]         = xcm + trans11 * xc3p + trans12 * yc3p + trans13 * zc3p;
+    xyz2[ind.z+d_setup.stride]  = ycm + trans21 * xc3p + trans22 * yc3p + trans23 * zc3p;
+    xyz2[ind.z+d_setup.stride2] = zcm + trans31 * xc3p + trans32 * yc3p + trans33 * zc3p;
+    */
 }
 
-__global__ void all_kernels() {
+__global__ void all_kernels(double *xyz2) {
   const int imol = threadIdx.x + blockDim.x*blockIdx.x;
   if (imol < d_setup.nsolvent) {
-    solvent_calc(imol);
+    solvent_calc(imol, xyz2);
   } else if (imol < d_setup.nsolvent + d_setup.npair) {
-    pair_calc(imol - d_setup.nsolvent);
+    //pair_calc(imol - d_setup.nsolvent);
   } else if (imol < d_setup.nsolvent + d_setup.npair + d_setup.ntrip) {
-    trip_calc(imol - d_setup.nsolvent - d_setup.npair);
+    //trip_calc(imol - d_setup.nsolvent - d_setup.npair);
   } else if (imol < d_setup.nsolvent + d_setup.npair + d_setup.ntrip + d_setup.nquad) {
-    quad_calc(imol - d_setup.nsolvent - d_setup.npair - d_setup.ntrip);
+    //quad_calc(imol - d_setup.nsolvent - d_setup.npair - d_setup.ntrip);
   }
 }
+
+//################################################################################################
 
 //
 // Class creator
@@ -581,7 +598,7 @@ HoloConst::HoloConst() {
   quad_mass_len = 0;
   quad_mass = NULL;
 
-  if (get_major() <= 2) {
+  if (get_cuda_arch() <= 200) {
     use_textures = true;
   } else {
     use_textures = false;
@@ -744,6 +761,7 @@ void HoloConst::setup_textures(double *xyz0, double *xyz1, int stride) {
   xyz1_texref.channelDesc.f = cudaChannelFormatKindUnsigned;
   cudaCheck(cudaBindTexture(NULL, xyz1_texref, (int2 *)xyz1, stride*3*sizeof(int2)));
   xyz1_texref_bound = true;
+
 }
 
 //
@@ -751,8 +769,7 @@ void HoloConst::setup_textures(double *xyz0, double *xyz1, int stride) {
 //
 void HoloConst::apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1) {
 
-  assert(xyz0->n == xyz1->n);
-  assert(xyz0->stride == xyz1->stride);
+  assert(xyz0->match(xyz1));
 
   h_setup.nsolvent = nsolvent;
   h_setup.solvent_ind = solvent_ind;
@@ -793,11 +810,9 @@ void HoloConst::apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1) {
 
   if (use_textures) setup_textures(xyz0->data, xyz1->data, stride);
 
-  int nthread, nblock;
-
-  nthread = 128;
-  nblock = (nsolvent + npair + ntrip + nquad - 1)/nthread + 1;
-  all_kernels<<< nblock, nthread >>>();
+  int nthread = 128;
+  int nblock = (nsolvent + npair + ntrip + nquad - 1)/nthread + 1;
+  all_kernels<<< nblock, nthread >>>(xyz1->data);
   cudaCheck(cudaGetLastError());
 
 
