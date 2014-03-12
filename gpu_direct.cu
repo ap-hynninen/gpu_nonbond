@@ -79,11 +79,15 @@ void test() {
 	     << max_diff << ")" << std::endl;
   }
 
+  return;
+
   VirialPressure vir;
   double vpress[9];
   cudaXYZ<double> coord;
-  cudaXYZ<double> disp;
-  vir.calc_virial(&coord, &disp, force_fp, vpress);
+  cudaXYZ<double> force_double(ncoord, force_fp.xyz.stride, (double *)force_fp.xyz.data);
+  float3 *xyz_shift = NULL;
+  vir.calc_virial(&coord, &force_double, xyz_shift, boxx, boxy, boxz, vpress);
+  force_double.data = NULL;
   
   tol = 1.0e-5;
   max_diff = 0.0;

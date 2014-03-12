@@ -25,6 +25,14 @@ struct pairs_t {
   int i[tilesize];
 };
 
+//
+// Bounding box structure
+//
+struct bb_t {
+  float x, y, z;      // Center
+  float wx, wy, wz;   // Half-width
+};
+
 template<typename AT, typename CT> class DirectForce;
 
 template <int tilesize>
@@ -61,10 +69,33 @@ private:
   int tile_indj_sparse_len;
   int *tile_indj_sparse;
 
+  // For building neighbor list on GPU
+  int ncellx, ncelly, ncellz;
+  
+  int tilex_key_len;
+  int *tilex_key;
+
+  int tilex_val_len;
+  int *tilex_val;
+
+  int bb_len;
+  bb_t *bb;
 
 public:
   NeighborList();
   ~NeighborList();
+
+  void sort_tilex(const int ncoord,
+		  const float x0, const float y0, const float z0,
+		  const float inv_dx, const float inv_dy, const float inv_dz,
+		  const float4 *xyzq,
+		  float4 *xyzq_sorted,
+		  cudaStream_t stream);
+
+  void calc_bounding_box(const int ncell,
+			 const int *cell_start,
+			 const float4 *xyzq,
+			 cudaStream_t stream);
 
   void build_excl(const float boxx, const float boxy, const float boxz,
 		  const float roff,

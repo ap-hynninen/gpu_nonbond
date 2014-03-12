@@ -249,11 +249,11 @@ void test() {
   HoloConst holoconst;
 
   // Setup
-  holoconst.setup(mO, mH, rOHsq, rHHsq);
-  holoconst.set_solvent_ind(nsolvent, (int3 *)h_solvent_ind);
-  holoconst.set_pair_ind(npair, (int2 *)h_pair_ind, h_pair_constr, h_pair_mass);
-  holoconst.set_trip_ind(ntrip, (int3 *)h_trip_ind, h_trip_constr, h_trip_mass);
-  holoconst.set_quad_ind(nquad, (int4 *)h_quad_ind, h_quad_constr, h_quad_mass);
+  holoconst.setup_solvent_parameters(mO, mH, rOHsq, rHHsq);
+  holoconst.setup_ind_mass_constr(npair, (int2 *)h_pair_ind, h_pair_constr, h_pair_mass,
+				  ntrip, (int3 *)h_trip_ind, h_trip_constr, h_trip_mass,
+				  nquad, (int4 *)h_quad_ind, h_quad_constr, h_quad_mass,
+				  nsolvent, (int3 *)h_solvent_ind);
 
   /*
   holoconst.set_pair_constr(npair_constr, h_pair_constr_red, h_pair_constr_indlist);

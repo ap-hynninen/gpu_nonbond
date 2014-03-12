@@ -9,6 +9,19 @@ private:
   bool use_textures;
   void setup_textures(double *xyz0, double *xyz1, int stride);
 
+  void update_setup(int stride, double *xyz0, double *xyz1, double *xyz2);
+
+  void set_solvent_ind(int nsolvent, int3 *h_solvent_ind);
+
+  void set_pair_ind(int npair, int2 *h_pair_ind,
+		    double *h_pair_constr, double *h_pair_mass);
+
+  void set_trip_ind(int ntrip, int3 *h_trip_ind,
+		    double *h_trip_constr, double *h_trip_mass);
+
+  void set_quad_ind(int nquad, int4 *h_quad_ind,
+		    double *h_quad_constr, double *h_quad_mass);
+
   // Maximum number of iterations for triplet and quad shake
   int max_niter;
 
@@ -66,17 +79,15 @@ public:
   HoloConst();
   ~HoloConst();
 
-  void setup(double mO, double mH, double rOHsq, double rHHsq);
-  void set_solvent_ind(int nsolvent, int3 *h_solvent_ind);
+  void setup_solvent_parameters(double mO, double mH, double rOHsq, double rHHsq);
 
-  void set_pair_ind(int npair, int2 *h_pair_ind,
-		    double *h_pair_constr, double *h_pair_mass);
-
-  void set_trip_ind(int ntrip, int3 *h_trip_ind,
-		    double *h_trip_constr, double *h_trip_mass);
-
-  void set_quad_ind(int nquad, int4 *h_quad_ind,
-		    double *h_quad_constr, double *h_quad_mass);
+  void setup_ind_mass_constr(int npair, int2 *h_pair_ind,
+			     double *h_pair_constr, double *h_pair_mass,
+			     int ntrip, int3 *h_trip_ind,
+			     double *h_trip_constr, double *h_trip_mass,
+			     int nquad, int4 *h_quad_ind,
+			     double *h_quad_constr, double *h_quad_mass,
+			     int nsolvent, int3 *h_solvent_ind);
 
   void apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1);
 
