@@ -3,6 +3,10 @@
 #include <cuda.h>
 
 //
+// Calculates direct non-bonded interactions on GPU
+//
+// (c) Antti-Pekka Hynninen, 2014, aphynninen@hotmail.com
+//
 // AT = accumulation type
 // CT = calculation type
 //

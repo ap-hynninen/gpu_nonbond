@@ -110,4 +110,46 @@ __device__ inline int iroundf(float f)
     return l;
 }
 
+template <typename AT, typename CT>
+__forceinline__ __device__
+void calc_component_force(CT fij,
+			  const CT dx, const CT dy, const CT dz,
+			  AT &fxij, AT &fyij, AT &fzij) {
+  fxij = (AT)(fij*dx);
+  fyij = (AT)(fij*dy);
+  fzij = (AT)(fij*dz);
+}
+
+template <>
+__forceinline__ __device__
+void calc_component_force<long long int, float>(float fij,
+						const float dx, const float dy, const float dz,
+						long long int &fxij, long long int &fyij, long long int &fzij) {
+  fij *= FORCE_SCALE;
+  fxij = lliroundf(fij*dx);
+  fyij = lliroundf(fij*dy);
+  fzij = lliroundf(fij*dz);
+}
+
+template <typename AT>
+__forceinline__ __device__
+void write_force(const AT fx, const AT fy, const AT fz,
+		 const int ind, const int stride,
+		 AT* force) {
+  // The generic version can not be used
+}
+
+// Template specialization for 64bit integer = "long long int"
+template <>
+__forceinline__ __device__ 
+void write_force <long long int> (const long long int fx,
+				  const long long int fy,
+				  const long long int fz,
+				  const int ind, const int stride,
+				  long long int* force) {
+  atomicAdd((unsigned long long int *)&force[ind           ], llitoulli(fx));
+  atomicAdd((unsigned long long int *)&force[ind + stride  ], llitoulli(fy));
+  atomicAdd((unsigned long long int *)&force[ind + stride*2], llitoulli(fz));
+}
+
 #endif // GPU_UTILS_H

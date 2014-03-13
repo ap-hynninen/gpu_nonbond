@@ -10,24 +10,6 @@
 
 static __constant__ const float ccelec = 332.0716;
 
-template <typename AT, typename CT>
-__forceinline__ __device__ void write_force(const CT fx, const CT fy, const CT fz,
-					    const int ind, const int stride,
-					    AT* force) {
-  // The generic version can not be used
-}
-
-// Template specialization for 64bit integer = "long long int"
-template <>
-__forceinline__ __device__ void write_force <long long int, float> (const float fx, const float fy, const float fz,
-								    const int ind, const int stride,
-								    long long int* force) {
-
-  atomicAdd((unsigned long long int *)&force[ind           ], llitoulli(fx));
-  atomicAdd((unsigned long long int *)&force[ind + stride  ], llitoulli(fy));
-  atomicAdd((unsigned long long int *)&force[ind + stride*2], llitoulli(fz));
-}
-
 /*
 template <>
 __forceinline__ __device__ void write_force <double, float>() {
@@ -52,27 +34,6 @@ __forceinline__ __device__ void write_force <double, float>() {
     //    force[blockIdx.x*stride3 + stride2 + indj + threadIdx.x] += fjz;
 }
 */
-
-template <typename AT, typename CT>
-__forceinline__ __device__
-void calc_component_force(CT fij,
-			  const CT dx, const CT dy, const CT dz,
-			  AT &fxij, AT &fyij, AT &fzij) {
-  fxij = (AT)(fij*dx);
-  fyij = (AT)(fij*dy);
-  fzij = (AT)(fij*dz);
-}
-
-template <>
-__forceinline__ __device__
-void calc_component_force<long long int, float>(float fij,
-						const float dx, const float dy, const float dz,
-						long long int &fxij, long long int &fyij, long long int &fzij) {
-  fij *= FORCE_SCALE;
-  fxij = lliroundf(fij*dx);
-  fyij = lliroundf(fij*dy);
-  fzij = lliroundf(fij*dz);
-}
 
 class vdw_base {
 public:
@@ -452,12 +413,12 @@ __global__ void calc_force_kernel(const unsigned int base_tid,
     }
 
     // Dump register forces (fjx, fjy, fjz)
-    write_force<AT, CT>(fjx, fjy, fjz, indj+load_ij, stride, force);
+    write_force<AT>(fjx, fjy, fjz, indj+load_ij, stride, force);
   }
 
   // Dump shared memory force (fi)
   //__syncthreads();         // <-- Is this really needed?
-  write_force<AT, CT>(fix[tid], fiy[tid], fiz[tid], indi+load_ij, stride, force);
+  write_force<AT>(fix[tid], fiy[tid], fiz[tid], indi+load_ij, stride, force);
 
   if (calc_virial) {
     // Value of ish depends on threadIdx.y => Reduce within warp
@@ -659,18 +620,18 @@ void calc_force_kernel_sparse(const int ni, const ientry_t* __restrict__ ientry,
       calc_component_force<AT, CT>(fij, dx, dy, dz, fxij, fyij, fzij);
 
       // Write j forces to global memory
-      write_force<AT, CT>(-fxij, -fyij, -fzij, indj+load_ij, stride, force);
+      write_force<AT>(-fxij, -fyij, -fzij, indj+load_ij, stride, force);
 
       // Write i forces to shared memory
-      write_force<AT, CT>(fxij, fyij, fzij, blockDim.x*3*threadIdx.y + i, blockDim.x, sh_force);
+      write_force<AT>(fxij, fyij, fzij, blockDim.x*3*threadIdx.y + i, blockDim.x, sh_force);
 
     } // if (r2 < d_setup.roff2)
 
   }
 
   // Write i forces to global memory
-  write_force<AT, CT>(sh_force[shi], sh_force[shi + blockDim.x], sh_force[shi + blockDim.x*2],
-		      indi+load_ij, stride, force);
+  write_force<AT>(sh_force[shi], sh_force[shi + blockDim.x], sh_force[shi + blockDim.x*2],
+		  indi+load_ij, stride, force);
 
   /*
   if (calc_energy) {
@@ -701,6 +662,8 @@ void calc_force_kernel_sparse(const int ni, const ientry_t* __restrict__ ientry,
   */
 
 }
+
+//########################################################################################
 
 //
 // Class creator

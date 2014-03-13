@@ -8,6 +8,7 @@
 #include "Force.h"
 #include "NeighborList.h"
 #include "DirectForce.h"
+#include "BondedForce.h"
 #include "VirialPressure.h"
 
 void test();
@@ -78,6 +79,8 @@ void test() {
     std::cout<<"force comparison OK (tolerance " << tol << " max difference " 
 	     << max_diff << ")" << std::endl;
   }
+
+  BondedForce<long long int, float> bondedforce;
 
   return;
 
