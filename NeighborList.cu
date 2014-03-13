@@ -8,7 +8,7 @@
 //
 // Calculates tilex index for each atom
 //
-__global__ void calc_tilex_ind_kernel(const int ncoord,
+__global__ void calc_tilex_ind_kernel(const int istart, const int iend,
 				      const float4* __restrict__ xyzq,
 				      const int ind0,
 				      const int ncellx,
@@ -23,10 +23,10 @@ __global__ void calc_tilex_ind_kernel(const int ncoord,
 				      int* __restrict__ tilex_key,
 				      int* __restrict__ tilex_val) {
 
-  const int tid = threadIdx.x + blockIdx.x*blockDim.x;
+  const int ind = threadIdx.x + blockIdx.x*blockDim.x + istart;
   
-  if (tid < ncoord) {
-    float4 xyzq_val = xyzq[tid];
+  if (ind <= iend) {
+    float4 xyzq_val = xyzq[ind];
     float x = xyzq_val.x;
     float y = xyzq_val.y;
     float z = xyzq_val.z;
@@ -35,8 +35,8 @@ __global__ void calc_tilex_ind_kernel(const int ncoord,
     int iz = (int)((z - z0)*inv_dz);
     int key = ind0 + (ix + iy*ncellx)*ncellz + iz;
 
-    tilex_key[tid] = key;
-    tilex_val[tid] = tid;
+    tilex_key[ind] = key;
+    tilex_val[ind] = ind;
   }
 
 }
@@ -59,23 +59,84 @@ __global__ void reorder_atoms_kernel(const int ncoord,
 }
 
 //
+//
+//
+template <int tilesize>
+void NeighborList<tilesize>::set_cell_sizes(const int *zonelist_atom,
+					    const float3 *max_xyz, const float3 *min_xyz,
+					    int *ncellx, int *ncelly,
+					    float *celldx, float *celldy) {
+
+  for (int izone=0;izone < 8;izone++) {
+    int nstart;
+    if (izone > 0) {
+      nstart = zonelist_atom[izone-1] + 1;
+    } else {
+      nstart = 1;
+    }
+    // ncoord_zone = number of atoms in this zone
+    int ncoord_zone = zonelist_atom[izone] - nstart + 1;
+    if (ncoord_zone > 0) {
+      // NOTE: we increase the cell sizes here by 0.001 to make sure no atoms drop outside cells
+      float xsize = max_xyz[izone].x - min_xyz[izone].x + 0.001f;
+      float ysize = max_xyz[izone].y - min_xyz[izone].y + 0.001f;
+      float zsize = max_xyz[izone].z - min_xyz[izone].z + 0.001f;
+      float delta = powf(xsize*ysize*zsize*tilesize/(float)ncoord_zone, 1.0f/3.0f);
+      ncellx[izone] = max(1, (int)(xsize/delta));
+      ncelly[izone] = max(1, (int)(ysize/delta));
+      celldx[izone] = xsize/(float)(ncellx[izone]);
+      celldy[izone] = ysize/(float)(ncelly[izone]);
+      // Increase ncellx and ncelly by one to account for bonded atoms outside the box
+    } else {
+      ncellx[izone] = 0;
+      ncelly[izone] = 0;
+      celldx[izone] = 1.0f;
+      celldy[izone] = 1.0f;
+    }
+  }
+
+}
+
+//
 // Sorts atoms into tiles
 //
 template <int tilesize>
-void NeighborList<tilesize>::sort_tilex(const int ncoord,
-					const float x0, const float y0, const float z0,
-					const float inv_dx, const float inv_dy, const float inv_dz,
+void NeighborList<tilesize>::sort_tilex(const int *zonelist_atom,
+					const int ncoord,
+					const float3 *max_xyz, const float3 *min_xyz,
 					const float4 *xyzq,
 					float4 *xyzq_sorted,
 					cudaStream_t stream) {
+
+  int ncellx[8], ncelly[8], ncellz[8];
+  float celldx[8], celldy[8], celldz[8];
+  float inv_dx[8], inv_dy[8], inv_dz[8];
+
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
-  calc_tilex_ind_kernel<<< nblock, nthread >>>
-    (ncoord, xyzq, 0, ncellx, ncelly, ncellz, x0, y0, z0,
-     inv_dx, inv_dy, inv_dz, tilex_key, tilex_val);
+  set_cell_sizes(zonelist_atom, max_xyz, min_xyz, ncellx, ncelly, celldx, celldy);
 
-  cudaCheck(cudaGetLastError());
+  for (int i=0;i < 8;i++) {
+    inv_dx[i] = 1.0f/celldx[i];
+    inv_dy[i] = 1.0f/celldy[i];
+  }
+
+  for (int i=0;i < 8;i++) {
+    int istart, iend;
+    if (i > 0) {
+      istart = zonelist_atom[i-1];
+    } else {
+      istart = 0;
+    }
+    iend = zonelist_atom[i] - 1;
+    calc_tilex_ind_kernel<<< nblock, nthread >>>
+      (istart, iend, xyzq, 0, ncellx[i], ncelly[i], ncellz[i],
+       min_xyz[i].x, min_xyz[i].y, min_xyz[i].z,
+       inv_dx[i], inv_dy[i], inv_dz[i], tilex_key, tilex_val);
+
+    cudaCheck(cudaGetLastError());
+  }
 
   thrust::sort_by_key(tilex_key, tilex_key + ncoord, tilex_val);
 

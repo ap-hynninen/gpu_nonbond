@@ -48,6 +48,7 @@ static texture<int2, 1, cudaReadModeElementType> xyz0_texref;
 static texture<int2, 1, cudaReadModeElementType> xyz1_texref;
 static int2* xyz0_texref_pointer = NULL;
 static int2* xyz1_texref_pointer = NULL;
+static int texref_stride = 0;
 
 template <int t>
 __forceinline__ __device__ double load_coord(const int ind) {
@@ -530,10 +531,12 @@ __forceinline__ __device__ void solvent_calc(int imol) {
     d_setup.xyz2[ind.z]         = xcm + trans11 * xc3p + trans12 * yc3p + trans13 * zc3p;
     d_setup.xyz2[ind.z+d_setup.stride]  = ycm + trans21 * xc3p + trans22 * yc3p + trans23 * zc3p;
     d_setup.xyz2[ind.z+d_setup.stride2] = zcm + trans31 * xc3p + trans32 * yc3p + trans33 * zc3p;
+
 }
 
 __global__ void all_kernels() {
   const int imol = threadIdx.x + blockDim.x*blockIdx.x;
+
   if (imol < d_setup.nsolvent) {
     solvent_calc(imol);
   } else if (imol < d_setup.nsolvent + d_setup.npair) {
@@ -585,6 +588,7 @@ HoloConst::HoloConst() {
 
   xyz0_texref_pointer = NULL;
   xyz1_texref_pointer = NULL;
+  texref_stride = 0;
 
   if (get_cuda_arch() <= 200) {
     use_textures = true;
@@ -821,7 +825,7 @@ void HoloConst::setup_textures(double *xyz0, double *xyz1, int stride) {
   assert(xyz1 != NULL);
 
   // Unbind texture
-  if (xyz0_texref_pointer != (int2 *)xyz0) {    
+  if (xyz0_texref_pointer != (int2 *)xyz0 || stride != texref_stride) {
     cudaCheck(cudaUnbindTexture(xyz0_texref));
     xyz0_texref_pointer = NULL;
   }
@@ -840,7 +844,7 @@ void HoloConst::setup_textures(double *xyz0, double *xyz1, int stride) {
   }
 
   // Unbind texture
-  if (xyz1_texref_pointer != (int2 *)xyz1) {
+  if (xyz1_texref_pointer != (int2 *)xyz1 || stride != texref_stride) {
     cudaCheck(cudaUnbindTexture(xyz1_texref));
     xyz1_texref_pointer = NULL;
   }
@@ -857,6 +861,8 @@ void HoloConst::setup_textures(double *xyz0, double *xyz1, int stride) {
     cudaCheck(cudaBindTexture(NULL, xyz1_texref, (int2 *)xyz1, stride*3*sizeof(int2)));
     xyz1_texref_pointer = (int2 *)xyz1;
   }
+
+  texref_stride = stride;
 }
 
 //

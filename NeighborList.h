@@ -81,21 +81,26 @@ private:
   int bb_len;
   bb_t *bb;
 
+  void set_cell_sizes(const int *zonelist_atom,
+		      const float3 *max_xyz, const float3 *min_xyz,
+		      int *ncellx, int *ncelly,
+		      float *celldx, float *celldy);
+
 public:
   NeighborList();
   ~NeighborList();
 
-  void sort_tilex(const int ncoord,
-		  const float x0, const float y0, const float z0,
-		  const float inv_dx, const float inv_dy, const float inv_dz,
+  void sort_tilex(const int *zonelist_atom,
+		  const int ncoord,
+		  const float3 *max_xyz, const float3 *min_xyz,
 		  const float4 *xyzq,
 		  float4 *xyzq_sorted,
-		  cudaStream_t stream);
+		  cudaStream_t stream=0);
 
   void calc_bounding_box(const int ncell,
 			 const int *cell_start,
 			 const float4 *xyzq,
-			 cudaStream_t stream);
+			 cudaStream_t stream=0);
 
   void build_excl(const float boxx, const float boxy, const float boxz,
 		  const float roff,

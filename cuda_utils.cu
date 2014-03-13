@@ -310,8 +310,8 @@ static cudaDeviceProp gpu_prop;
 static int cuda_arch;
 
 void start_gpu(int numnode, int mynode) {
-  //int devices[4] = {2, 3, 0, 1};
-  int devices[4] = {0, 1, 2, 3};
+  int devices[4] = {2, 3, 0, 1};
+  //int devices[4] = {0, 1, 2, 3};
 
   int device_count;
   cudaCheck(cudaGetDeviceCount(&device_count));
