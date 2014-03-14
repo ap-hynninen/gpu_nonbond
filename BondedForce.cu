@@ -7,7 +7,9 @@
 // Energy and virial in device memory
 static __device__ BondedEnergyVirial_t d_energy_virial;
 
-
+//
+// Calculates box shift
+//
 __forceinline__ __device__
 float3 calc_box_shift(int ish,
 		      const float boxx,
@@ -22,6 +24,26 @@ float3 calc_box_shift(int ish,
   return sh;
 }
 
+//
+// Reduces energy values
+//
+__forceinline__ __device__
+void reduce_energy(const double epot, const unsigned int tid, volatile double *sh_epot,
+		   double *global_epot) {
+  sh_epot[tid] = epot;
+  __syncthreads();
+  for (int i=1;i < blockDim.x/2;i *= 2) {
+    int t = tid + i;
+    double epot_val  = (t < blockDim.x) ? sh_epot[t] : 0.0;
+    __syncthreads();
+    sh_epot[tid] += epot_val;
+    __syncthreads();
+  }
+  if (tid == 0) {
+    double epot_val = sh_epot[0];
+    atomicAdd(global_epot, epot_val);
+  }
+}
 
 //
 // bondcoef.x = cbb
@@ -52,9 +74,6 @@ __global__ void calc_bond_force_kernel(const int nbondlist, const bondlist_t* bo
 
     // Calculate shift for i-atom
     float3 sh_xyz = calc_box_shift(ish, boxx, boxy, boxz);
-
-    // NOTE: Take this into account in building bondcoef
-    //    if (ic == 0) cycle
 
     float4 xyzqi = xyzq[ii];
     float4 xyzqj = xyzq[jj];
@@ -92,35 +111,21 @@ __global__ void calc_bond_force_kernel(const int nbondlist, const bondlist_t* bo
 
   if (calc_energy) {
     // Reduce energy
-    sh_epot[threadIdx.x] = epot;
-    __syncthreads();
-    for (int i=1;i < blockDim.x/2;i *= 2) {
-      int t = threadIdx.x + i;
-      double epot_val  = (t < blockDim.x) ? sh_epot[t] : 0.0;
-      __syncthreads();
-      sh_epot[threadIdx.x] += epot_val;
-      __syncthreads();
-    }
-    if (threadIdx.x == 0) {
-      double epot_val = sh_epot[0];
-      atomicAdd(&d_energy_virial.energy_bond, epot_val);
-    }
-
+    reduce_energy(epot, threadIdx.x, sh_epot, &d_energy_virial.energy_bond);
   }
 
 }
-
-#ifdef NOTREADY
 
 //
 // anglecoef.x = ctb
 // anglecoef.y = ctc
 //
-__global__ void eangle_kernel(const int nanglelist, const anglelist_t *anglelist,
-			      const float2 *anglecoef, const float4 *xyzq,
-			      const int stride,
-			      const float boxx, const float boxy, const float boxz,
-			      FORCE_T *force) {
+template <typename AT, typename CT, bool calc_energy, bool calc_virial>
+__global__ void calc_angle_force_kernel(const int nanglelist, const anglelist_t *anglelist,
+					const float2 *anglecoef, const float4 *xyzq,
+					const int stride,
+					const float boxx, const float boxy, const float boxz,
+					AT *force) {
   int pos = threadIdx.x + blockIdx.x*blockDim.x;
 
   while (pos < nanglelist) {
@@ -136,9 +141,6 @@ __global__ void eangle_kernel(const int nanglelist, const anglelist_t *anglelist
 
     // Calculate shift for k-atom
     float3 ksh_xyz = calc_box_shift(ksh, boxx, boxy, boxz);
-
-    // NOTE: Take this into account when building anglecoef
-    // if (ic == 0) cycle
 
     float dxij = xyzq[ii].x + ish_xyz.x - xyzq[jj].x;
     float dyij = xyzq[ii].y + ish_xyz.y - xyzq[jj].y;
@@ -164,34 +166,35 @@ __global__ void eangle_kernel(const int nanglelist, const anglelist_t *anglelist
 
     float2 anglecoef_val = anglecoef[ic];
 
+    float df;
     if (fabsf(cst) >= 0.99f) {
-      if (abs(cst) > 1.0f) cst = sign(1.0f,cst);
-      at = acos(cst);
-      da = at - ctb_val;
+      if (fabsf(cst) > 1.0f) cst = (cst >= 0.0f) ? 1.0f : -1.0f; //sign(1.0f,cst);
+      float at = acosf(cst);
+      float da = at - ctb_val;
       df = ctc_val*da;
 
-#ifdef CALC_ENERGY
-      //epot = epot + real(df*da,kind=chm_real);
-#endif
-      st2r = 1.0f/(1.0f - cst*cst + rpreci);
-      str = sqrtf(st2r);
+      if (calc_energy) {
+	epot += epot + (double)(df*da);
+      }
+      float st2r = 1.0f/(1.0f - cst*cst + rpreci);
+      float str = sqrtf(st2r);
       if (ctb_val < 0.001f) {
-	df = -2.0f*ctc_val*(one + da*da*sixth);
+	df = -2.0f*ctc_val*(1.0f + da*da*0.166666666666667f);
       } else if (pi_val-ctb_val < 0.001) {
-	df = 2.0f*ctc_val*(one + da*da*sixth);
+	df = 2.0f*ctc_val*(1.0f + da*da*0.166666666666667f);
       } else {
-	df = mintwo*df*str;
+	df = -2.0f*df*str;
       }
     } else {
-      at = acos(cst);
-      da = at - ctb_val;
+      float at = acosf(cst);
+      float da = at - ctb_val;
       df = ctc_val*da;
-#ifdef CALC_ENERGY
-      epot = epot + real(df*da,kind=chm_real);
-#endif
-      st2r = one/(one - cst*cst);
-      str = sqrtf(st2r);
-      df = mintwo*df*str;
+      if (calc_energy) {
+	epot += epot + (double)(df*da);
+      }
+      float st2r = 1.0f/(1.0f - cst*cst);
+      float str = sqrtf(st2r);
+      df = -2.0f*df*str;
     }
 
     float dtxi = rij_inv*(dxkjr - cst*dxijr);
@@ -201,52 +204,66 @@ __global__ void eangle_kernel(const int nanglelist, const anglelist_t *anglelist
     float dtzi = rij_inv*(dzkjr - cst*dzijr);
     float dtzj = rkj_inv*(dzijr - cst*dzkjr);
 
+    AT AT_dtxi, AT_dtyi, AT_dtzi;
+    AT AT_dtxj, AT_dtyj, AT_dtzj;
+    calc_component_force<AT, CT>(df, dtxi, dtyi, dtzi, AT_dtxi, AT_dtyi, AT_dtzi);
+    calc_component_force<AT, CT>(df, dtxj, dtyj, dtzj, AT_dtxj, AT_dtyj, AT_dtzj);
+
+    write_force<AT>(AT_dtxi, AT_dtyi, AT_dtzi, ii, stride, force);
+    write_force<AT>(AT_dtxj, AT_dtyj, AT_dtzj, kk, stride, force);
+    write_force<AT>(-AT_dtxi-AT_dtxj, -AT_dtyi-AT_dtyj, -AT_dtzi-AT_dtzj, jj, stride, force);
+
+    /*
 #ifdef PREC_SPFP
     df *= FORCE_SCALE;
-    FORCE_T dti = lliroundf(df*dtxi);
-    FORCE_T dtj = lliroundf(df*dtxj);
-    atomicAdd((unsigned long long int *)&force[ii], llitoulli(dti));
-    atomicAdd((unsigned long long int *)&force[kk], llitoulli(dtj));
-    atomicAdd((unsigned long long int *)&force[jj], llitoulli(-dti-dtj));
+    FORCE_T dtxi = lliroundf(df*dtxi);
+    FORCE_T dtxj = lliroundf(df*dtxj);
+    atomicAdd((unsigned long long int *)&force[ii], llitoulli(dtxi));
+    atomicAdd((unsigned long long int *)&force[kk], llitoulli(dtxj));
+    atomicAdd((unsigned long long int *)&force[jj], llitoulli(-dtxi-dtxj));
 #endif
 
-#ifdef CALC_VIRIAL
-	 //       sforce(is) = sforce(is) + dti
-	 //       sforce(ks) = sforce(ks) + dtj
-#endif
+    if (calc_virial) {
+      //       sforce(is) = sforce(is) + dtxi
+      //       sforce(ks) = sforce(ks) + dtxj
+    }
 
 #ifdef PREC_SPFP
-    dti = lliroundf(df*dtyi);
-    dtj = lliroundf(df*dtyj);
-    atomicAdd((unsigned long long int *)&force[ii+stride], llitoulli(dti));
-    atomicAdd((unsigned long long int *)&force[kk+stride], llitoulli(dtj));
-    atomicAdd((unsigned long long int *)&force[jj+stride], llitoulli(-dti-dtj));
+    dtyi = lliroundf(df*dtyi);
+    dtyj = lliroundf(df*dtyj);
+    atomicAdd((unsigned long long int *)&force[ii+stride], llitoulli(dtyi));
+    atomicAdd((unsigned long long int *)&force[kk+stride], llitoulli(dtyj));
+    atomicAdd((unsigned long long int *)&force[jj+stride], llitoulli(-dtyi-dtyj));
 #endif
 
 
-#ifdef CALC_VIRIAL
-	 //       sforce(is+1) = sforce(is+1) + dti
-	 //       sforce(ks+1) = sforce(ks+1) + dtj
-#endif
+    if (calc_virial) {
+      //       sforce(is+1) = sforce(is+1) + dtxi
+      //       sforce(ks+1) = sforce(ks+1) + dtxj
+    }
 
 #ifdef PREC_SPFP
     const int stride2 = stride*2;
-    dti = lliroundf(df*dtzi);
-    dtj = lliroundf(df*dtzj);
-    atomicAdd((unsigned long long int *)&force[ii+stride2], llitoulli(dti));
-    atomicAdd((unsigned long long int *)&force[kk+stride2], llitoulli(dtj));
-    atomicAdd((unsigned long long int *)&force[jj+stride2], llitoulli(-dti-dtj));
+    dtzi = lliroundf(df*dtzi);
+    dtzj = lliroundf(df*dtzj);
+    atomicAdd((unsigned long long int *)&force[ii+stride2], llitoulli(dtzi));
+    atomicAdd((unsigned long long int *)&force[kk+stride2], llitoulli(dtzj));
+    atomicAdd((unsigned long long int *)&force[jj+stride2], llitoulli(-dtzi-dtzj));
 #endif
 
-#ifdef CALC_VIRIAL
-	 //       sforce(is+2) = sforce(is+2) + dti
-	 //       sforce(ks+2) = sforce(ks+2) + dtj
-#endif
+    if (calc_virial) {
+      //       sforce(is+2) = sforce(is+2) + dtxi
+      //       sforce(ks+2) = sforce(ks+2) + dtxj
+    }
+    */
 
     pos += blockDim.x*gridDim.x;
   }
 
 }
+
+#ifdef NOTREADY
+
 
 //
 // Dihedral potential
@@ -566,6 +583,18 @@ __global__ void edihe_kernel(const int ndihelist, const dihelist_t *dihelist,
 //
 template <typename AT, typename CT>
 BondedForce<AT, CT>::BondedForce() {
+  nbondlist = 0;
+  bondlist_len = 0;
+  bondlist = NULL;
+  bondcoef_len = 0;
+  bondcoef = NULL;
+
+  nanglelist = 0;
+  anglelist_len = 0;
+  anglelist = NULL;
+  anglecoef_len = 0;
+  anglecoef = NULL;
+
   allocate_host<BondedEnergyVirial_t>(&h_energy_virial, 1);
 }
 
@@ -574,7 +603,34 @@ BondedForce<AT, CT>::BondedForce() {
 //
 template <typename AT, typename CT>
 BondedForce<AT, CT>::~BondedForce() {
+  if (bondlist != NULL) deallocate<bondlist_t>(&bondlist);
+  if (bondcoef != NULL) deallocate<float2>(&bondcoef);
+
+  if (anglelist != NULL) deallocate<anglelist_t>(&anglelist);
+  if (anglecoef != NULL) deallocate<float2>(&anglecoef);
+
   if (h_energy_virial != NULL) deallocate_host<BondedEnergyVirial_t>(&h_energy_virial);
+}
+
+//
+// Setup bondlists and coefficients (copies them from CPU to GPU)
+//
+template <typename AT, typename CT>
+void BondedForce<AT, CT>::setup(int nbondlist, bondlist_t *h_bondlist, float2 *h_bondcoef,
+				int nanglelist, anglelist_t *h_anglelist, float2 *h_anglecoef) {
+  this->nbondlist = nbondlist;
+  reallocate<bondlist_t>(&bondlist, &bondlist_len, nbondlist, 1.2f);
+  reallocate<float2>(&bondcoef, &bondcoef_len, nbondlist, 1.2f);
+
+  this->nanglelist = nanglelist;
+  reallocate<anglelist_t>(&anglelist, &anglelist_len, nanglelist, 1.2f);
+  reallocate<float2>(&anglecoef, &anglecoef_len, nanglelist, 1.2f);
+
+  copy_HtoD<bondlist_t>(h_bondlist, bondlist, nbondlist);
+  copy_HtoD<float2>(h_bondcoef, bondcoef, nbondlist);
+
+  copy_HtoD<anglelist_t>(h_anglelist, anglelist, nanglelist);
+  copy_HtoD<float2>(h_anglecoef, anglecoef, nanglelist);
 }
 
 //
@@ -587,9 +643,11 @@ void BondedForce<AT, CT>::calc_force(const float4 *xyzq,
 				     const bool calc_virial,
 				     const int stride, AT *force, cudaStream_t stream) {
 
-  int nthread = 512;
-  int nblock = (nbondlist -1)/nthread + 1;
-  int shmem_size = 0;
+  int nthread, nblock, shmem_size;
+
+  nthread = 512;
+  nblock = (nbondlist -1)/nthread + 1;
+  shmem_size = 0;
   if (calc_energy) {
     shmem_size += nthread*sizeof(double);
   }
@@ -600,9 +658,24 @@ void BondedForce<AT, CT>::calc_force(const float4 *xyzq,
     if (calc_virial) {
       std::cerr << "BondedForce<AT, CT>::calc_force, calc_virial not implemented yet" << std::endl;
     } else {
+      nthread = 512;
+      nblock = (nbondlist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) {
+	shmem_size += nthread*sizeof(double);
+      }
       calc_bond_force_kernel<AT, CT, false, false >
 	<<< nblock, nthread, shmem_size, stream >>>
 	(nbondlist, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force);
+      nthread = 512;
+      nblock = (nbondlist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) {
+	shmem_size += nthread*sizeof(double);
+      }
+      calc_angle_force_kernel<AT, CT, false, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nanglelist, anglelist, anglecoef, xyzq, stride, boxx, boxy, boxz, force);
     }
   }
 

@@ -64,15 +64,29 @@ private:
   int bondcoef_len;
   float2 *bondcoef;
 
+  // -------
+  // Angles
+  // -------
+  int nanglelist;
+
+  int anglelist_len;
+  anglelist_t *anglelist;
+
+  int anglecoef_len;
+  float2 *anglecoef;
+
 public:
   BondedForce();
   ~BondedForce();
+
+  void setup(int nbondlist, bondlist_t *bondlist, float2 *bondcoef,
+	     int nanglelist, anglelist_t *anglelist, float2 *anglecoef);
 
   void calc_force(const float4 *xyzq,
 		  const float boxx, const float boxy, const float boxz,
 		  const bool calc_energy,
 		  const bool calc_virial,
-		  const int stride, AT *force, cudaStream_t stream);
+		  const int stride, AT *force, cudaStream_t stream=0);
 
   void clear_energy_virial();
   void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
