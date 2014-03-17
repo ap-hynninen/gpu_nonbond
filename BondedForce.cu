@@ -78,20 +78,20 @@ __global__ void calc_bond_force_kernel(const int nbondlist, const bondlist_t* bo
     float4 xyzqi = xyzq[ii];
     float4 xyzqj = xyzq[jj];
 
-    float dx = xyzqi.x + sh_xyz.x - xyzqj.x;
-    float dy = xyzqi.y + sh_xyz.y - xyzqj.y;
-    float dz = xyzqi.z + sh_xyz.z - xyzqj.z;
+    CT dx = xyzqi.x + sh_xyz.x - xyzqj.x;
+    CT dy = xyzqi.y + sh_xyz.y - xyzqj.y;
+    CT dz = xyzqi.z + sh_xyz.z - xyzqj.z;
 
-    float r = sqrtf(dx*dx + dy*dy + dz*dz);
+    CT r = sqrtf(dx*dx + dy*dy + dz*dz);
 
     float2 bondcoef_val = bondcoef[ic];
-    float db = r - bondcoef_val.x;
-    float fij = db*bondcoef_val.y;
+    CT db = r - (CT)bondcoef_val.x;
+    CT fij = db*(CT)bondcoef_val.y;
 
     if (calc_energy) {
       epot += (double)(fij*db);
     }
-    fij *= 2.0f/r;
+    fij *= ((CT)2)/r;
 
     AT fxij, fyij, fzij;
     calc_component_force<AT, CT>(fij, dx, dy, dz, fxij, fyij, fzij);
@@ -128,6 +128,9 @@ __global__ void calc_angle_force_kernel(const int nanglelist, const anglelist_t 
 					AT *force) {
   int pos = threadIdx.x + blockIdx.x*blockDim.x;
 
+  double epot;
+  if (calc_energy) epot = 0.0;
+
   while (pos < nanglelist) {
     int ii = anglelist[pos].i;
     int jj = anglelist[pos].j;
@@ -142,67 +145,84 @@ __global__ void calc_angle_force_kernel(const int nanglelist, const anglelist_t 
     // Calculate shift for k-atom
     float3 ksh_xyz = calc_box_shift(ksh, boxx, boxy, boxz);
 
-    float dxij = xyzq[ii].x + ish_xyz.x - xyzq[jj].x;
-    float dyij = xyzq[ii].y + ish_xyz.y - xyzq[jj].y;
-    float dzij = xyzq[ii].z + ish_xyz.z - xyzq[jj].z;
+    CT dxij = xyzq[ii].x + ish_xyz.x - xyzq[jj].x;
+    CT dyij = xyzq[ii].y + ish_xyz.y - xyzq[jj].y;
+    CT dzij = xyzq[ii].z + ish_xyz.z - xyzq[jj].z;
 
-    float dxkj = xyzq[kk].x + ksh_xyz.x - xyzq[jj].x;
-    float dykj = xyzq[kk].y + ksh_xyz.y - xyzq[jj].y;
-    float dzkj = xyzq[kk].z + ksh_xyz.z - xyzq[jj].z;
+    CT dxkj = xyzq[kk].x + ksh_xyz.x - xyzq[jj].x;
+    CT dykj = xyzq[kk].y + ksh_xyz.y - xyzq[jj].y;
+    CT dzkj = xyzq[kk].z + ksh_xyz.z - xyzq[jj].z;
 
-    float rij = sqrtf(dxij*dxij + dyij*dyij + dzij*dzij);
-    float rkj = sqrtf(dxkj*dxkj + dykj*dykj + dzkj*dzkj);
+    CT rij = sqrtf(dxij*dxij + dyij*dyij + dzij*dzij);
+    CT rkj = sqrtf(dxkj*dxkj + dykj*dykj + dzkj*dzkj);
 
-    float rij_inv = 1.0f/rij;
-    float rkj_inv = 1.0f/rkj;
+    CT rij_inv = ((CT)1)/rij;
+    CT rkj_inv = ((CT)1)/rkj;
 
-    float dxijr = dxij*rij_inv;
-    float dyijr = dyij*rij_inv;
-    float dzijr = dzij*rij_inv;
-    float dxkjr = dxkj*rkj_inv;
-    float dykjr = dykj*rkj_inv;
-    float dzkjr = dzkj*rkj_inv;
-    float cst = dxijr*dxkjr + dyijr*dykjr + dzijr*dzkjr;
+    CT dxijr = dxij*rij_inv;
+    CT dyijr = dyij*rij_inv;
+    CT dzijr = dzij*rij_inv;
+    CT dxkjr = dxkj*rkj_inv;
+    CT dykjr = dykj*rkj_inv;
+    CT dzkjr = dzkj*rkj_inv;
+    CT cst = dxijr*dxkjr + dyijr*dykjr + dzijr*dzkjr;
 
+    // anglecoef.x = ctb
+    // anglecoef.y = ctc
     float2 anglecoef_val = anglecoef[ic];
 
-    float df;
-    if (fabsf(cst) >= 0.99f) {
-      if (fabsf(cst) > 1.0f) cst = (cst >= 0.0f) ? 1.0f : -1.0f; //sign(1.0f,cst);
-      float at = acosf(cst);
-      float da = at - ctb_val;
-      df = ctc_val*da;
+    // Restrict values of cst to the interval [-0.999 ... 0.999]
+    // NOTE: we are ignoring the fancy stuff that is done on the CPU version
+    cst = min((CT)0.999, max(-(CT)0.999, cst));
 
+    CT at = acosf(cst);
+    CT da = at - (CT)anglecoef_val.x;
+    CT df = ((CT)anglecoef_val.y)*da;
+    if (calc_energy) {
+      epot += epot + (double)(df*da);
+    }
+    CT st2r = ((CT)1.0)/(((CT)1.0) - cst*cst);
+    CT str = sqrtf(st2r);
+    df = -((CT)2.0)*df*str;
+
+    /*
+      CPU code:
+    if (fabsf(cst) >= (CT)0.999999) {
+      if (fabsf(cst) > (CT)1.0) cst = (cst >= (CT)0.0) ? (CT)1.0 : -(CT)1.0; //sign(1.0f,cst);
+      CT at = acosf(cst);
+      CT da = at - (CT)anglecoef_val.x;
+      df = ((CT)anglecoef_val.y)*da;
       if (calc_energy) {
 	epot += epot + (double)(df*da);
       }
-      float st2r = 1.0f/(1.0f - cst*cst + rpreci);
-      float str = sqrtf(st2r);
-      if (ctb_val < 0.001f) {
-	df = -2.0f*ctc_val*(1.0f + da*da*0.166666666666667f);
-      } else if (pi_val-ctb_val < 0.001) {
-	df = 2.0f*ctc_val*(1.0f + da*da*0.166666666666667f);
+      CT st2r = ((CT)1.0)/(((CT)1.0) - cst*cst + rpreci);
+      CT str = sqrtf(st2r);
+      if (anglecoef_val.x < 0.001f) {
+	df = -((CT)2.0)*((CT)anglecoef_val.y)*(((CT)1.0) + da*da*((CT)0.166666666666667));
+      } else if ((CT)3.14159265358979323846 - (CT)anglecoef_val.x < (CT)0.001) {
+	df = ((CT)2.0)*((CT)anglecoef_val.y)*(((CT)1.0) + da*da*((CT)0.166666666666667));
       } else {
-	df = -2.0f*df*str;
+	df = -((CT)2.0)*df*str;
       }
     } else {
-      float at = acosf(cst);
-      float da = at - ctb_val;
-      df = ctc_val*da;
+      CT at = acosf(cst);
+      CT da = at - (CT)anglecoef_val.x;
+      df = ((CT)anglecoef_val.y)*da;
       if (calc_energy) {
 	epot += epot + (double)(df*da);
       }
-      float st2r = 1.0f/(1.0f - cst*cst);
-      float str = sqrtf(st2r);
-      df = -2.0f*df*str;
+      CT st2r = ((CT)1.0)/(((CT)1.0) - cst*cst);
+      CT str = sqrtf(st2r);
+      df = -((CT)2.0)*df*str;
     }
+    */
 
-    float dtxi = rij_inv*(dxkjr - cst*dxijr);
-    float dtxj = rkj_inv*(dxijr - cst*dxkjr);
-    float dtyi = rij_inv*(dykjr - cst*dyijr);
-    float dtyj = rkj_inv*(dyijr - cst*dykjr);
-    float dtzi = rij_inv*(dzkjr - cst*dzijr);
-    float dtzj = rkj_inv*(dzijr - cst*dzkjr);
+    CT dtxi = rij_inv*(dxkjr - cst*dxijr);
+    CT dtxj = rkj_inv*(dxijr - cst*dxkjr);
+    CT dtyi = rij_inv*(dykjr - cst*dyijr);
+    CT dtyj = rkj_inv*(dyijr - cst*dykjr);
+    CT dtzi = rij_inv*(dzkjr - cst*dzijr);
+    CT dtzj = rkj_inv*(dzijr - cst*dzkjr);
 
     AT AT_dtxi, AT_dtyi, AT_dtzi;
     AT AT_dtxj, AT_dtyj, AT_dtzj;
@@ -276,7 +296,7 @@ __global__ void calc_angle_force_kernel(const int nanglelist, const anglelist_t 
 // res.x = e
 // res.y = df
 //
-static __forceinline__ __device__ float2 dihe_pot(const int *cpd, const float3 *dihecoef,
+static __forceinline__ __device__ CT2 dihe_pot(const int *cpd, const float3 *dihecoef,
 						  const int ic_in,
 						  const float st, const float ct)
 {
@@ -433,12 +453,16 @@ static __forceinline__ __device__ float2 imdihe_pot(const int *cid, const float3
 // dihecoef.x = ctb
 // dihecoef.y = ctc
 //
-__global__ void edihe_kernel(const int ndihelist, const dihelist_t *dihelist,
-			      const float2 *dihecoef, const float4 *xyzq,
-			      const int stride,
-			      const float boxx, const float boxy, const float boxz,
-			      FORCE_T *force) {
+template <typename AT, typename CT, bool calc_energy, bool calc_virial>
+__global__ void calc_dihe_force_kernel(const int ndihelist, const dihelist_t *dihelist,
+				       const float2 *dihecoef, const float4 *xyzq,
+				       const int stride,
+				       const float boxx, const float boxy, const float boxz,
+				       FORCE_T *force) {
   int pos = threadIdx.x + blockIdx.x*blockDim.x;
+
+  double epot;
+  if (calc_energy) epot = 0.0;
 
   while (pos < ndihelist) {
     int ii = dihelist[pos].i;
@@ -459,53 +483,53 @@ __global__ void edihe_kernel(const int ndihelist, const dihelist_t *dihelist,
     // Calculate shift for l-atom
     float3 sl = calc_box_shift(ksh, boxx, boxy, boxz);
 
-    float fx = (xyzq[ii].x + si.x) - (xyzq[jj].x + sj.x);
-    float fy = (xyzq[ii].y + si.y) - (xyzq[jj].y + sj.y);
-    float fz = (xyzq[ii].z + si.z) - (xyzq[jj].z + sj.z);
+    CT fx = (xyzq[ii].x + si.x) - (xyzq[jj].x + sj.x);
+    CT fy = (xyzq[ii].y + si.y) - (xyzq[jj].y + sj.y);
+    CT fz = (xyzq[ii].z + si.z) - (xyzq[jj].z + sj.z);
 
-    float gx = xyzq[jj].x + sj.x - xyzq[kk].x;
-    float gy = xyzq[jj].y + sj.y - xyzq[kk].y;
-    float gz = xyzq[jj].z + sj.z - xyzq[kk].z;
+    CT gx = xyzq[jj].x + sj.x - xyzq[kk].x;
+    CT gy = xyzq[jj].y + sj.y - xyzq[kk].y;
+    CT gz = xyzq[jj].z + sj.z - xyzq[kk].z;
 
-    float hx = xyzq[ll].x + sl.x - xyzq[kk].x;
-    float hy = xyzq[ll].y + sl.y - xyzq[kk].y;
-    float hz = xyzq[ll].z + sl.z - xyzq[kk].z;
+    CT hx = xyzq[ll].x + sl.x - xyzq[kk].x;
+    CT hy = xyzq[ll].y + sl.y - xyzq[kk].y;
+    CT hz = xyzq[ll].z + sl.z - xyzq[kk].z;
 
     // A=F^G, B=H^G.
-    float ax = fy*gz - fz*gy;
-    float ay = fz*gx - fx*gz;
-    float az = fx*gy - fy*gx;
-    float bx = hy*gz - hz*gy;
-    float by = hz*gx - hx*gz;
-    float bz = hx*gy - hy*gx;
+    CT ax = fy*gz - fz*gy;
+    CT ay = fz*gx - fx*gz;
+    CT az = fx*gy - fy*gx;
+    CT bx = hy*gz - hz*gy;
+    CT by = hz*gx - hx*gz;
+    CT bz = hx*gy - hy*gx;
 
-    float ra2 = ax*ax + ay*ay + az*az;
-    float rb2 = bx*bx + by*by + bz*bz;
-    float rg = sqrtf(gx*gx + gy*gy + gz*gz);
+    CT ra2 = ax*ax + ay*ay + az*az;
+    CT rb2 = bx*bx + by*by + bz*bz;
+    CT rg = sqrtf(gx*gx + gy*gy + gz*gz);
 
     //    if((ra2 <= rxmin2) .or. (rb2 <= rxmin2) .or. (rg <= rxmin)) then
     //          nlinear = nlinear + 1
     //       endif
 
-    float rgr = 1.0f / rg;
-    float ra2r = 1.0f / ra2;
-    float rb2r = 1.0f / rb2;
-    float rabr = sqrtf(ra2r*rb2r);
+    CT rgr = 1.0f / rg;
+    CT ra2r = 1.0f / ra2;
+    CT rb2r = 1.0f / rb2;
+    CT rabr = sqrtf(ra2r*rb2r);
 
     // ct=cos(phi)
-    float ct = (ax*bx + ay*by + az*bz)*rabr;
+    CT ct = (ax*bx + ay*by + az*bz)*rabr;
     //
     // ST=sin(phi), Note that sin(phi).G/|G|=B^A/(|A|.|B|)
     // which can be simplify to sin(phi)=|G|H.A/(|A|.|B|)
-    float st = rg*rabr*(ax*hx + ay*hy + az*hz);
+    CT st = rg*rabr*(ax*hx + ay*hy + az*hz);
     //
     //     Energy and derivative contributions.
 
     dihe_pot(cpd, cpc, cpcos, cpsin, ic, st, ct, e, df);
 
-#ifdef CALC_ENERGY
-    //       epot = epot + real(e,kind=chm_real4)  !##sp
-#endif
+    if (calc_energy) {
+      epot += epot + e;
+    }
 
     //
     //     Compute derivatives wrt catesian coordinates.
@@ -513,14 +537,14 @@ __global__ void edihe_kernel(const int ndihelist, const dihelist_t *dihelist,
     // GAA=dE/dphi.|G|/A^2, GBB=dE/dphi.|G|/B^2, FG=F.G, HG=H.G
     //  FGA=dE/dphi*F.G/(|G|A^2), HGB=dE/dphi*H.G/(|G|B^2)
 
-    float fg = fx*gx + fy*gy + fz*gz;
-    float hg = hx*gx + hy*gy + hz*gz;
-    float ra2r = df*ra2r;
-    float rb2r = df*rb2r;
-    float fga = fg*ra2r*rgr;
-    float hgb = hg*rb2r*rgr;
-    float gaa = ra2r*rg;
-    float gbb = rb2r*rg;
+    CT fg = fx*gx + fy*gy + fz*gz;
+    CT hg = hx*gx + hy*gy + hz*gz;
+    CT ra2r = df*ra2r;
+    CT rb2r = df*rb2r;
+    CT fga = fg*ra2r*rgr;
+    CT hgb = hg*rb2r*rgr;
+    CT gaa = ra2r*rg;
+    CT gbb = rb2r*rg;
     // DFi=dE/dFi, DGi=dE/dGi, DHi=dE/dHi.
 
     // Store forces
@@ -533,11 +557,11 @@ __global__ void edihe_kernel(const int ndihelist, const dihelist_t *dihelist,
     atomicAdd((unsigned long long int *)&force[ii        ], llitoulli(dfx));
     atomicAdd((unsigned long long int *)&force[ii+stride ], llitoulli(dfy));
     atomicAdd((unsigned long long int *)&force[ii+stride2], llitoulli(dfz));
-#ifdef CALC_VIRIAL
+    if (calc_virial) {
     //       sforce(is)   = sforce(is)   + dfx
     //       sforce(is+1) = sforce(is+1) + dfy
     //       sforce(is+2) = sforce(is+2) + dfz
-#endif
+    }
 
     FORCE_T dgx = lliroundf(fga*ax - hgb*bx);
     FORCE_T dgy = lliroundf(fga*ay - hgb*by);
@@ -545,11 +569,11 @@ __global__ void edihe_kernel(const int ndihelist, const dihelist_t *dihelist,
     atomicAdd((unsigned long long int *)&force[jj        ], llitoulli(-dfx + dgx));
     atomicAdd((unsigned long long int *)&force[jj+stride ], llitoulli(-dfy + dgy));
     atomicAdd((unsigned long long int *)&force[jj+stride2], llitoulli(-dfz + dgz));
-#ifdef CALC_VIRIAL
+    if (calc_virial) {
 	 //       sforce(js)   = sforce(js)   - dfx + dgx
 	 //       sforce(js+1) = sforce(js+1) - dfy + dgy
 	 //       sforce(js+2) = sforce(js+2) - dfz + dgz
-#endif
+    }
 #endif
 
 #ifdef PREC_SPFP
@@ -562,11 +586,11 @@ __global__ void edihe_kernel(const int ndihelist, const dihelist_t *dihelist,
     atomicAdd((unsigned long long int *)&force[ll        ], llitoulli(dhx));
     atomicAdd((unsigned long long int *)&force[ll+stride ], llitoulli(dhy));
     atomicAdd((unsigned long long int *)&force[ll+stride2], llitoulli(dhz));
-#ifdef CALC_VIRIAL
+    if (calc_virial) {
     //       sforce(ls)   = sforce(ls)   + dhx
     //       sforce(ls+1) = sforce(ls+1) + dhy
     //       sforce(ls+2) = sforce(ls+2) + dhz
-#endif
+    }
 #endif
 
     pos += blockDim.x*gridDim.x;
@@ -595,6 +619,24 @@ BondedForce<AT, CT>::BondedForce() {
   anglecoef_len = 0;
   anglecoef = NULL;
 
+  ndihelist = 0;
+  dihelist_len = 0;
+  dihelist = NULL;
+  dihecoef_len = 0;
+  dihecoef = NULL;
+
+  nimdihelist = 0;
+  imdihelist_len = 0;
+  imdihelist = NULL;
+  imdihecoef_len = 0;
+  imdihecoef = NULL;
+
+  ncmaplist = 0;
+  cmaplist_len = 0;
+  cmaplist = NULL;
+  cmapcoef_len = 0;
+  cmapcoef = NULL;
+
   allocate_host<BondedEnergyVirial_t>(&h_energy_virial, 1);
 }
 
@@ -609,6 +651,15 @@ BondedForce<AT, CT>::~BondedForce() {
   if (anglelist != NULL) deallocate<anglelist_t>(&anglelist);
   if (anglecoef != NULL) deallocate<float2>(&anglecoef);
 
+  if (dihelist != NULL) deallocate<dihelist_t>(&dihelist);
+  if (dihecoef != NULL) deallocate<float2>(&dihecoef);
+
+  if (imdihelist != NULL) deallocate<dihelist_t>(&imdihelist);
+  if (imdihecoef != NULL) deallocate<float2>(&imdihecoef);
+
+  if (cmaplist != NULL) deallocate<cmaplist_t>(&cmaplist);
+  if (cmapcoef != NULL) deallocate<float2>(&cmapcoef);
+
   if (h_energy_virial != NULL) deallocate_host<BondedEnergyVirial_t>(&h_energy_virial);
 }
 
@@ -617,20 +668,50 @@ BondedForce<AT, CT>::~BondedForce() {
 //
 template <typename AT, typename CT>
 void BondedForce<AT, CT>::setup(int nbondlist, bondlist_t *h_bondlist, float2 *h_bondcoef,
-				int nanglelist, anglelist_t *h_anglelist, float2 *h_anglecoef) {
+				int nanglelist, anglelist_t *h_anglelist, float2 *h_anglecoef,
+				int ndihelist, dihelist_t *dihelist, float2 *dihecoef,
+				int nimdihelist, dihelist_t *imdihelist, float2 *imdihecoef,
+				int ncmaplist, cmaplist_t *cmaplist, float2 *cmapcoef) {
   this->nbondlist = nbondlist;
-  reallocate<bondlist_t>(&bondlist, &bondlist_len, nbondlist, 1.2f);
-  reallocate<float2>(&bondcoef, &bondcoef_len, nbondlist, 1.2f);
+  if (nbondlist > 0) {
+    reallocate<bondlist_t>(&bondlist, &bondlist_len, nbondlist, 1.2f);
+    reallocate<float2>(&bondcoef, &bondcoef_len, nbondlist, 1.2f);
+    copy_HtoD<bondlist_t>(h_bondlist, bondlist, nbondlist);
+    copy_HtoD<float2>(h_bondcoef, bondcoef, nbondlist);
+  }
 
   this->nanglelist = nanglelist;
-  reallocate<anglelist_t>(&anglelist, &anglelist_len, nanglelist, 1.2f);
-  reallocate<float2>(&anglecoef, &anglecoef_len, nanglelist, 1.2f);
+  if (nanglelist > 0) {
+    reallocate<anglelist_t>(&anglelist, &anglelist_len, nanglelist, 1.2f);
+    reallocate<float2>(&anglecoef, &anglecoef_len, nanglelist, 1.2f);
+    copy_HtoD<anglelist_t>(h_anglelist, anglelist, nanglelist);
+    copy_HtoD<float2>(h_anglecoef, anglecoef, nanglelist);
+  }
 
-  copy_HtoD<bondlist_t>(h_bondlist, bondlist, nbondlist);
-  copy_HtoD<float2>(h_bondcoef, bondcoef, nbondlist);
+  this->ndihelist = ndihelist;
+  if (ndihelist > 0) {
+    reallocate<dihelist_t>(&dihelist, &dihelist_len, ndihelist, 1.2f);
+    reallocate<float2>(&dihecoef, &dihecoef_len, ndihelist, 1.2f);
+    copy_HtoD<dihelist_t>(h_dihelist, dihelist, ndihelist);
+    copy_HtoD<float2>(h_dihecoef, dihecoef, ndihelist);
+  }
 
-  copy_HtoD<anglelist_t>(h_anglelist, anglelist, nanglelist);
-  copy_HtoD<float2>(h_anglecoef, anglecoef, nanglelist);
+  this->nimdihelist = nimdihelist;
+  if (nimdihelist > 0) {
+    reallocate<dihelist_t>(&imdihelist, &imdihelist_len, nimdihelist, 1.2f);
+    reallocate<float2>(&imdihecoef, &imdihecoef_len, nimdihelist, 1.2f);
+    copy_HtoD<dihelist_t>(h_imdihelist, imdihelist, nimdihelist);
+    copy_HtoD<float2>(h_imdihecoef, imdihecoef, nimdihelist);
+  }
+
+  this->ncmaplist = ncmaplist;
+  if (ncmaplist > 0) {
+    reallocate<cmaplist_t>(&cmaplist, &cmaplist_len, ncmaplist, 1.2f);
+    reallocate<float2>(&cmapcoef, &cmapcoef_len, ncmaplist, 1.2f);
+    copy_HtoD<cmaplist_t>(h_cmaplist, cmaplist, ncmaplist);
+    copy_HtoD<float2>(h_cmapcoef, cmapcoef, ncmaplist);
+  }
+
 }
 
 //
@@ -690,6 +771,7 @@ void BondedForce<AT, CT>::clear_energy_virial() {
   h_energy_virial->energy_angle = 0.0;
   h_energy_virial->energy_dihe = 0.0;
   h_energy_virial->energy_imdihe = 0.0;
+  h_energy_virial->energy_cmap = 0.0;
   for (int i=0;i < 27;i++) {
     h_energy_virial->sforcex[i] = 0.0;
     h_energy_virial->sforcey[i] = 0.0;
@@ -707,19 +789,21 @@ template <typename AT, typename CT>
 void BondedForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
 					    double *energy_bond, double *energy_angle,
 					    double *energy_dihe, double *energy_imdihe,
+					    double *energy_cmap,
 					    double *sforcex, double *sforcey, double *sforcez) {
   if (prev_calc_energy && prev_calc_virial) {
     cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(BondedEnergyVirial_t)));
   } else if (prev_calc_energy) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 4*sizeof(double)));
+    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 5*sizeof(double)));
   } else if (prev_calc_virial) {
     cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 27*3*sizeof(double),
-				   4*sizeof(double)));
+				   5*sizeof(double)));
   }
   *energy_bond = h_energy_virial->energy_bond;
   *energy_angle = h_energy_virial->energy_angle;
   *energy_dihe = h_energy_virial->energy_dihe;
   *energy_imdihe = h_energy_virial->energy_imdihe;
+  *energy_cmap = h_energy_virial->energy_cmap;
   for (int i=0;i < 27;i++) {
     sforcex[i] = h_energy_virial->sforcex[i];
     sforcey[i] = h_energy_virial->sforcey[i];

@@ -38,6 +38,7 @@ struct BondedEnergyVirial_t {
   double energy_angle;
   double energy_dihe;
   double energy_imdihe;
+  double energy_cmap;
 
   // Shift forces for calculating virials
   double sforcex[27];
@@ -75,12 +76,48 @@ private:
   int anglecoef_len;
   float2 *anglecoef;
 
+  // ----------
+  // Dihedrals
+  // ----------
+  int ndihelist;
+
+  int dihelist_len;
+  dihelist_t *dihelist;
+
+  int dihecoef_len;
+  float2 *dihecoef;
+
+  // -------------------
+  // Improper Dihedrals
+  // -------------------
+  int nimdihelist;
+
+  int imdihelist_len;
+  dihelist_t *imdihelist;
+
+  int imdihecoef_len;
+  float2 *imdihecoef;
+
+  // ------
+  // CMAPs
+  // ------
+  int ncmaplist;
+
+  int cmaplist_len;
+  cmaplist_t *cmaplist;
+
+  int cmapcoef_len;
+  float2 *cmapcoef;
+
 public:
   BondedForce();
   ~BondedForce();
 
   void setup(int nbondlist, bondlist_t *bondlist, float2 *bondcoef,
-	     int nanglelist, anglelist_t *anglelist, float2 *anglecoef);
+	     int nanglelist, anglelist_t *anglelist, float2 *anglecoef,
+	     int ndihelist, dihelist_t *dihelist, float2 *dihecoef,
+	     int nimdihelist, dihelist_t *imdihelist, float2 *imdihecoef,
+	     int ncmaplist, cmaplist_t *cmaplist, float2 *cmapcoef);
 
   void calc_force(const float4 *xyzq,
 		  const float boxx, const float boxy, const float boxz,
@@ -92,6 +129,7 @@ public:
   void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
 			 double *energy_bond, double *energy_angle,
 			 double *energy_dihe, double *energy_imdihe,
+			 double *energy_cmap,
 			 double *sforcex, double *sforcey, double *sforcez);
 };
 

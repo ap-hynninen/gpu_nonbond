@@ -111,6 +111,9 @@ void test() {
   //---------------------- Bonded -------------------
   const int nbondlist = 0;
   const int nanglelist = 0;
+  const int ndihelist = 0;
+  const int nimdihelist = 0;
+
   bondlist_t *h_bondlist = new bondlist_t[nbondlist];
   float2 *h_bondcoef = new float2[nbondlist];
   load_ind<int>(4, "test_data/bondlist.txt", nbondlist, (int *)h_bondlist);
@@ -121,10 +124,22 @@ void test() {
   load_ind<int>(6, "test_data/anglelist.txt", nanglelist, (int *)h_anglelist);
   load_ind<float>(2, "test_data/anglecoef.txt", nanglelist, (float *)h_anglecoef);
 
+  dihelist_t *h_dihelist = new dihelist_t[ndihelist];
+  float2 *h_dihecoef = new float2[ndihelist];
+  load_ind<int>(8, "test_data/dihelist.txt", ndihelist, (int *)h_dihelist);
+  load_ind<float>(2, "test_data/dihecoef.txt", ndihelist, (float *)h_dihecoef);
+
+  dihelist_t *h_imdihelist = new dihelist_t[nimdihelist];
+  float2 *h_imdihecoef = new float2[nimdihelist];
+  load_ind<int>(8, "test_data/imdihelist.txt", nimdihelist, (int *)h_imdihelist);
+  load_ind<float>(2, "test_data/imdihecoef.txt", nimdihelist, (float *)h_imdihecoef);
+
   force_fp.clear();
   BondedForce<long long int, float> bondedforce;
   bondedforce.setup(nbondlist, h_bondlist, h_bondcoef,
-		    nanglelist, h_anglelist, h_anglecoef);
+		    nanglelist, h_anglelist, h_anglecoef,
+		    ndihelist, h_dihelist, h_dihecoef,
+		    nimdihelist, h_imdihelist, h_imdihecoef);
   bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, false, false,
 			 force_fp.xyz.stride, force_fp.xyz.data);
   force_fp.convert(&force);
@@ -142,6 +157,12 @@ void test() {
   
   delete [] h_anglelist;
   delete [] h_anglecoef;
+
+  delete [] h_dihelist;
+  delete [] h_dihecoef;
+  
+  delete [] h_imdihelist;
+  delete [] h_imdihecoef;
   
   return;
 
