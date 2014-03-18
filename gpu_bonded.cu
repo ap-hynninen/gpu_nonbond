@@ -206,6 +206,10 @@ void test() {
 		<< max_diff << ")" << std::endl;
     }
 
+    force_fp.clear();
+    bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, false, false,
+			   force_fp.xyz.stride, force_fp.xyz.data);
+
   }
 
   // Double precision

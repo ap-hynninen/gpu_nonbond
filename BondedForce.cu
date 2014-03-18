@@ -72,11 +72,13 @@ double sqrt_template(const T x) {
 // bondcoef.y = cbc
 //
 template <typename AT, typename CT, bool q_bond, bool calc_energy, bool calc_virial>
-__global__ void calc_bond_force_kernel(const int nbondlist, const bondlist_t* bondlist,
-				       const float2 *bondcoef, const float4 *xyzq,
+__global__ void calc_bond_force_kernel(const int nbondlist,
+				       const bondlist_t* __restrict__ bondlist,
+				       const float2* __restrict__ bondcoef,
+				       const float4* __restrict__ xyzq,
 				       const int stride,
 				       const float boxx, const float boxy, const float boxz,
-				       AT *force) {
+				       AT* __restrict__ force) {
   // Amount of shared memory required:
   // sh_epot: blockDim.x*sizeof(double)
   extern __shared__ double sh_epot[];
@@ -147,11 +149,13 @@ __global__ void calc_bond_force_kernel(const int nbondlist, const bondlist_t* bo
 // anglecoef.y = ctc
 //
 template <typename AT, typename CT, bool calc_energy, bool calc_virial>
-__global__ void calc_angle_force_kernel(const int nanglelist, const anglelist_t *anglelist,
-					const float2 *anglecoef, const float4 *xyzq,
+__global__ void calc_angle_force_kernel(const int nanglelist,
+					const anglelist_t* __restrict__ anglelist,
+					const float2* __restrict__ anglecoef,
+					const float4* __restrict__ xyzq,
 					const int stride,
 					const float boxx, const float boxy, const float boxz,
-					AT *force) {
+					AT* __restrict__ force) {
   // Amount of shared memory required:
   // sh_epot: blockDim.x*sizeof(double)
   extern __shared__ double sh_epot[];
@@ -327,13 +331,13 @@ __global__ void calc_angle_force_kernel(const int nanglelist, const anglelist_t 
 //
 // Out: df, e
 //
-template <typename T>
+template <typename T, bool calc_energy>
 __forceinline__ __device__
 void dihe_pot(const float4* dihecoef, const int ic_in,
 	      const T st, const T ct, T& df, double& e) {
 
   df = (T)0;
-  e = 0.0;
+  if (calc_energy) e = 0.0;
   int ic = ic_in;
 
   bool lrep = true;
@@ -354,15 +358,16 @@ void dihe_pot(const float4* dihecoef, const int ic_in,
       df1 = e1*st + df1*ct;
       e1 = ddf1;
     }
-    e1 = e1*dihecoef_val.w + df1*dihecoef_val.z;
+    if (calc_energy) e1 = e1*dihecoef_val.w + df1*dihecoef_val.z;
     df1 = df1*dihecoef_val.w - ddf1*dihecoef_val.z;
     df1 = -iper*df1;
-    e1 += (T)1;
-
-    if (iper == 0) e1 = (T)1;
+    if (calc_energy) {
+      e1 += (T)1;
+      if (iper == 0) e1 = (T)1;
+    }
 
     float arg = dihecoef_val.y;
-    e += arg*e1;
+    if (calc_energy) e += arg*e1;
     df += arg*df1;
 
     ic++;
@@ -380,12 +385,12 @@ void dihe_pot(const float4* dihecoef, const int ic_in,
 //
 // Out: df, e
 //
-template<typename T>
+template<typename T, bool calc_energy>
 __forceinline__ __device__
 void imdihe_pot(const float4 *dihecoef, const int ic_in,
 		const T st, const T ct, T& df, double& e) {
   df = (T)0;
-  e = 0.0;
+  if (calc_energy) e = 0.0;
 
   float4 dihecoef_val = dihecoef[ic_in];
 
@@ -408,15 +413,16 @@ void imdihe_pot(const float4 *dihecoef, const int ic_in,
 	df1 = e1*st + df1*ct;
 	e1 = ddf1;
       }
-      e1 = e1*dihecoef_val.w + df1*dihecoef_val.z;
+      if (calc_energy) e1 = e1*dihecoef_val.w + df1*dihecoef_val.z;
       df1 = df1*dihecoef_val.w - ddf1*dihecoef_val.z;
       df1 = -iper*df1;
-      e1 += (T)1;
-      
-      if (iper == 0) e1 = (T)1;
+      if (calc_energy) {
+	e1 += (T)1;
+	if (iper == 0) e1 = (T)1;
+      }
       
       float arg = dihecoef_val.y;
-      e += arg*e1;
+      if (calc_energy) e += arg*e1;
       df += arg*df1;
       
       ic++;
@@ -440,7 +446,7 @@ void imdihe_pot(const float4 *dihecoef, const int ic_in,
     }
 
     df = dihecoef_val.y*ap;
-    e = df*ap;
+    if (calc_energy) e = df*ap;
     df *= (T)2;
   }
   
@@ -454,11 +460,13 @@ void imdihe_pot(const float4 *dihecoef, const int ic_in,
 //
 //
 template <typename AT, typename CT, bool q_dihe, bool calc_energy, bool calc_virial>
-__global__ void calc_dihe_force_kernel(const int ndihelist, const dihelist_t *dihelist,
-				       const float4 *dihecoef, const float4 *xyzq,
+__global__ void calc_dihe_force_kernel(const int ndihelist,
+				       const dihelist_t* __restrict__ dihelist,
+				       const float4* __restrict__ dihecoef,
+				       const float4* __restrict__ xyzq,
 				       const int stride,
 				       const float boxx, const float boxy, const float boxz,
-				       AT *force) {
+				       AT* __restrict__ force) {
   // Amount of shared memory required:
   // sh_epot: blockDim.x*sizeof(double)
   extern __shared__ double sh_epot[];
@@ -532,9 +540,9 @@ __global__ void calc_dihe_force_kernel(const int ndihelist, const dihelist_t *di
     CT df;
     double e;
     if (q_dihe) {
-      dihe_pot<CT>(dihecoef, ic, st, ct, df, e);
+      dihe_pot<CT, calc_energy>(dihecoef, ic, st, ct, df, e);
     } else {
-      imdihe_pot<CT>(dihecoef, ic, st, ct, df, e);
+      imdihe_pot<CT, calc_energy>(dihecoef, ic, st, ct, df, e);
     }
 
     if (calc_energy) epot += e;
