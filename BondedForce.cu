@@ -37,18 +37,18 @@ float3 calc_box_shift(int ish,
 // Reduces energy values
 //
 __forceinline__ __device__
-void reduce_energy(const double epot, const unsigned int tid, volatile double *sh_epot,
+void reduce_energy(const double epot, volatile double *sh_epot,
 		   double *global_epot) {
-  sh_epot[tid] = epot;
+  sh_epot[threadIdx.x] = epot;
   __syncthreads();
-  for (int i=1;i < blockDim.x/2;i *= 2) {
-    int t = tid + i;
+  for (int i=1;i < blockDim.x;i *= 2) {
+    int t = threadIdx.x + i;
     double epot_val  = (t < blockDim.x) ? sh_epot[t] : 0.0;
     __syncthreads();
-    sh_epot[tid] += epot_val;
+    sh_epot[threadIdx.x] += epot_val;
     __syncthreads();
   }
-  if (tid == 0) {
+  if (threadIdx.x == 0) {
     double epot_val = sh_epot[0];
     atomicAdd(global_epot, epot_val);
   }
@@ -71,7 +71,7 @@ double sqrt_template(const T x) {
 // bondcoef.x = cbb
 // bondcoef.y = cbc
 //
-template <typename AT, typename CT, bool calc_energy, bool calc_virial>
+template <typename AT, typename CT, bool q_bond, bool calc_energy, bool calc_virial>
 __global__ void calc_bond_force_kernel(const int nbondlist, const bondlist_t* bondlist,
 				       const float2 *bondcoef, const float4 *xyzq,
 				       const int stride,
@@ -100,13 +100,9 @@ __global__ void calc_bond_force_kernel(const int nbondlist, const bondlist_t* bo
     float4 xyzqi = xyzq[ii];
     float4 xyzqj = xyzq[jj];
 
-    //    CT dx = xyzqi.x + sh_xyz.x - xyzqj.x;
-    //    CT dy = xyzqi.y + sh_xyz.y - xyzqj.y;
-    //    CT dz = xyzqi.z + sh_xyz.z - xyzqj.z;
-
-    CT dx = (CT)xyzqi.x + (CT)sh_xyz.x - (CT)xyzqj.x;
-    CT dy = (CT)xyzqi.y + (CT)sh_xyz.y - (CT)xyzqj.y;
-    CT dz = (CT)xyzqi.z + (CT)sh_xyz.z - (CT)xyzqj.z;
+    CT dx = xyzqi.x + sh_xyz.x - xyzqj.x;
+    CT dy = xyzqi.y + sh_xyz.y - xyzqj.y;
+    CT dz = xyzqi.z + sh_xyz.z - xyzqj.z;
 
     CT r = sqrt_template<CT>(dx*dx + dy*dy + dz*dz);
 
@@ -135,9 +131,13 @@ __global__ void calc_bond_force_kernel(const int nbondlist, const bondlist_t* bo
     pos += blockDim.x*gridDim.x;
   }
 
+  // Reduce energy
   if (calc_energy) {
-    // Reduce energy
-    reduce_energy(epot, threadIdx.x, sh_epot, &d_energy_virial.energy_bond);
+    if (q_bond) {
+      reduce_energy(epot, sh_epot, &d_energy_virial.energy_bond);
+    } else {
+      reduce_energy(epot, sh_epot, &d_energy_virial.energy_ureyb);
+    }
   }
 
 }
@@ -152,6 +152,10 @@ __global__ void calc_angle_force_kernel(const int nanglelist, const anglelist_t 
 					const int stride,
 					const float boxx, const float boxy, const float boxz,
 					AT *force) {
+  // Amount of shared memory required:
+  // sh_epot: blockDim.x*sizeof(double)
+  extern __shared__ double sh_epot[];
+
   int pos = threadIdx.x + blockIdx.x*blockDim.x;
 
   double epot;
@@ -161,7 +165,7 @@ __global__ void calc_angle_force_kernel(const int nanglelist, const anglelist_t 
     int ii = anglelist[pos].i - 1;
     int jj = anglelist[pos].j - 1;
     int kk = anglelist[pos].k - 1;
-    int ic = anglelist[pos].itype;
+    int ic = anglelist[pos].itype - 1;
     int ish = anglelist[pos].ishift1;
     int ksh = anglelist[pos].ishift2;
 
@@ -306,185 +310,159 @@ __global__ void calc_angle_force_kernel(const int nanglelist, const anglelist_t 
     pos += blockDim.x*gridDim.x;
   }
 
+  // Reduce energy
+  if (calc_energy) {
+    reduce_energy(epot, sh_epot, &d_energy_virial.energy_angle);
+  }
 }
-
-#ifdef NOTREADY
 
 
 //
 // Dihedral potential
 //
-// dihecoef.x = cpc
-// dihecoef.y = cpcos
+// dihecoef.x = cpd (integer)
+// dihecoef.y = cpc
 // dihecoef.z = cpsin
+// dihecoef.w = cpcos
 //
-// Out:
-// res.x = e
-// res.y = df
+// Out: df, e
 //
-static __forceinline__ __device__ CT2 dihe_pot(const int *cpd, const float3 *dihecoef,
-						  const int ic_in,
-						  const float st, const float ct)
-{
+template <typename T>
+__forceinline__ __device__
+void dihe_pot(const float4* dihecoef, const int ic_in,
+	      const T st, const T ct, T& df, double& e) {
 
-  float e = 0.0f;
-  float df = 0.0f;
-  ic = ic_in
+  df = (T)0;
+  e = 0.0;
+  int ic = ic_in;
 
-30  continue
-    iper = cpd(ic)
-    if (iper > 0) then
-       lrep = .false.
-    else
-       lrep = .true.
-       iper = -iper
-    endif
+  bool lrep = true;
+  while (lrep) {
+    float4 dihecoef_val = dihecoef[ic];
 
-	 e1 = 1.0f;
-  df1 = 0.0f;
-  ddf1 = 0.0f;
+    int iper = (int)dihecoef_val.x;
+    lrep = (iper > 0) ? false : true;
+    iper = abs(iper);
 
-	 // Calculation of cos(n*phi-phi0) and sin(n*phi-phi0).
-    do nper=1,iper
-       ddf1 = e1*ct - df1*st
-       df1 = e1*st + df1*ct
-       e1 = ddf1
-    enddo
-    cpcos_val = cpcos(ic)
-    cpsin_val = cpsin(ic)
-    e1 = e1*cpcos_val + df1*cpsin_val
-    df1 = df1*cpcos_val - ddf1*cpsin_val
-    df1 = -iper*df1
-    e1 = one + e1
+    T e1 = (T)1;
+    T df1 = (T)0;
+    T ddf1 = (T)0;
 
-    if(iper == 0) e1 = one
+    // Calculation of cos(n*phi-phi0) and sin(n*phi-phi0).
+    for (int nper=1;nper <= iper;nper++) {
+      ddf1 = e1*ct - df1*st;
+      df1 = e1*st + df1*ct;
+      e1 = ddf1;
+    }
+    e1 = e1*dihecoef_val.w + df1*dihecoef_val.z;
+    df1 = df1*dihecoef_val.w - ddf1*dihecoef_val.z;
+    df1 = -iper*df1;
+    e1 += (T)1;
 
-    arg = cpc(ic)
-    e = e + arg*e1
-    df = df + arg*df1
+    if (iper == 0) e1 = (T)1;
 
-    if(lrep) then
-       ic = ic+1
-       goto 30
-    endif
+    float arg = dihecoef_val.y;
+    e += arg*e1;
+    df += arg*df1;
 
-	       return res;
-	       }
+    ic++;
+  }
 
-/*
+}
+
 //
 // Improper dihedral potential
 //
-// imdihecoef.x = cic
-// imdihecoef.y = cicos
+// imdihecoef.x = cid (integer)
+// imdihecoef.y = cic
 // imdihecoef.z = cisin
+// imdihecoef.w = cicos
 //
-// Out:
-// res.x = e   (energy)
-// res.y = df  (force)
+// Out: df, e
 //
-static __forceinline__ __device__ float2 imdihe_pot(const int *cid, const float3 *imdihecoef,
-						    const int ic_in,
-						    const float st, const float ct)
-{
+template<typename T>
+__forceinline__ __device__
+void imdihe_pot(const float4 *dihecoef, const int ic_in,
+		const T st, const T ct, T& df, double& e) {
+  df = (T)0;
+  e = 0.0;
 
-    integer ic, iper, nper
-    logical lrep
-    real(chm_real4) e1, df1, ddf1, arg
-    real(chm_real4) ca, sa, ap
-    real(chm_real4) cicos_val, cisin_val
+  float4 dihecoef_val = dihecoef[ic_in];
 
-    ic = ic_in
+  if ((int)dihecoef_val.x != 0) {
+    int ic = ic_in;
+    bool lrep = true;
+    while (lrep) {
+      
+      int iper = (int)dihecoef_val.x;
+      lrep = (iper > 0) ? false : true;
+      iper = abs(iper);
+      
+      T e1 = (T)1;
+      T df1 = (T)0;
+      T ddf1 = (T)0;
+      
+      // Calculation of cos(n*phi-phi0) and sin(n*phi-phi0).
+      for (int nper=1;nper <= iper;nper++) {
+	ddf1 = e1*ct - df1*st;
+	df1 = e1*st + df1*ct;
+	e1 = ddf1;
+      }
+      e1 = e1*dihecoef_val.w + df1*dihecoef_val.z;
+      df1 = df1*dihecoef_val.w - ddf1*dihecoef_val.z;
+      df1 = -iper*df1;
+      e1 += (T)1;
+      
+      if (iper == 0) e1 = (T)1;
+      
+      float arg = dihecoef_val.y;
+      e += arg*e1;
+      df += arg*df1;
+      
+      ic++;
+      if (lrep) dihecoef_val = dihecoef[ic];
+    }       
+    // use harmonic potential
+  } else {
+    // calcul of cos(phi-phi0),sin(phi-phi0) and (phi-phi0).
 
-##IF OPLS
-    if (cid(ic) /= 0) then
+    T ca = ct*dihecoef_val.w + st*dihecoef_val.z;
+    T sa = st*dihecoef_val.w - ct*dihecoef_val.z;
+    T ap;
+    if (ca > (T)0.1) {
+      ap = asinf(sa);
+    } else {
+      //ap = sign(acos(max(ca,-(T)1)),sa);
+      ap = acosf(max(ca,-(T)1));
+      ap = (sa > (T)0) ? ap : -ap;
+      // warning is now triggered at deltaphi=84.26...deg (used to be 90).
+      //nbent = nbent + 1;
+    }
 
-       e = zero
-       df = zero
-35     continue
-       iper = cid(ic)
-       if (iper >= 0) then
-          lrep = .false.
-       else
-          lrep = .true.
-          iper = -iper
-       endif
-       !
-       e1 = one
-       df1 = zero
-       !calculation of cos(n*phi-phi0) and sin(n*phi-phi0).
-       do nper=1,iper
-          ddf1 = e1*ct - df1*st
-          df1 = e1*st + df1*ct
-          e1 = ddf1
-       enddo
-##IF dp
-       cicos_val = cicos(ic)
-       cisin_val = cisin(ic)
-##ELSE
-       cicos_val = real(cicos(ic),kind=chm_real4)
-       cisin_val = real(cisin(ic),kind=chm_real4)
-##ENDIF
-       e1 = e1*cicos_val + df1*cisin_val
-       df1 = df1*cicos_val - ddf1*cisin_val
-       df1 = -iper*df1
-       e1 = one + e1
-       !
-       arg = cic(ic)                       !##dp
-       arg = real(cic(ic),kind=chm_real4)  !##sp
-       e = e + arg*e1
-       df = df + arg*df1
-       !
-       if(lrep) then
-          ic = ic + 1
-          goto 35
-       endif
-       !
-       
-       ! use harmonic potential
-       !
-    else
-       !
-##ENDIF
-       !
-       !calcul of cos(phi-phi0),sin(phi-phi0) and (phi-phi0).
-##IF dp
-       cicos_val = cicos(ic)
-       cisin_val = cisin(ic)
-##ELSE
-       cicos_val = real(cicos(ic),kind=chm_real4)
-       cisin_val = real(cisin(ic),kind=chm_real4)
-##ENDIF
-       ca = ct*cicos_val + st*cisin_val
-       sa = st*cicos_val - ct*cisin_val
-       if (ca > ptone ) then
-          ap = asin(sa)
-       else
-          ap = sign(acos(max(ca,minone)),sa)
-          ! warning is now triggered at deltaphi=84.26...deg (used to be 90).
-          nbent = nbent + 1
-       endif
-       !
-       df = cic(ic)*ap                       !##dp
-       df = real(cic(ic),kind=chm_real4)*ap  !##sp
-       e = df*ap
-       df = two*df
-    endif   !##OPLS
-
-	    return res;
-	    }
-*/
+    df = dihecoef_val.y*ap;
+    e = df*ap;
+    df *= (T)2;
+  }
+  
+}
 
 //
-// dihecoef.x = ctb
-// dihecoef.y = ctc
+// dihecoef.x = cpd (integer)
+// dihecoef.y = cpc
+// dihecoef.z = cpsin
+// dihecoef.w = cpcos
 //
-template <typename AT, typename CT, bool calc_energy, bool calc_virial>
+//
+template <typename AT, typename CT, bool q_dihe, bool calc_energy, bool calc_virial>
 __global__ void calc_dihe_force_kernel(const int ndihelist, const dihelist_t *dihelist,
-				       const float2 *dihecoef, const float4 *xyzq,
+				       const float4 *dihecoef, const float4 *xyzq,
 				       const int stride,
 				       const float boxx, const float boxy, const float boxz,
-				       FORCE_T *force) {
+				       AT *force) {
+  // Amount of shared memory required:
+  // sh_epot: blockDim.x*sizeof(double)
+  extern __shared__ double sh_epot[];
+
   int pos = threadIdx.x + blockIdx.x*blockDim.x;
 
   double epot;
@@ -495,7 +473,7 @@ __global__ void calc_dihe_force_kernel(const int ndihelist, const dihelist_t *di
     int jj = dihelist[pos].j - 1;
     int kk = dihelist[pos].k - 1;
     int ll = dihelist[pos].l - 1;
-    int ic = dihelist[pos].itype;
+    int ic = dihelist[pos].itype - 1;
     int ish = dihelist[pos].ishift1;
     int jsh = dihelist[pos].ishift2;
     int lsh = dihelist[pos].ishift3;
@@ -507,7 +485,7 @@ __global__ void calc_dihe_force_kernel(const int ndihelist, const dihelist_t *di
     float3 sj = calc_box_shift(jsh, boxx, boxy, boxz);
 
     // Calculate shift for l-atom
-    float3 sl = calc_box_shift(ksh, boxx, boxy, boxz);
+    float3 sl = calc_box_shift(lsh, boxx, boxy, boxz);
 
     CT fx = (xyzq[ii].x + si.x) - (xyzq[jj].x + sj.x);
     CT fy = (xyzq[ii].y + si.y) - (xyzq[jj].y + sj.y);
@@ -551,11 +529,15 @@ __global__ void calc_dihe_force_kernel(const int ndihelist, const dihelist_t *di
     //
     //     Energy and derivative contributions.
 
-    dihe_pot(cpd, cpc, cpcos, cpsin, ic, st, ct, e, df);
-
-    if (calc_energy) {
-      epot += epot + e;
+    CT df;
+    double e;
+    if (q_dihe) {
+      dihe_pot<CT>(dihecoef, ic, st, ct, df, e);
+    } else {
+      imdihe_pot<CT>(dihecoef, ic, st, ct, df, e);
     }
+
+    if (calc_energy) epot += e;
 
     //
     //     Compute derivatives wrt catesian coordinates.
@@ -565,8 +547,8 @@ __global__ void calc_dihe_force_kernel(const int ndihelist, const dihelist_t *di
 
     CT fg = fx*gx + fy*gy + fz*gz;
     CT hg = hx*gx + hy*gy + hz*gz;
-    CT ra2r = df*ra2r;
-    CT rb2r = df*rb2r;
+    ra2r *= df;
+    rb2r *= df;
     CT fga = fg*ra2r*rgr;
     CT hgb = hg*rb2r*rgr;
     CT gaa = ra2r*rg;
@@ -574,6 +556,21 @@ __global__ void calc_dihe_force_kernel(const int ndihelist, const dihelist_t *di
     // DFi=dE/dFi, DGi=dE/dGi, DHi=dE/dHi.
 
     // Store forces
+    AT dfx, dfy, dfz;
+    calc_component_force<AT, CT>(-gaa, ax, ay, az, dfx, dfy, dfz);
+    write_force<AT>(dfx, dfy, dfz, ii, stride, force);
+
+    AT dgx, dgy, dgz;
+    calc_component_force<AT, CT>(fga, ax, ay, az, -hgb, bx, by, bz,
+				 dgx, dgy, dgz);
+    write_force<AT>(dgx-dfx, dgy-dfy, dgz-dfz, jj, stride, force);
+
+    AT dhx, dhy, dhz;
+    calc_component_force<AT, CT>(gbb, bx, by, bz, dhx, dhy, dhz);
+    write_force<AT>(-dhx-dgx, -dhy-dgy, -dhz-dgz, kk, stride, force);
+    write_force<AT>(dhx, dhy, dhz, ll, stride, force);
+
+    /*
 #ifdef PREC_SPFP
     const int stride2 = stride*2;
     gaa *= FORCE_SCALE;
@@ -618,13 +615,19 @@ __global__ void calc_dihe_force_kernel(const int ndihelist, const dihelist_t *di
     //       sforce(ls+2) = sforce(ls+2) + dhz
     }
 #endif
-
+    */
     pos += blockDim.x*gridDim.x;
   }
 
+  // Reduce energy
+  if (calc_energy) {
+    if (q_dihe) {
+      reduce_energy(epot, sh_epot, &d_energy_virial.energy_dihe);
+    } else {
+      reduce_energy(epot, sh_epot, &d_energy_virial.energy_imdihe);
+    }
+  }
 }
-
-#endif // NOTREADY
 
 //#############################################################################################
 
@@ -693,10 +696,10 @@ BondedForce<AT, CT>::~BondedForce() {
   if (anglecoef != NULL) deallocate<float2>(&anglecoef);
 
   if (dihelist != NULL) deallocate<dihelist_t>(&dihelist);
-  if (dihecoef != NULL) deallocate<float2>(&dihecoef);
+  if (dihecoef != NULL) deallocate<float4>(&dihecoef);
 
   if (imdihelist != NULL) deallocate<dihelist_t>(&imdihelist);
-  if (imdihecoef != NULL) deallocate<float2>(&imdihecoef);
+  if (imdihecoef != NULL) deallocate<float4>(&imdihecoef);
 
   if (cmaplist != NULL) deallocate<cmaplist_t>(&cmaplist);
   if (cmapcoef != NULL) deallocate<float2>(&cmapcoef);
@@ -712,8 +715,8 @@ template <typename AT, typename CT>
 void BondedForce<AT, CT>::setup_coef(int nbondcoef, float2 *h_bondcoef,
 				     int nureybcoef, float2 *h_ureybcoef,
 				     int nanglecoef, float2 *h_anglecoef,
-				     int ndihecoef, float2 *h_dihecoef,
-				     int nimdihecoef, float2 *h_imdihecoef,
+				     int ndihecoef, float4 *h_dihecoef,
+				     int nimdihecoef, float4 *h_imdihecoef,
 				     int ncmapcoef, float2 *h_cmapcoef) {
 
   this->nbondcoef = nbondcoef;
@@ -736,14 +739,14 @@ void BondedForce<AT, CT>::setup_coef(int nbondcoef, float2 *h_bondcoef,
 
   this->ndihecoef = ndihecoef;
   if (ndihecoef > 0) {
-    reallocate<float2>(&dihecoef, &dihecoef_len, ndihecoef, 1.2f);
-    copy_HtoD<float2>(h_dihecoef, dihecoef, ndihecoef);
+    reallocate<float4>(&dihecoef, &dihecoef_len, ndihecoef, 1.2f);
+    copy_HtoD<float4>(h_dihecoef, dihecoef, ndihecoef);
   }
 
   this->nimdihecoef = nimdihecoef;
   if (nimdihecoef > 0) {
-    reallocate<float2>(&imdihecoef, &imdihecoef_len, nimdihecoef, 1.2f);
-    copy_HtoD<float2>(h_imdihecoef, imdihecoef, nimdihecoef);
+    reallocate<float4>(&imdihecoef, &imdihecoef_len, nimdihecoef, 1.2f);
+    copy_HtoD<float4>(h_imdihecoef, imdihecoef, nimdihecoef);
   }
 
   this->ncmapcoef = ncmapcoef;
@@ -825,31 +828,105 @@ void BondedForce<AT, CT>::calc_force(const float4 *xyzq,
   }
 
   if (calc_energy) {
-    std::cerr << "BondedForce<AT, CT>::calc_force, calc_energy not implemented yet" << std::endl;
-  } else {
     if (calc_virial) {
       std::cerr << "BondedForce<AT, CT>::calc_force, calc_virial not implemented yet" << std::endl;
     } else {
+
       nthread = 512;
       nblock = (nbondlist -1)/nthread + 1;
       shmem_size = 0;
       if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_bond_force_kernel<AT, CT, false, false >
+      calc_bond_force_kernel<AT, CT, true, true, false >
 	<<< nblock, nthread, shmem_size, stream >>>
 	(nbondlist, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force);
       cudaCheck(cudaGetLastError());
-      
-      /*
+
+      nthread = 512;
+      nblock = (nureyblist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_bond_force_kernel<AT, CT, false, true, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nureyblist, ureyblist, ureybcoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+
+      nthread = 512;
+      nblock = (nanglelist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_angle_force_kernel<AT, CT, true, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nanglelist, anglelist, anglecoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+
+      nthread = 512;
+      nblock = (ndihelist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_dihe_force_kernel<AT, CT, true, true, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(ndihelist, dihelist, dihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+
+      nthread = 512;
+      nblock = (nimdihelist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_dihe_force_kernel<AT, CT, false, true, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nimdihelist, imdihelist, imdihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+
+    }
+  } else {
+    if (calc_virial) {
+      std::cerr << "BondedForce<AT, CT>::calc_force, calc_virial not implemented yet" << std::endl;
+    } else {
+
       nthread = 512;
       nblock = (nbondlist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_bond_force_kernel<AT, CT, true, false, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nbondlist, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+
+      nthread = 512;
+      nblock = (nureyblist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_bond_force_kernel<AT, CT, false, false, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nureyblist, ureyblist, ureybcoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+
+      nthread = 512;
+      nblock = (nanglelist -1)/nthread + 1;
       shmem_size = 0;
       if (calc_energy) shmem_size += nthread*sizeof(double);
       calc_angle_force_kernel<AT, CT, false, false >
 	<<< nblock, nthread, shmem_size, stream >>>
 	(nanglelist, anglelist, anglecoef, xyzq, stride, boxx, boxy, boxz, force);
       cudaCheck(cudaGetLastError());
-      */
 
+      nthread = 512;
+      nblock = (ndihelist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_dihe_force_kernel<AT, CT, true, false, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(ndihelist, dihelist, dihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+
+      nthread = 512;
+      nblock = (nimdihelist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_dihe_force_kernel<AT, CT, false, false, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nimdihelist, imdihelist, imdihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
     }
   }
 

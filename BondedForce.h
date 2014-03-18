@@ -102,7 +102,7 @@ private:
   dihelist_t *dihelist;
 
   int dihecoef_len;
-  float2 *dihecoef;
+  float4 *dihecoef;
 
   // -------------------
   // Improper Dihedrals
@@ -114,7 +114,7 @@ private:
   dihelist_t *imdihelist;
 
   int imdihecoef_len;
-  float2 *imdihecoef;
+  float4 *imdihecoef;
 
   // ------
   // CMAPs
@@ -135,8 +135,8 @@ public:
   void setup_coef(int nbondcoef, float2 *h_bondcoef,
 		  int nureybcoef, float2 *h_ureybcoef,
 		  int nanglecoef, float2 *h_anglecoef,
-		  int ndihecoef, float2 *h_dihecoef,
-		  int nimdihecoef, float2 *h_imdihecoef,
+		  int ndihecoef, float4 *h_dihecoef,
+		  int nimdihecoef, float4 *h_imdihecoef,
 		  int ncmapcoef, float2 *h_cmapcoef);
 
   void setup_list(int nbondlist, bondlist_t *h_bondlist, 

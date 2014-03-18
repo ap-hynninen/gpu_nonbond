@@ -56,16 +56,19 @@ void test() {
   const double boxz = 62.23;
   const int ncoord = 23558;
 
-  const double energy_bond = 715.08289;
-  const double energy_ureyb = 167.39536;
-  const double energy_angle = 1228.72913;
-  const double energy_dihe = 921.88694;
-  const double energy_imdihe = 102.07776;
+  const double energy_bond_ref = 715.08289;
+  const double energy_ureyb_ref = 167.39536;
+  const double energy_angle_ref = 1228.72913;
+  const double energy_dihe_ref = 921.88694;
+  const double energy_imdihe_ref = 102.07776;
 
-  double sforce[81];
-  load_ind<double>(81, "test_data/sforce_bonded.txt", 1, sforce);
+  double sforce_ref[81];
+  load_ind<double>(81, "test_data/sforce_bonded.txt", 1, sforce_ref);
 
-  Force<double> force_bonded("test_data/force_bonded_bond.txt");
+  double sforcex[27], sforcey[27], sforcez[27];
+  double energy_bond, energy_ureyb, energy_angle, energy_dihe, energy_imdihe, energy_cmap;
+
+  Force<double> force_bonded("test_data/force_bonded.txt");
   Force<long long int> force_fp(ncoord);
   Force<double> force(ncoord);
 
@@ -106,14 +109,14 @@ void test() {
   load_ind<float>(2, "test_data/anglecoef.txt", nanglecoef, (float *)h_anglecoef);
 
   dihelist_t *h_dihelist = new dihelist_t[ndihelist];
-  float2 *h_dihecoef = new float2[ndihecoef];
+  float4 *h_dihecoef = new float4[ndihecoef];
   load_ind<int>(8, "test_data/dihelist.txt", ndihelist, (int *)h_dihelist);
-  load_ind<float>(2, "test_data/dihecoef.txt", ndihecoef, (float *)h_dihecoef);
+  load_ind<float>(4, "test_data/dihecoef.txt", ndihecoef, (float *)h_dihecoef);
 
   dihelist_t *h_imdihelist = new dihelist_t[nimdihelist];
-  float2 *h_imdihecoef = new float2[nimdihecoef];
+  float4 *h_imdihecoef = new float4[nimdihecoef];
   load_ind<int>(8, "test_data/imdihelist.txt", nimdihelist, (int *)h_imdihelist);
-  load_ind<float>(2, "test_data/imdihecoef.txt", nimdihecoef, (float *)h_imdihecoef);
+  load_ind<float>(4, "test_data/imdihecoef.txt", nimdihecoef, (float *)h_imdihecoef);
 
   cmaplist_t *h_cmaplist = NULL; //new cmaplist_t[ncmaplist];
   float2 *h_cmapcoef = NULL;//new float2[ncmaplist];
@@ -126,54 +129,108 @@ void test() {
   {
     force_fp.clear();
     BondedForce<long long int, float> bondedforce;
-    bondedforce.setup_coef(nbondlist, h_bondcoef,
-			   nureyblist, h_ureybcoef,
-			   nanglelist, h_anglecoef,
-			   ndihelist, h_dihecoef,
-			   nimdihelist, h_imdihecoef,
-			   ncmaplist, h_cmapcoef);
+    bondedforce.clear_energy_virial();
+    bondedforce.setup_coef(nbondcoef, h_bondcoef,
+			   nureybcoef, h_ureybcoef,
+			   nanglecoef, h_anglecoef,
+			   ndihecoef, h_dihecoef,
+			   nimdihecoef, h_imdihecoef,
+			   ncmapcoef, h_cmapcoef);
     bondedforce.setup_list(nbondlist, h_bondlist, 
 			   nureyblist, h_ureyblist, 
 			   nanglelist, h_anglelist, 
 			   ndihelist, h_dihelist, 
 			   nimdihelist, h_imdihelist, 
 			   ncmaplist, h_cmaplist);
-    bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, false, false,
+    bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, true, false,
 			   force_fp.xyz.stride, force_fp.xyz.data);
+    bondedforce.get_energy_virial(true, false,
+				  &energy_bond, &energy_ureyb,
+				  &energy_angle,
+				  &energy_dihe, &energy_imdihe,
+				  &energy_cmap,
+				  sforcex, sforcey, sforcez);
     force_fp.convert(&force);
 
     double max_diff;
-    double tol = 0.0054;
+    double tol = 0.0057;
     if (!force_bonded.compare(&force, tol, max_diff)) {
-      std::cout<<"(SP) Bonded force comparison FAILED"<<std::endl;
+      std::cout << "(SP) Bonded force comparison FAILED " << std::endl;
     } else {
       std::cout<<"(SP) Bonded force comparison OK (tolerance " << tol << " max difference " 
 	       << max_diff << ")" << std::endl;
     }
+
+    max_diff = fabs(energy_bond_ref - energy_bond);
+    if (max_diff > tol) {
+      std::cout << "(SP) energy_bond comparison FAILED: ref = " << energy_bond_ref 
+		<< " energy = " << energy_bond << std::endl;
+    } else {
+      std::cout << "(SP) energy_bond comparison OK (tolerance " << tol << " difference " 
+		<< max_diff << ")" << std::endl;
+    }
+
+    max_diff = fabs(energy_ureyb_ref - energy_ureyb);
+    if (max_diff > tol) {
+      std::cout << "(SP) energy_ureyb comparison FAILED: ref = " << energy_ureyb_ref 
+		<< " energy = " << energy_ureyb << std::endl;
+    } else {
+      std::cout << "(SP) energy_ureyb comparison OK (tolerance " << tol << " difference " 
+		<< max_diff << ")" << std::endl;
+    }
+
+    max_diff = fabs(energy_angle_ref - energy_angle);
+    if (max_diff > tol) {
+      std::cout << "(SP) energy_angle comparison FAILED: ref = " << energy_angle_ref 
+		<< " energy = " << energy_angle << std::endl;
+    } else {
+      std::cout << "(SP) energy_angle comparison OK (tolerance " << tol << " difference " 
+		<< max_diff << ")" << std::endl;
+    }
+
+    max_diff = fabs(energy_dihe_ref - energy_dihe);
+    if (max_diff > tol) {
+      std::cout << "(SP) energy_dihe comparison FAILED: ref = " << energy_dihe_ref 
+		<< " energy = " << energy_dihe << std::endl;
+    } else {
+      std::cout << "(SP) energy_dihe comparison OK (tolerance " << tol << " difference " 
+		<< max_diff << ")" << std::endl;
+    }
+
+    max_diff = fabs(energy_imdihe_ref - energy_imdihe);
+    if (max_diff > tol) {
+      std::cout << "(SP) energy_imdihe comparison FAILED: ref = " << energy_imdihe_ref 
+		<< " energy = " << energy_imdihe << std::endl;
+    } else {
+      std::cout << "(SP) energy_imdihe comparison OK (tolerance " << tol << " difference " 
+		<< max_diff << ")" << std::endl;
+    }
+
   }
 
   // Double precision
   {
     force_fp.clear();
     BondedForce<long long int, double> bondedforce;
-    bondedforce.setup_coef(nbondlist, h_bondcoef,
-			   nureyblist, h_ureybcoef,
-			   nanglelist, h_anglecoef,
-			   ndihelist, h_dihecoef,
-			   nimdihelist, h_imdihecoef,
-			   ncmaplist, h_cmapcoef);
+    bondedforce.clear_energy_virial();
+    bondedforce.setup_coef(nbondcoef, h_bondcoef,
+			   nureybcoef, h_ureybcoef,
+			   nanglecoef, h_anglecoef,
+			   ndihecoef, h_dihecoef,
+			   nimdihecoef, h_imdihecoef,
+			   ncmapcoef, h_cmapcoef);
     bondedforce.setup_list(nbondlist, h_bondlist, 
 			   nureyblist, h_ureyblist, 
 			   nanglelist, h_anglelist, 
 			   ndihelist, h_dihelist, 
 			   nimdihelist, h_imdihelist, 
 			   ncmaplist, h_cmaplist);
-    bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, false, false,
+    bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, true, false,
 			   force_fp.xyz.stride, force_fp.xyz.data);
     force_fp.convert(&force);
 
     double max_diff;
-    double tol = 0.00541;
+    double tol = 0.0058;
     if (!force_bonded.compare(&force, tol, max_diff)) {
       std::cout<<"(DP) Bonded force comparison FAILED"<<std::endl;
     } else {

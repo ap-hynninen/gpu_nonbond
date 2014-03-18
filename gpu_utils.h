@@ -117,6 +117,7 @@ __device__ inline int iroundf(float f)
     return l;
 }
 
+// ----------------------------------------------------------------------------------------------
 template <typename AT, typename CT>
 __forceinline__ __device__
 void calc_component_force(CT fij,
@@ -153,6 +154,61 @@ void calc_component_force<long long int, double>(double fij,
   fzij = lliroundd(fij*dz);
 }
 
+// ----------------------------------------------------------------------------------------------
+template <typename AT, typename CT>
+__forceinline__ __device__
+void calc_component_force(CT fij1,
+			  const CT dx1, const CT dy1, const CT dz1,
+			  CT fij2,
+			  const CT dx2, const CT dy2, const CT dz2,
+			  AT &fxij, AT &fyij, AT &fzij) {
+  fxij = (AT)(fij1*dx1 + fij2*dx2);
+  fyij = (AT)(fij1*dy1 + fij2*dy2);
+  fzij = (AT)(fij1*dz1 + fij2*dz2);
+}
+
+template <>
+__forceinline__ __device__
+void calc_component_force<long long int, float>(float fij1,
+						const float dx1,
+						const float dy1,
+						const float dz1,
+						float fij2,
+						const float dx2,
+						const float dy2,
+						const float dz2,
+						long long int &fxij,
+						long long int &fyij,
+						long long int &fzij) {
+  fij1 *= FORCE_SCALE;
+  fij2 *= FORCE_SCALE;
+  fxij = lliroundf(fij1*dx1 + fij2*dx2);
+  fyij = lliroundf(fij1*dy1 + fij2*dy2);
+  fzij = lliroundf(fij1*dz1 + fij2*dz2);
+}
+
+template <>
+__forceinline__ __device__
+void calc_component_force<long long int, double>(double fij1,
+						 const double dx1,
+						 const double dy1,
+						 const double dz1,
+						 double fij2,
+						 const double dx2,
+						 const double dy2,
+						 const double dz2,
+						 long long int &fxij,
+						 long long int &fyij,
+						 long long int &fzij) {
+  fij1 *= FORCE_SCALE;
+  fij2 *= FORCE_SCALE;
+  fxij = lliroundd(fij1*dx1 + fij2*dx2);
+  fyij = lliroundd(fij1*dy1 + fij2*dy2);
+  fzij = lliroundd(fij1*dz1 + fij2*dz2);
+}
+
+// ----------------------------------------------------------------------------------------------
+
 template <typename AT>
 __forceinline__ __device__
 void write_force(const AT fx, const AT fy, const AT fz,
@@ -173,5 +229,6 @@ void write_force <long long int> (const long long int fx,
   atomicAdd((unsigned long long int *)&force[ind + stride  ], llitoulli(fy));
   atomicAdd((unsigned long long int *)&force[ind + stride*2], llitoulli(fz));
 }
+// ----------------------------------------------------------------------------------------------
 
 #endif // GPU_UTILS_H
