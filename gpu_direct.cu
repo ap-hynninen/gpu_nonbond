@@ -9,7 +9,6 @@
 #include "Force.h"
 #include "NeighborList.h"
 #include "DirectForce.h"
-#include "BondedForce.h"
 #include "VirialPressure.h"
 
 void test();
@@ -35,30 +34,6 @@ int main(int argc, char *argv[]) {
 }
 
 //
-// Loads indices from file
-//
-template <typename T>
-void load_ind(const int nind, const char *filename, const int n, T *ind) {
-  std::ifstream file(filename);
-  if (file.is_open()) {
-
-    for (int i=0;i < n;i++) {
-      for (int k=0;k < nind;k++) {
-	if (!(file >> ind[i*nind+k])) {
-	  std::cerr<<"Error reading file "<<filename<<std::endl;
-	  exit(1);
-	}
-      }
-    }
-
-  } else {
-    std::cerr<<"Error opening file "<<filename<<std::endl;
-    exit(1);
-  }
-
-}
-
-//
 // Test the code using data in test_data/ -directory
 //
 void test() {
@@ -74,7 +49,6 @@ void test() {
   const double ref_vpress[9] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
   Force<float> force_nonbond("test_data/force_direct.txt");
-  Force<float> force_bonded("test_data/force_bonded.txt");
   Force<long long int> force_fp(ncoord);
   Force<float> force(ncoord);
 
@@ -108,62 +82,6 @@ void test() {
 	     << max_diff << ")" << std::endl;
   }
 
-  //---------------------- Bonded -------------------
-  const int nbondlist = 0;
-  const int nanglelist = 0;
-  const int ndihelist = 0;
-  const int nimdihelist = 0;
-
-  bondlist_t *h_bondlist = new bondlist_t[nbondlist];
-  float2 *h_bondcoef = new float2[nbondlist];
-  load_ind<int>(4, "test_data/bondlist.txt", nbondlist, (int *)h_bondlist);
-  load_ind<float>(2, "test_data/bondcoef.txt", nbondlist, (float *)h_bondcoef);
-
-  anglelist_t *h_anglelist = new anglelist_t[nanglelist];
-  float2 *h_anglecoef = new float2[nanglelist];
-  load_ind<int>(6, "test_data/anglelist.txt", nanglelist, (int *)h_anglelist);
-  load_ind<float>(2, "test_data/anglecoef.txt", nanglelist, (float *)h_anglecoef);
-
-  dihelist_t *h_dihelist = new dihelist_t[ndihelist];
-  float2 *h_dihecoef = new float2[ndihelist];
-  load_ind<int>(8, "test_data/dihelist.txt", ndihelist, (int *)h_dihelist);
-  load_ind<float>(2, "test_data/dihecoef.txt", ndihelist, (float *)h_dihecoef);
-
-  dihelist_t *h_imdihelist = new dihelist_t[nimdihelist];
-  float2 *h_imdihecoef = new float2[nimdihelist];
-  load_ind<int>(8, "test_data/imdihelist.txt", nimdihelist, (int *)h_imdihelist);
-  load_ind<float>(2, "test_data/imdihecoef.txt", nimdihelist, (float *)h_imdihecoef);
-
-  force_fp.clear();
-  BondedForce<long long int, float> bondedforce;
-  bondedforce.setup(nbondlist, h_bondlist, h_bondcoef,
-		    nanglelist, h_anglelist, h_anglecoef,
-		    ndihelist, h_dihelist, h_dihecoef,
-		    nimdihelist, h_imdihelist, h_imdihecoef);
-  bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, false, false,
-			 force_fp.xyz.stride, force_fp.xyz.data);
-  force_fp.convert(&force);
-
-  tol = 1.0;
-  if (!force_bonded.compare(&force, tol, max_diff)) {
-    std::cout<<"Bonded force comparison FAILED"<<std::endl;
-  } else {
-    std::cout<<"Bonded force comparison OK (tolerance " << tol << " max difference " 
-	     << max_diff << ")" << std::endl;
-  }
-
-  delete [] h_bondlist;
-  delete [] h_bondcoef;
-  
-  delete [] h_anglelist;
-  delete [] h_anglecoef;
-
-  delete [] h_dihelist;
-  delete [] h_dihecoef;
-  
-  delete [] h_imdihelist;
-  delete [] h_imdihecoef;
-  
   return;
 
   //------------------ Virial pressure ---------------

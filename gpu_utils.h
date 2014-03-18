@@ -94,6 +94,13 @@ __device__ inline long long int lliroundf(float f)
     return l;
 }
 
+__device__ inline long long int lliroundd(double d)
+{
+    long long int l;
+    asm("cvt.rni.s64.f64 	%0, %1;" : "=l"(l) : "d"(d));
+    return l;
+}
+
 // End of copied code.
 
 __device__ inline unsigned int itoui(int l)
@@ -124,11 +131,26 @@ template <>
 __forceinline__ __device__
 void calc_component_force<long long int, float>(float fij,
 						const float dx, const float dy, const float dz,
-						long long int &fxij, long long int &fyij, long long int &fzij) {
+						long long int &fxij,
+						long long int &fyij,
+						long long int &fzij) {
   fij *= FORCE_SCALE;
   fxij = lliroundf(fij*dx);
   fyij = lliroundf(fij*dy);
   fzij = lliroundf(fij*dz);
+}
+
+template <>
+__forceinline__ __device__
+void calc_component_force<long long int, double>(double fij,
+						 const double dx, const double dy, const double dz,
+						 long long int &fxij,
+						 long long int &fyij,
+						 long long int &fzij) {
+  fij *= FORCE_SCALE;
+  fxij = lliroundd(fij*dx);
+  fyij = lliroundd(fij*dy);
+  fzij = lliroundd(fij*dz);
 }
 
 template <typename AT>

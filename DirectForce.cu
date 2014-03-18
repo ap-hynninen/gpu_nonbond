@@ -991,15 +991,15 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
   const int tilesize = 32;
 
   if (nlist->ni == 0) return;
+  int vdw_model_loc = calc_vdw ? vdw_model : NONE;
+  int elec_model_loc = calc_elec ? elec_model : NONE;
+  if (elec_model_loc == NONE && vdw_model_loc == NONE) return;
 
   dim3 nthread(32, 2, 1);
   dim3 nblock_tot((nlist->ni-1)/nthread.y+1, 1, 1);
 
   size_t shmem_size = tilesize*nthread.y*(sizeof(float4) + sizeof(int)) + 
     warpsize*nthread.y*3*sizeof(AT);
-
-  int vdw_model_loc = calc_vdw ? vdw_model : NONE;
-  int elec_model_loc = calc_elec ? elec_model : NONE;
 
   int3 max_nblock3 = get_max_nblock();
   unsigned int max_nblock = max_nblock3.x;
@@ -1436,7 +1436,8 @@ void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
 	  }
 	}
       } else {
-	std::cout<<"DirectForce<AT, CT>::calc_force, Invalid EWALD model "<<elec_model_loc<<std::endl;
+	std::cout<<"DirectForce<AT, CT>::calc_force, Invalid EWALD model "
+		 <<elec_model_loc<<std::endl;
 	exit(1);
       }
     } else {

@@ -222,5 +222,6 @@ template class Force<float>;
 template void Force<long long int>::convert<double>(cudaStream_t stream);
 template void Force<long long int>::convert_add<double>(Force<float> *force, cudaStream_t stream);
 template void Force<long long int>::convert<float>(Force<float>* force, cudaStream_t stream);
+template void Force<long long int>::convert<double>(Force<double>* force, cudaStream_t stream);
 template void Force<float>::convert_to<double>(Force<long long int> *force, cudaStream_t stream);
 

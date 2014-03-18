@@ -35,6 +35,7 @@ struct cmaplist_t {
 struct BondedEnergyVirial_t {
   // Energies
   double energy_bond;
+  double energy_ureyb;
   double energy_angle;
   double energy_dihe;
   double energy_imdihe;
@@ -58,6 +59,7 @@ private:
   // Bonds
   // ------
   int nbondlist;
+  int nbondcoef;
 
   int bondlist_len;
   bondlist_t *bondlist;
@@ -65,10 +67,24 @@ private:
   int bondcoef_len;
   float2 *bondcoef;
 
+  // -------------
+  // Urey-Bradley
+  // -------------
+  int nureyblist;
+  int nureybcoef;
+
+  int ureyblist_len;
+  bondlist_t *ureyblist;
+
+  int ureybcoef_len;
+  float2 *ureybcoef;
+
+
   // -------
   // Angles
   // -------
   int nanglelist;
+  int nanglecoef;
 
   int anglelist_len;
   anglelist_t *anglelist;
@@ -80,6 +96,7 @@ private:
   // Dihedrals
   // ----------
   int ndihelist;
+  int ndihecoef;
 
   int dihelist_len;
   dihelist_t *dihelist;
@@ -91,6 +108,7 @@ private:
   // Improper Dihedrals
   // -------------------
   int nimdihelist;
+  int nimdihecoef;
 
   int imdihelist_len;
   dihelist_t *imdihelist;
@@ -102,6 +120,7 @@ private:
   // CMAPs
   // ------
   int ncmaplist;
+  int ncmapcoef;
 
   int cmaplist_len;
   cmaplist_t *cmaplist;
@@ -113,11 +132,19 @@ public:
   BondedForce();
   ~BondedForce();
 
-  void setup(int nbondlist, bondlist_t *bondlist, float2 *bondcoef,
-	     int nanglelist, anglelist_t *anglelist, float2 *anglecoef,
-	     int ndihelist, dihelist_t *dihelist, float2 *dihecoef,
-	     int nimdihelist, dihelist_t *imdihelist, float2 *imdihecoef,
-	     int ncmaplist, cmaplist_t *cmaplist, float2 *cmapcoef);
+  void setup_coef(int nbondcoef, float2 *h_bondcoef,
+		  int nureybcoef, float2 *h_ureybcoef,
+		  int nanglecoef, float2 *h_anglecoef,
+		  int ndihecoef, float2 *h_dihecoef,
+		  int nimdihecoef, float2 *h_imdihecoef,
+		  int ncmapcoef, float2 *h_cmapcoef);
+
+  void setup_list(int nbondlist, bondlist_t *h_bondlist, 
+		  int nureyblist, bondlist_t *h_ureyblist,
+		  int nanglelist, anglelist_t *h_anglelist,
+		  int ndihelist, dihelist_t *h_dihelist,
+		  int nimdihelist, dihelist_t *h_imdihelist,
+		  int ncmaplist, cmaplist_t *h_cmaplist);
 
   void calc_force(const float4 *xyzq,
 		  const float boxx, const float boxy, const float boxz,
@@ -127,7 +154,8 @@ public:
 
   void clear_energy_virial();
   void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
-			 double *energy_bond, double *energy_angle,
+			 double *energy_bond,  double *energy_ureyb, 
+			 double *energy_angle,
 			 double *energy_dihe, double *energy_imdihe,
 			 double *energy_cmap,
 			 double *sforcex, double *sforcey, double *sforcez);

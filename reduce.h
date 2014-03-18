@@ -36,6 +36,27 @@ __global__ static void reduce_data<long long int, float>(const int n,
 
 }
 
+// Convert "long long int" -> "double"
+template <>
+__global__ static void reduce_data<long long int, double>(const int n,
+							 const int stride_in,
+							 const long long int* __restrict__ data_in,
+							 const int stride_out,
+							 double* __restrict__ data_out) {
+  unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
+  
+  while (pos < n) {
+    long long int val1 = data_in[pos];
+    long long int val2 = data_in[pos + stride_in];
+    long long int val3 = data_in[pos + stride_in*2];
+    data_out[pos]                = ((double)val1)*INV_FORCE_SCALE;
+    data_out[pos + stride_out]   = ((double)val2)*INV_FORCE_SCALE;
+    data_out[pos + stride_out*2] = ((double)val3)*INV_FORCE_SCALE;
+    pos += blockDim.x*gridDim.x;
+  }
+
+}
+
 //----------------------------------------------------------------------------------------
 
 template <typename AT, typename CT>
@@ -109,17 +130,19 @@ __global__ static void reduce_data<float, double>(const int nfft_tot,
 
 template <typename AT, typename CT>
 __global__ static void reduce_data(const int nfft_tot,
-				   AT* __restrict__ data_in) {
+				   AT* data_in) {
   // The generic version can not be used
 }
 
 // Convert "long long int" -> "double"
 template <>
 __global__ static void reduce_data<long long int, double>(const int nfft_tot,
-							  long long int* __restrict__ data_in) {
+							  long long int* data_in) {
   unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
   double *data_out = (double *)data_in;
-  
+
+  if (pos == 0) printf("Here\n");
+
   while (pos < nfft_tot) {
     long long int val = data_in[pos];
     data_out[pos] = ((double)val)*INV_FORCE_SCALE;
