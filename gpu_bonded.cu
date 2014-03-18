@@ -2,6 +2,7 @@
 #include <fstream>
 #include <cuda.h>
 #include "cuda_utils.h"
+#include "gpu_utils.h"
 #include "XYZQ.h"
 #include "Force.h"
 #include "BondedForce.h"
@@ -142,6 +143,7 @@ void test() {
 			   ndihelist, h_dihelist, 
 			   nimdihelist, h_imdihelist, 
 			   ncmaplist, h_cmaplist);
+
     bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, true, false,
 			   force_fp.xyz.stride, force_fp.xyz.data);
     bondedforce.get_energy_virial(true, false,
@@ -209,6 +211,15 @@ void test() {
     force_fp.clear();
     bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, false, false,
 			   force_fp.xyz.stride, force_fp.xyz.data);
+    force_fp.convert(&force);
+
+    tol = 0.0057;
+    if (!force_bonded.compare(&force, tol, max_diff)) {
+      std::cout << "(SP) Bonded force comparison FAILED " << std::endl;
+    } else {
+      std::cout<<"(SP) Bonded force comparison OK (tolerance " << tol << " max difference " 
+	       << max_diff << ")" << std::endl;
+    }
 
   }
 

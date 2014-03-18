@@ -31,6 +31,61 @@ struct cmaplist_t {
   int i1, j1, k1, l1, i2, j2, k2, l2, itype, ishift1, ishift2, ishift3;
 };
 
+/*
+// Data structure for settings
+struct BondedSettings_t {
+  // ------
+  // Bonds
+  // ------
+  int nbondlist;
+  bondlist_t *bondlist;
+  float2 *bondcoef;
+
+  // -------------
+  // Urey-Bradley
+  // -------------
+  int nureyblist;
+  bondlist_t *ureyblist;
+  float2 *ureybcoef;
+
+  // -------
+  // Angles
+  // -------
+  int nanglelist;
+  anglelist_t *anglelist;
+  float2 *anglecoef;
+
+  // ----------
+  // Dihedrals
+  // ----------
+  int ndihelist;
+  dihelist_t *dihelist;
+  float4 *dihecoef;
+
+  // -------------------
+  // Improper Dihedrals
+  // -------------------
+  int nimdihelist;
+  dihelist_t *imdihelist;
+  float4 *imdihecoef;
+
+  // ------
+  // CMAPs
+  // ------
+  int ncmaplist;
+  cmaplist_t *cmaplist;
+  float2 *cmapcoef;
+
+  // Other stuff
+  const float4 *xyzq;
+  int stride;
+  float boxx;
+  float boxy;
+  float boxz;
+  void *force;
+};
+*/
+
 // Data structure for saving energies and virials
 struct BondedEnergyVirial_t {
   // Energies
@@ -53,6 +108,8 @@ class BondedForce {
 
 private:
 
+  //BondedSettings_t *h_setup;
+  
   BondedEnergyVirial_t *h_energy_virial;
 
   // ------
