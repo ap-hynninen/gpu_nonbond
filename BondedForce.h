@@ -207,7 +207,12 @@ public:
 		  const float boxx, const float boxy, const float boxz,
 		  const bool calc_energy,
 		  const bool calc_virial,
-		  const int stride, AT *force, cudaStream_t stream=0);
+		  const int stride, AT *force,
+		  const bool calc_bond=true, const bool calc_ureyb=true,
+		  const bool calc_angle=true, const bool calc_dihe=true,
+		  const bool calc_imdihe=true,
+		  cudaStream_t stream=0);
+
 
   void clear_energy_virial();
   void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,

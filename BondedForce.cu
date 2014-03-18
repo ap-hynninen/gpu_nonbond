@@ -882,6 +882,8 @@ void BondedForce<AT, CT>::setup_coef(int nbondcoef, float2 *h_bondcoef,
 				     int nimdihecoef, float4 *h_imdihecoef,
 				     int ncmapcoef, float2 *h_cmapcoef) {
 
+  assert(nureybcoef == nanglecoef);
+
   this->nbondcoef = nbondcoef;
   if (nbondcoef > 0) {
     reallocate<float2>(&bondcoef, &bondcoef_len, nbondcoef, 1.2f);
@@ -979,7 +981,11 @@ void BondedForce<AT, CT>::calc_force(const float4 *xyzq,
 				     const float boxx, const float boxy, const float boxz,
 				     const bool calc_energy,
 				     const bool calc_virial,
-				     const int stride, AT *force, cudaStream_t stream) {
+				     const int stride, AT *force,
+				     const bool calc_bond, const bool calc_ureyb,
+				     const bool calc_angle, const bool calc_dihe,
+				     const bool calc_imdihe,
+				     cudaStream_t stream) {
 
   int nthread, nblock, shmem_size;
 
@@ -995,50 +1001,60 @@ void BondedForce<AT, CT>::calc_force(const float4 *xyzq,
       std::cerr << "BondedForce<AT, CT>::calc_force, calc_virial not implemented yet" << std::endl;
     } else {
 
-      nthread = 512;
-      nblock = (nbondlist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_bond_force_kernel<AT, CT, true, false >
-	<<< nblock, nthread, shmem_size, stream >>>
-	(nbondlist, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force);
-      cudaCheck(cudaGetLastError());
+      if (calc_bond) {
+	nthread = 512;
+	nblock = (nbondlist -1)/nthread + 1;
+	shmem_size = 0;
+	if (calc_energy) shmem_size += nthread*sizeof(double);
+	calc_bond_force_kernel<AT, CT, true, false >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nbondlist, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force);
+	cudaCheck(cudaGetLastError());
+      }
 
-      nthread = 512;
-      nblock = (nureyblist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_ureyb_force_kernel<AT, CT, true, false >
-	<<< nblock, nthread, shmem_size, stream >>>
-	(nureyblist, ureyblist, ureybcoef, xyzq, stride, boxx, boxy, boxz, force);
-      cudaCheck(cudaGetLastError());
+      if (calc_ureyb) {
+	nthread = 512;
+	nblock = (nureyblist -1)/nthread + 1;
+	shmem_size = 0;
+	if (calc_energy) shmem_size += nthread*sizeof(double);
+	calc_ureyb_force_kernel<AT, CT, true, false >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nureyblist, ureyblist, ureybcoef, xyzq, stride, boxx, boxy, boxz, force);
+	cudaCheck(cudaGetLastError());
+      }
 
-      nthread = 512;
-      nblock = (nanglelist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_angle_force_kernel<AT, CT, true, false >
-	<<< nblock, nthread, shmem_size, stream >>>
-	(nanglelist, anglelist, anglecoef, xyzq, stride, boxx, boxy, boxz, force);
-      cudaCheck(cudaGetLastError());
+      if (calc_angle) {
+	nthread = 512;
+	nblock = (nanglelist -1)/nthread + 1;
+	shmem_size = 0;
+	if (calc_energy) shmem_size += nthread*sizeof(double);
+	calc_angle_force_kernel<AT, CT, true, false >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nanglelist, anglelist, anglecoef, xyzq, stride, boxx, boxy, boxz, force);
+	cudaCheck(cudaGetLastError());
+      }
 
-      nthread = 512;
-      nblock = (ndihelist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_dihe_force_kernel<AT, CT, true, false >
-	<<< nblock, nthread, shmem_size, stream >>>
-	(ndihelist, dihelist, dihecoef, xyzq, stride, boxx, boxy, boxz, force);
-      cudaCheck(cudaGetLastError());
+      if (calc_dihe) {
+	nthread = 512;
+	nblock = (ndihelist -1)/nthread + 1;
+	shmem_size = 0;
+	if (calc_energy) shmem_size += nthread*sizeof(double);
+	calc_dihe_force_kernel<AT, CT, true, false >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (ndihelist, dihelist, dihecoef, xyzq, stride, boxx, boxy, boxz, force);
+	cudaCheck(cudaGetLastError());
+      }
 
-      nthread = 512;
-      nblock = (nimdihelist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_imdihe_force_kernel<AT, CT, true, false >
-	<<< nblock, nthread, shmem_size, stream >>>
-	(nimdihelist, imdihelist, imdihecoef, xyzq, stride, boxx, boxy, boxz, force);
-      cudaCheck(cudaGetLastError());
+      if (calc_imdihe) {
+	nthread = 512;
+	nblock = (nimdihelist -1)/nthread + 1;
+	shmem_size = 0;
+	if (calc_energy) shmem_size += nthread*sizeof(double);
+	calc_imdihe_force_kernel<AT, CT, true, false >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nimdihelist, imdihelist, imdihecoef, xyzq, stride, boxx, boxy, boxz, force);
+	cudaCheck(cudaGetLastError());
+      }
 
     }
   } else {
@@ -1046,63 +1062,23 @@ void BondedForce<AT, CT>::calc_force(const float4 *xyzq,
       std::cerr << "BondedForce<AT, CT>::calc_force, calc_virial not implemented yet" << std::endl;
     } else {
 
+      int nbondlist_loc   = (calc_bond)   ? nbondlist   : 0;
+      int nureyblist_loc  = (calc_ureyb)  ? nureyblist  : 0;
+      int nanglelist_loc  = (calc_angle)  ? nanglelist  : 0;
+      int ndihelist_loc   = (calc_dihe)   ? ndihelist   : 0;
+      int nimdihelist_loc = (calc_imdihe) ? nimdihelist : 0;
+
       nthread = 512;
-      nblock = (nbondlist + nureyblist + nanglelist + ndihelist + nimdihelist -1)/nthread + 1;      
+      nblock = (nbondlist_loc + nureyblist_loc + nanglelist_loc + 
+		ndihelist_loc + nimdihelist_loc -1)/nthread + 1;      
       calc_all_forces_kernel<AT, CT, false, false>
 	<<< nblock, nthread, shmem_size, stream>>>
-	(nbondlist, bondlist, bondcoef,
-	 nureyblist, ureyblist, ureybcoef,
-	 nanglelist, anglelist, anglecoef,
-	 ndihelist, dihelist, dihecoef,
-	 nimdihelist, imdihelist, imdihecoef,
+	(nbondlist_loc, bondlist, bondcoef,
+	 nureyblist_loc, ureyblist, ureybcoef,
+	 nanglelist_loc, anglelist, anglecoef,
+	 ndihelist_loc, dihelist, dihecoef,
+	 nimdihelist_loc, imdihelist, imdihecoef,
 	 xyzq, stride, boxx, boxy, boxz, force);
-
-      /*
-      nthread = 512;
-      nblock = (nbondlist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_bond_force_kernel<AT, CT, false, false >
-	<<< nblock, nthread, shmem_size, st[0] >>>();
-      //(nbondlist, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force);
-      cudaCheck(cudaGetLastError());
-
-      nthread = 512;
-      nblock = (nimdihelist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_imdihe_force_kernel<AT, CT, false, false >
-	<<< nblock, nthread, shmem_size, st[3] >>>();
-      //(nimdihelist, imdihelist, imdihecoef, xyzq, stride, boxx, boxy, boxz, force);
-      cudaCheck(cudaGetLastError());
-
-      nthread = 512;
-      nblock = (nanglelist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_angle_force_kernel<AT, CT, false, false >
-	<<< nblock, nthread, shmem_size, st[2] >>>();
-      //(nanglelist, anglelist, anglecoef, xyzq, stride, boxx, boxy, boxz, force);
-      cudaCheck(cudaGetLastError());
-
-      nthread = 512;
-      nblock = (ndihelist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_dihe_force_kernel<AT, CT, false, false >
-	<<< nblock, nthread, shmem_size, st[4] >>>();
-      //(ndihelist, dihelist, dihecoef, xyzq, stride, boxx, boxy, boxz, force);
-      cudaCheck(cudaGetLastError());
-
-      nthread = 512;
-      nblock = (nureyblist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_ureyb_force_kernel<AT, CT, false, false >
-	<<< nblock, nthread, shmem_size, st[1] >>>();
-      //(nureyblist, ureyblist, ureybcoef, xyzq, stride, boxx, boxy, boxz, force);
-      cudaCheck(cudaGetLastError());
-      */
 
     }
   }
