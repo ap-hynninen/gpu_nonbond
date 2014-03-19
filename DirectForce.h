@@ -11,10 +11,15 @@
 // CT = calculation type
 //
 
+struct list14_t {
+  int i, j, ishift;
+};
+
 struct DirectEnergyVirial_t {
   // Energies
   double energy_vdw;
   double energy_elec;
+  double energy_excl;
 
   // Shift forces for calculating virials
   double sforcex[27];
@@ -42,6 +47,8 @@ struct DirectSettings_t {
   float k6, k12, dv6, dv12;
   float roffinv3;
 
+  float e14fac;
+
   float hinv;
   float *ewald_force;
 
@@ -51,6 +58,7 @@ struct DirectSettings_t {
 template <int tilesize> class NeighborList;
 #endif
 
+// Enum for VdW and electrostatic models
 enum {NONE=0, 
       VDW_VSH=1, VDW_VSW=2, VDW_VFSW=3, 
       EWALD=4,
@@ -58,6 +66,9 @@ enum {NONE=0,
       RSHFT=10, RSHIFT=11, RFSWIT=12,
       VDW_CUT=13,
       EWALD_LOOKUP=14};
+
+// Enum for vdwparam
+enum {VDW_MAIN, VDW_IN14};
 
 template <typename AT, typename CT>
 class DirectForce {
@@ -68,8 +79,22 @@ private:
   int nvdwparam;
   int vdwparam_len;
   CT *vdwparam;
-
   bool use_tex_vdwparam;
+
+  // VdW 1-4 parameters
+  int nvdwparam14;
+  int vdwparam14_len;
+  CT *vdwparam14;
+  bool use_tex_vdwparam14;
+
+  // 1-4 interaction and exclusion lists
+  int nin14list;
+  int in14list_len;
+  list14_t* in14list;
+
+  int nex14list;
+  int ex14list_len;
+  list14_t* ex14list;
 
   // VdW types
   int vdwtype_len;
@@ -94,6 +119,9 @@ private:
   void set_elec_model(int elec_model, CT h=0.01);
   void update_setup();
 
+  void setup_vdwparam(int type, int nvdwparam, CT *h_vdwparam);
+  void load_vdwparam(const char *filename, int *nvdwparam, CT **h_vdwparam);
+
 public:
 
   DirectForce();
@@ -102,6 +130,7 @@ public:
   void setup(CT boxx, CT boxy, CT boxz, 
 	     CT kappa,
 	     CT roff, CT ron,
+	     CT e14fac,
 	     int vdw_model, int elec_model,
 	     bool calc_vdw, bool calc_elec);
 
@@ -113,11 +142,20 @@ public:
 
   void set_vdwparam(int nvdwparam, CT *h_vdwparam);
   void set_vdwparam(const char *filename);
+  void set_vdwparam14(int nvdwparam, CT *h_vdwparam);
+  void set_vdwparam14(const char *filename);
 
   void set_vdwtype(int ncoord, int *h_vdwtype);
   void set_vdwtype(const char *filename);
 
-  void calc_force(const int ncoord, const float4 *xyzq,
+  void set_14_list(int nin14list, int nex14list,
+		   list14_t* h_in14list, list14_t* h_ex14list);
+
+  void calc_14_force(const float4 *xyzq,
+		     const bool calc_energy, const bool calc_virial,
+		     const int stride, AT *force, cudaStream_t stream=0);
+
+  void calc_force(const float4 *xyzq,
 		  const NeighborList<32> *nlist,
 		  const bool calc_energy,
 		  const bool calc_virial,
@@ -128,6 +166,7 @@ public:
   
   void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
 			 double *energy_vdw, double *energy_elec,
+			 double *energy_excl,
 			 double *sforcex, double *sforcey, double *sforcez);
 };
 

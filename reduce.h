@@ -141,8 +141,6 @@ __global__ static void reduce_data<long long int, double>(const int nfft_tot,
   unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
   double *data_out = (double *)data_in;
 
-  if (pos == 0) printf("Here\n");
-
   while (pos < nfft_tot) {
     long long int val = data_in[pos];
     data_out[pos] = ((double)val)*INV_FORCE_SCALE;

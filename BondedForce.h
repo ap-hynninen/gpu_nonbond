@@ -23,10 +23,6 @@ struct dihelist_t {
   int i, j, k, l, itype, ishift1, ishift2, ishift3;
 };
 
-struct list14_t {
-  int i, j, ishift;
-};
-
 struct cmaplist_t {
   int i1, j1, k1, l1, i2, j2, k2, l2, itype, ishift1, ishift2, ishift3;
 };

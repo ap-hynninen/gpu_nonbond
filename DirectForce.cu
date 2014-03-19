@@ -10,31 +10,6 @@
 
 static __constant__ const float ccelec = 332.0716;
 
-/*
-template <>
-__forceinline__ __device__ void write_force <double, float>() {
-    // Reduce forces and then do atomicAdd from a single thread
-    // Write to shared memory
-    fj_tmp[tid].x = fjx;
-    fj_tmp[tid].y = fjy;
-    fj_tmp[tid].z = fjz;
-    if (threadIdx.x == 0) {
-      FORCE_T f_red[3] = {0.0f, 0.0f, 0.0f};
-      for (int i=sh_start;i < sh_start + threadIdx.x;i++) {
-	f_red[0] += fj_tmp[i].x;
-	f_red[1] += fj_tmp[i].y;
-	f_red[2] += fj_tmp[i].z;
-      }
-      atomicAdd(&force[blockIdx.x*stride3 +           indj + threadIdx.x], f_red[0]);
-      atomicAdd(&force[blockIdx.x*stride3 + stride  + indj + threadIdx.x], f_red[1]);
-      atomicAdd(&force[blockIdx.x*stride3 + stride2 + indj + threadIdx.x], f_red[2]);
-    }
-    //    force[blockIdx.x*stride3 +           indj + threadIdx.x] += fjx;
-    //    force[blockIdx.x*stride3 + stride +  indj + threadIdx.x] += fjy;
-    //    force[blockIdx.x*stride3 + stride2 + indj + threadIdx.x] += fjz;
-}
-*/
-
 class vdw_base {
 public:
   virtual void setup(float ron2, float roff2) = 0;
@@ -70,13 +45,16 @@ static __device__ DirectEnergyVirial_t d_energy_virial;
 // VdW parameter texture reference
 static texture<float2, 1, cudaReadModeElementType> vdwparam_texref;
 static bool vdwparam_texref_bound = false;
+static texture<float2, 1, cudaReadModeElementType> vdwparam14_texref;
+static bool vdwparam14_texref_bound = false;
 
 //
 // Calculates VdW pair force & energy
 //
 template <int vdw_model, bool calc_energy>
 __forceinline__ __device__
-float pair_vdw_force(float r2, float r, float rinv, float rinv2, float c6, float c12,
+float pair_vdw_force(const float r2, const float r, const float rinv, const float rinv2,
+		     const float c6, const float c12,
 		     double &vdwpotl) {
 
   float fij_vdw;
@@ -159,7 +137,7 @@ float pair_vdw_force(float r2, float r, float rinv, float rinv2, float c6, float
 // Returns simple linear interpolation
 // NOTE: Could the interpolation be done implicitly using the texture unit?
 //
-__forceinline__ __device__ float lookup_force(float r, float hinv) {
+__forceinline__ __device__ float lookup_force(const float r, const float hinv) {
   float r_hinv = r*hinv;
   int ind = (int)r_hinv;
   float f1 = r_hinv - (float)ind;
@@ -177,11 +155,12 @@ __forceinline__ __device__ float lookup_force(float r, float hinv) {
 //
 template <int elec_model, bool calc_energy>
 __forceinline__ __device__
-float pair_elec_force(float r2, float r, float rinv, float qi, float qj, double &coulpotl) {
+float pair_elec_force(const float r2, const float r, const float rinv, 
+		      const float qi, const float qj, double &coulpotl) {
 
   float fij_elec;
 
-  float qq = qi*qj;
+  const float qq = qi*qj;
 
   if (elec_model == EWALD_LOOKUP) {
     fij_elec = qi*qj*lookup_force(r, d_setup.hinv);
@@ -198,6 +177,221 @@ float pair_elec_force(float r2, float r, float rinv, float qi, float qj, double 
   }
 
   return fij_elec;
+}
+
+//
+// Calculates electrostatic force & energy for 1-4 interactions and exclusions
+//
+template <int elec_model, bool calc_energy>
+__forceinline__ __device__
+float pair_elec_force_14(const float r2, const float r, const float rinv,
+			 const float qq, const float e14fac, double &coulpotl) {
+
+  float fij_elec;
+
+  if (elec_model == EWALD) {
+    float erfc_val = fasterfc(d_setup.kappa*r);
+    float exp_val = expf(-d_setup.kappa2*r2);
+    float qq_efac_rinv = qq*(erfc_val + e14fac - 1.0f)*rinv;
+    if (calc_energy) {
+      coulpotl += (double)qq_efac_rinv;
+    }
+    const float two_sqrtpi = 1.12837916709551f;    // 2/sqrt(pi)
+    fij_elec = -qq*two_sqrtpi*d_setup.kappa*exp_val - qq_efac_rinv;
+  } else if (elec_model == NONE) {
+    fij_elec = 0.0f;
+  }
+
+  return fij_elec;
+}
+
+//
+// 1-4 interaction force
+//
+template <typename AT, typename CT, int vdw_model, int elec_model, 
+	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
+__device__ void calc_in14_force_device(const int pos, const list14_t* in14list,
+				       const int* vdwtype, const float* vdwparam14,
+				       const float4* xyzq, const int stride, AT *force,
+				       double &vdw_pot, double &elec_pot) {
+
+  int i = in14list[pos].i - 1;
+  int j = in14list[pos].j - 1;
+  int ish = in14list[pos].ishift;
+  float3 sh_xyz = calc_box_shift(ish, d_setup.boxx, d_setup.boxy, d_setup.boxz);
+  // Load atom coordinates
+  float4 xyzqi = xyzq[i];
+  float4 xyzqj = xyzq[j];
+  // Calculate distance
+  CT dx = xyzqi.x - xyzqj.x + sh_xyz.x;
+  CT dy = xyzqi.y - xyzqj.y + sh_xyz.y;
+  CT dz = xyzqi.z - xyzqj.z + sh_xyz.z;
+  CT r2 = dx*dx + dy*dy + dz*dz;
+  CT qq = ccelec*xyzqi.w*xyzqj.w;
+  // Calculate the interaction
+  CT r = sqrtf(r2);
+  CT rinv = ((CT)1)/r;
+
+  int ia = vdwtype[i];
+  int ja = vdwtype[j];
+  int aa = max(ja, ia);
+  int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
+
+  CT c6, c12;
+  if (tex_vdwparam) {
+    //c6 = __ldg(&vdwparam[ivdw]);
+    //c12 = __ldg(&vdwparam[ivdw+1]);
+    float2 c6c12 = tex1Dfetch(vdwparam14_texref, ivdw);
+    c6  = c6c12.x;
+    c12 = c6c12.y;
+  } else {
+    c6 = vdwparam14[ivdw];
+    c12 = vdwparam14[ivdw+1];
+  }
+
+  CT rinv2 = rinv*rinv;
+
+  CT fij_vdw = pair_vdw_force<vdw_model, calc_energy>(r2, r, rinv, rinv2, c6, c12, vdw_pot);
+
+  CT fij_elec = pair_elec_force_14<elec_model, calc_energy>(r2, r, rinv, qq,
+							    d_setup.e14fac, elec_pot);
+
+  CT fij = (fij_vdw + fij_elec)*rinv2;
+
+  // Calculate force components
+  AT fxij, fyij, fzij;
+  calc_component_force<AT, CT>(fij, dx, dy, dz, fxij, fyij, fzij);
+
+  // Store forces
+  write_force<AT>(fxij, fyij, fzij,    i, stride, force);
+  write_force<AT>(-fxij, -fyij, -fzij, j, stride, force);
+  
+  // Store shifted forces
+  if (calc_virial) {
+    //sforce(is)   = sforce(is)   + fijx
+    //sforce(is+1) = sforce(is+1) + fijy
+    //sforce(is+2) = sforce(is+2) + fijz
+  }
+
+}
+
+//
+// 1-4 exclusion force
+//
+template <typename AT, typename CT, int elec_model, bool calc_energy, bool calc_virial>
+__device__ void calc_ex14_force_device(const int pos, const list14_t* ex14list,
+				       const float4* xyzq, const int stride, AT *force,
+				       double &elec_pot) {
+
+  int i = ex14list[pos].i - 1;
+  int j = ex14list[pos].j - 1;
+  int ish = ex14list[pos].ishift;
+  float3 sh_xyz = calc_box_shift(ish, d_setup.boxx, d_setup.boxy, d_setup.boxz);
+  // Load atom coordinates
+  float4 xyzqi = xyzq[i];
+  float4 xyzqj = xyzq[j];
+  // Calculate distance
+  CT dx = xyzqi.x - xyzqj.x + sh_xyz.x;
+  CT dy = xyzqi.y - xyzqj.y + sh_xyz.y;
+  CT dz = xyzqi.z - xyzqj.z + sh_xyz.z;
+  CT r2 = dx*dx + dy*dy + dz*dz;
+  CT qq = ccelec*xyzqi.w*xyzqj.w;
+  // Calculate the interaction
+  CT r = sqrtf(r2);
+  CT rinv = ((CT)1)/r;
+  CT rinv2 = rinv*rinv;
+  CT fij_elec = pair_elec_force_14<elec_model, calc_energy>(r2, r, rinv, qq,
+							    0.0f, elec_pot);
+  CT fij = fij_elec*rinv2;
+  // Calculate force components
+  AT fxij, fyij, fzij;
+  calc_component_force<AT, CT>(fij, dx, dy, dz, fxij, fyij, fzij);
+
+  // Store forces
+  write_force<AT>(fxij, fyij, fzij,    i, stride, force);
+  write_force<AT>(-fxij, -fyij, -fzij, j, stride, force);
+  // Store shifted forces
+  if (calc_virial) {
+    //sforce(is)   = sforce(is)   + fijx
+    //sforce(is+1) = sforce(is+1) + fijy
+    //sforce(is+2) = sforce(is+2) + fijz
+  }
+
+}
+
+//
+// 1-4 exclusion and interaction calculation kernel
+//
+template <typename AT, typename CT, int vdw_model, int elec_model, 
+	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
+__global__ void calc_14_force_kernel(const int nin14list, const int nex14list,
+				     const int nin14block,
+				     const list14_t* in14list, const list14_t* ex14list,
+				     const int* vdwtype, const float* vdwparam14,
+				     const float4* xyzq, const int stride, AT *force) {
+  // Amount of shared memory required:
+  // blockDim.x*sizeof(double2)
+  extern __shared__ double2 shpot[];
+
+  if (blockIdx.x < nin14block) {
+    double vdw_pot, elec_pot;
+    if (calc_energy) {
+      vdw_pot = 0.0;
+      elec_pot = 0.0;
+    }
+
+    int pos = threadIdx.x + blockIdx.x*blockDim.x;
+    if (pos < nin14list) {
+      calc_in14_force_device<AT, CT, vdw_model, elec_model, calc_energy, calc_virial, tex_vdwparam>
+	(pos, in14list, vdwtype, vdwparam14, xyzq, stride, force, vdw_pot, elec_pot);
+    }
+
+    if (calc_energy) {
+      shpot[threadIdx.x].x = vdw_pot;
+      shpot[threadIdx.x].y = elec_pot;
+      __syncthreads();
+      for (int i=1;i < blockDim.x;i *= 2) {
+	int t = threadIdx.x + i;
+	double val1 = (t < blockDim.x) ? shpot[t].x : 0.0;
+	double val2 = (t < blockDim.x) ? shpot[t].y : 0.0;
+	__syncthreads();
+	shpot[threadIdx.x].x += val1;
+	shpot[threadIdx.x].y += val2;
+	__syncthreads();
+      }
+      if (threadIdx.x == 0) {
+	atomicAdd(&d_energy_virial.energy_vdw,  shpot[0].x);
+	atomicAdd(&d_energy_virial.energy_elec, shpot[0].y);
+      }
+    }
+
+  } else {
+    double excl_pot;
+    if (calc_energy) excl_pot = 0.0;
+
+    int pos = threadIdx.x + (blockIdx.x-nin14block)*blockDim.x;
+    if (pos < nex14list) {
+      calc_ex14_force_device<AT, CT, elec_model, calc_energy, calc_virial>
+	(pos, ex14list, xyzq, stride, force, excl_pot);
+    }
+
+    if (calc_energy) {
+      shpot[threadIdx.x].x = excl_pot;
+      __syncthreads();
+      for (int i=1;i < blockDim.x;i *= 2) {
+	int t = threadIdx.x + i;
+	double val = (t < blockDim.x) ? shpot[t].x : 0.0;
+	__syncthreads();
+	shpot[threadIdx.x].x += val;
+	__syncthreads();
+      }
+      if (threadIdx.x == 0) {
+	atomicAdd(&d_energy_virial.energy_excl,  shpot[0].x);
+      }
+    }
+
+  }
+
 }
 
 //
@@ -676,6 +870,20 @@ DirectForce<AT, CT>::DirectForce() {
   use_tex_vdwparam = true;
   vdwparam_texref_bound = false;
 
+  vdwparam14 = NULL;
+  nvdwparam14 = 0;
+  vdwparam14_len = 0;
+  use_tex_vdwparam14 = true;
+  vdwparam14_texref_bound = false;
+
+  nin14list = 0;
+  in14list_len = 0;
+  in14list = NULL;
+
+  nex14list = 0;
+  ex14list_len = 0;
+  ex14list = NULL;
+
   vdwtype = NULL;
   vdwtype_len = 0;
 
@@ -701,6 +909,13 @@ DirectForce<AT, CT>::~DirectForce() {
     vdwparam_texref_bound = false;
   }
   if (vdwparam != NULL) deallocate<CT>(&vdwparam);
+  if (vdwparam14_texref_bound) {
+    cudaCheck(cudaUnbindTexture(vdwparam14_texref));
+    vdwparam14_texref_bound = false;
+  }
+  if (vdwparam14 != NULL) deallocate<CT>(&vdwparam14);
+  if (in14list != NULL) deallocate<list14_t>(&in14list);
+  if (ex14list != NULL) deallocate<list14_t>(&ex14list);
   if (vdwtype != NULL) deallocate<int>(&vdwtype);
   if (ewald_force != NULL) deallocate<CT>(&ewald_force);
   if (h_energy_virial != NULL) deallocate_host<DirectEnergyVirial_t>(&h_energy_virial);
@@ -722,6 +937,7 @@ template <typename AT, typename CT>
 void DirectForce<AT, CT>::setup(CT boxx, CT boxy, CT boxz, 
 				CT kappa,
 				CT roff, CT ron,
+				CT e14fac,
 				int vdw_model, int elec_model,
 				bool calc_vdw, bool calc_elec) {
 
@@ -761,6 +977,8 @@ void DirectForce<AT, CT>::setup(CT boxx, CT boxy, CT boxz,
     h_setup->dv12 = -((CT)1.0)/(roff6*roff6);
   }
   h_setup->roffinv3 =  ((CT)1.0)/roff3;
+
+  h_setup->e14fac = e14fac;
 
   this->vdw_model = vdw_model;
   set_elec_model(elec_model);
@@ -809,84 +1027,139 @@ void DirectForce<AT, CT>::set_calc_elec(bool calc_elec) {
 }
 
 //
-// Sets VdW parameters
+// Sets VdW parameters by copying them from CPU
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_vdwparam(int nvdwparam, CT *h_vdwparam) {
+void DirectForce<AT, CT>::setup_vdwparam(int type, int h_nvdwparam, CT *h_vdwparam) {
+  assert(type == VDW_MAIN || type == VDW_IN14);
 
-  this->nvdwparam = nvdwparam;
+  int *nvdwparam_loc;
+  int *vdwparam_len_loc;
+  CT **vdwparam_loc;
+
+  if (type == VDW_MAIN) {
+    nvdwparam_loc = &this->nvdwparam;
+    vdwparam_len_loc = &this->vdwparam_len;
+    vdwparam_loc = &this->vdwparam;
+  } else {
+    nvdwparam_loc = &this->nvdwparam14;
+    vdwparam_len_loc = &this->vdwparam14_len;
+    vdwparam_loc = &this->vdwparam14;
+  }
+
+  *nvdwparam_loc = h_nvdwparam;
 
   // "Fix" vdwparam by multiplying c6 by 6.0 and c12 by 12.0
   // NOTE: this is done in order to avoid the multiplication in the inner loop
-  CT *h_vdwparam_fixed = new CT[nvdwparam];
-  for(int i=0;i < nvdwparam/2;i++) {
+  CT *h_vdwparam_fixed = new CT[*nvdwparam_loc];
+  for(int i=0;i < *nvdwparam_loc/2;i++) {
     h_vdwparam_fixed[i*2]   = ((CT)6.0)*h_vdwparam[i*2];
     h_vdwparam_fixed[i*2+1] = ((CT)12.0)*h_vdwparam[i*2+1];
-    //h_vdwparam_fixed[i*2]   = h_vdwparam[i*2];
-    //h_vdwparam_fixed[i*2+1] = h_vdwparam[i*2+1];
   }
 
   bool vdwparam_reallocated = false;
-  if (nvdwparam > vdwparam_len) {
-    reallocate<CT>(&vdwparam, &vdwparam_len, nvdwparam, 1.0f);
+  if (*nvdwparam_loc > *vdwparam_len_loc) {
+    reallocate<CT>(vdwparam_loc, vdwparam_len_loc, *nvdwparam_loc, 1.0f);
     vdwparam_reallocated = true;
   }
-  copy_HtoD<CT>(h_vdwparam_fixed, vdwparam, nvdwparam);
+  copy_HtoD<CT>(h_vdwparam_fixed, *vdwparam_loc, *nvdwparam_loc);
   delete [] h_vdwparam_fixed;
 
-  if (use_tex_vdwparam && vdwparam_reallocated) {
+  bool *use_tex_vdwparam_loc;
+  bool *vdwparam_texref_bound_loc;
+  texture<float2, 1, cudaReadModeElementType> *vdwparam_texref_loc;
+  if (type == VDW_MAIN) {
+    use_tex_vdwparam_loc = &this->use_tex_vdwparam;
+    vdwparam_texref_bound_loc = &vdwparam_texref_bound;
+    vdwparam_texref_loc = &vdwparam_texref;
+  } else {
+    use_tex_vdwparam_loc = &this->use_tex_vdwparam14;
+    vdwparam_texref_bound_loc = &vdwparam14_texref_bound;
+    vdwparam_texref_loc = &vdwparam14_texref;
+  }
+
+  if (*use_tex_vdwparam_loc && vdwparam_reallocated) {
     // Unbind texture
-    if (vdwparam_texref_bound) {
-      cudaCheck(cudaUnbindTexture(vdwparam_texref));
-      vdwparam_texref_bound = false;
+    if (*vdwparam_texref_bound_loc) {
+      cudaCheck(cudaUnbindTexture(*vdwparam_texref_loc));
+      *vdwparam_texref_bound_loc = false;
     }
     // Bind texture
-    vdwparam_texref.normalized = 0;
-    vdwparam_texref.filterMode = cudaFilterModePoint;
-    vdwparam_texref.addressMode[0] = cudaAddressModeClamp;
-    vdwparam_texref.channelDesc.x = 32;
-    vdwparam_texref.channelDesc.y = 32;
-    vdwparam_texref.channelDesc.z = 0;
-    vdwparam_texref.channelDesc.w = 0;
-    vdwparam_texref.channelDesc.f = cudaChannelFormatKindFloat;
-    cudaCheck(cudaBindTexture(NULL, vdwparam_texref, vdwparam, 
-			      nvdwparam*sizeof(float)));
-    vdwparam_texref_bound = true;
+    vdwparam_texref_loc->normalized = 0;
+    vdwparam_texref_loc->filterMode = cudaFilterModePoint;
+    vdwparam_texref_loc->addressMode[0] = cudaAddressModeClamp;
+    vdwparam_texref_loc->channelDesc.x = 32;
+    vdwparam_texref_loc->channelDesc.y = 32;
+    vdwparam_texref_loc->channelDesc.z = 0;
+    vdwparam_texref_loc->channelDesc.w = 0;
+    vdwparam_texref_loc->channelDesc.f = cudaChannelFormatKindFloat;
+    cudaCheck(cudaBindTexture(NULL, *vdwparam_texref_loc, *vdwparam_loc, 
+			      (*nvdwparam_loc)*sizeof(float)));
+    *vdwparam_texref_bound_loc = true;
   }
+
 }
 
 //
-// Sets VdW parameters by loading them from a file
+// Loads vdwparam from a file
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_vdwparam(const char *filename) {
-  
-  int nvdwparam;
-  CT *h_vdwparam;
-
+void DirectForce<AT, CT>::load_vdwparam(const char *filename, int *nvdwparam, CT **h_vdwparam) {
   std::ifstream file;
   file.exceptions(std::ifstream::failbit | std::ifstream::badbit);
   try {
     // Open file
     file.open(filename);
-
-    file >> nvdwparam;
-
-    h_vdwparam = new float[nvdwparam];
-
-    for (int i=0;i < nvdwparam;i++) {
-      file >> h_vdwparam[i];
+    file >> *nvdwparam;
+    *h_vdwparam = new float[*nvdwparam];
+    for (int i=0;i < *nvdwparam;i++) {
+      file >> (*h_vdwparam)[i];
     }
-
     file.close();
   }
   catch(std::ifstream::failure e) {
     std::cerr << "Error opening/reading/closing file " << filename << std::endl;
     exit(1);
   }
+}
 
-  set_vdwparam(nvdwparam, h_vdwparam);
+//
+// Sets VdW parameters by copying them from CPU
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::set_vdwparam(int nvdwparam, CT *h_vdwparam) {
+  setup_vdwparam(VDW_MAIN, nvdwparam, h_vdwparam);
+}
 
+//
+// Sets VdW parameters by loading them from a file
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::set_vdwparam(const char *filename) {  
+  int nvdwparam;
+  CT *h_vdwparam;
+  load_vdwparam(filename, &nvdwparam, &h_vdwparam);
+  setup_vdwparam(VDW_MAIN, nvdwparam, h_vdwparam);
+  delete [] h_vdwparam;
+}
+
+//
+// Sets VdW parameters by copying them from CPU
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::set_vdwparam14(int nvdwparam, CT *h_vdwparam) {
+  setup_vdwparam(VDW_IN14, nvdwparam, h_vdwparam);
+}
+
+//
+// Sets VdW parameters by loading them from a file
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::set_vdwparam14(const char *filename) {  
+  int nvdwparam;
+  CT *h_vdwparam;
+  load_vdwparam(filename, &nvdwparam, &h_vdwparam);
+  setup_vdwparam(VDW_IN14, nvdwparam, h_vdwparam);
   delete [] h_vdwparam;
 }
 
@@ -935,13 +1208,34 @@ void DirectForce<AT, CT>::set_vdwtype(const char *filename) {
 }
 
 //
+// Sets 1-4 interaction and exclusion lists
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::set_14_list(int nin14list, int nex14list,
+				      list14_t* h_in14list, list14_t* h_ex14list) {
+
+  this->nin14list = nin14list;
+  this->nex14list = nex14list;
+
+  if (nin14list > 0) {
+    reallocate<list14_t>(&in14list, &in14list_len, nin14list);
+    copy_HtoD<list14_t>(h_in14list, in14list, nin14list);
+  }
+
+  if (nex14list > 0) {
+    reallocate<list14_t>(&ex14list, &ex14list_len, nex14list);
+    copy_HtoD<list14_t>(h_ex14list, ex14list, nex14list);
+  }
+
+}
+
+//
 // Builds Ewald lookup table
 // roff  = distance cut-off
 // h     = the distance between interpolation points
 //
 template <typename AT, typename CT>
 void DirectForce<AT, CT>::setup_ewald_force(CT h) {
-
   h_setup->hinv = ((CT)1.0)/h;
 
   n_ewald_force = (int)(sqrt(h_setup->roff2)*h_setup->hinv) + 2;
@@ -963,7 +1257,6 @@ void DirectForce<AT, CT>::setup_ewald_force(CT h) {
   h_setup->ewald_force = ewald_force;
 
   delete [] h_ewald_force;
-
 }
 
 //
@@ -979,10 +1272,375 @@ void DirectForce<AT, CT>::set_elec_model(int elec_model, CT h) {
 }
 
 //
+// Calculates 1-4 exclusions and interactions
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::calc_14_force(const float4 *xyzq,
+					const bool calc_energy, const bool calc_virial,
+					const int stride, AT *force, cudaStream_t stream) {
+  int nthread = 512;
+  //int nblock = (nin14list + nex14list - 1)/nthread + 1;
+  int nin14block = (nin14list - 1)/nthread + 1;
+  int nex14block = (nex14list - 1)/nthread + 1;
+  int nblock = nin14block + nex14block;
+  int shmem_size = 0;
+  if (calc_energy) {
+    shmem_size = nthread*sizeof(double2);
+  }
+
+  int vdw_model_loc = calc_vdw ? vdw_model : NONE;
+  int elec_model_loc = calc_elec ? elec_model : NONE;
+  if (elec_model_loc == NONE && vdw_model_loc == NONE) return;
+
+  if (vdw_model_loc == VDW_VSH) {
+    if (elec_model_loc == EWALD) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, EWALD, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, EWALD, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, EWALD, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, EWALD, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else if (elec_model_loc == EWALD_LOOKUP) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, EWALD_LOOKUP, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, EWALD_LOOKUP, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, EWALD_LOOKUP, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, EWALD_LOOKUP, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else if (elec_model_loc == NONE) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, NONE, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, NONE, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, NONE, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSH, NONE, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else {
+      std::cout<<"DirectForce<AT, CT>::calc_14_force, Invalid EWALD model "
+	       <<elec_model_loc<<std::endl;
+      exit(1);
+    }
+  } else if (vdw_model_loc == VDW_VSW) {
+    if (elec_model_loc == EWALD) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, EWALD, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, EWALD, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, EWALD, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, EWALD, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else if (elec_model_loc == EWALD_LOOKUP) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, EWALD_LOOKUP, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, EWALD_LOOKUP, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, EWALD_LOOKUP, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, EWALD_LOOKUP, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else if (elec_model_loc == NONE) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, NONE, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, NONE, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, NONE, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VSW, NONE, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else {
+      std::cout<<"DirectForce<AT, CT>::calc_14_force, Invalid EWALD model "
+	       <<elec_model_loc<<std::endl;
+      exit(1);
+    }
+  } else if (vdw_model_loc == VDW_VFSW) {
+    if (elec_model_loc == EWALD) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, EWALD, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, EWALD, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, EWALD, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, EWALD, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else if (elec_model_loc == EWALD_LOOKUP) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, EWALD_LOOKUP, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, EWALD_LOOKUP, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, EWALD_LOOKUP, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, EWALD_LOOKUP, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else if (elec_model_loc == NONE) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, NONE, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, NONE, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, NONE, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_VFSW, NONE, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else {
+      std::cout<<"DirectForce<AT, CT>::calc_14_force, Invalid EWALD model "
+	       <<elec_model_loc<<std::endl;
+      exit(1);
+    }
+  } else if (vdw_model_loc == VDW_CUT) {
+    if (elec_model_loc == EWALD) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, EWALD, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, EWALD, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, EWALD, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, EWALD, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else if (elec_model_loc == EWALD_LOOKUP) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, EWALD_LOOKUP, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, EWALD_LOOKUP, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, EWALD_LOOKUP, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, EWALD_LOOKUP, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else if (elec_model_loc == NONE) {
+      if (calc_energy) {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, NONE, true, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, NONE, true, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      } else {
+	if (calc_virial) {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, NONE, false, true, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	} else {
+	  calc_14_force_kernel <AT, CT, VDW_CUT, NONE, false, false, true>
+	    <<< nblock, nthread, shmem_size, stream >>>
+	    (nin14list, nex14list, nin14block, in14list, ex14list, vdwtype, vdwparam14, xyzq,
+	     stride, force);
+	}
+      }
+    } else {
+      std::cout<<"DirectForce<AT, CT>::calc_14_force, Invalid EWALD model "
+	       <<elec_model_loc<<std::endl;
+      exit(1);
+    }
+  } else {
+    std::cout<<"DirectForce<AT, CT>::calc_14_force, Invalid VDW model"<<std::endl;
+    exit(1);
+  }
+
+  cudaCheck(cudaGetLastError());
+}
+
+//
 // Calculates direct force
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::calc_force(const int ncoord, const float4 *xyzq,
+void DirectForce<AT, CT>::calc_force(const float4 *xyzq,
 				     const NeighborList<32> *nlist,
 				     const bool calc_energy,
 				     const bool calc_virial,
@@ -1459,6 +2117,7 @@ template <typename AT, typename CT>
 void DirectForce<AT, CT>::clear_energy_virial() {
   h_energy_virial->energy_vdw = 0.0;
   h_energy_virial->energy_elec = 0.0;
+  h_energy_virial->energy_excl = 0.0;
   for (int i=0;i < 27;i++) {
     h_energy_virial->sforcex[i] = 0.0;
     h_energy_virial->sforcey[i] = 0.0;
@@ -1475,17 +2134,19 @@ void DirectForce<AT, CT>::clear_energy_virial() {
 template <typename AT, typename CT>
 void DirectForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
 					    double *energy_vdw, double *energy_elec,
+					    double *energy_excl,
 					    double *sforcex, double *sforcey, double *sforcez) {
   if (prev_calc_energy && prev_calc_virial) {
     cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(DirectEnergyVirial_t)));
   } else if (prev_calc_energy) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 2*sizeof(double)));
+    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 3*sizeof(double)));
   } else if (prev_calc_virial) {
     cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 27*3*sizeof(double),
-				   2*sizeof(double)));
+				   3*sizeof(double)));
   }
   *energy_vdw = h_energy_virial->energy_vdw;
   *energy_elec = h_energy_virial->energy_elec;
+  *energy_excl = h_energy_virial->energy_excl;
   for (int i=0;i < 27;i++) {
     sforcex[i] = h_energy_virial->sforcex[i];
     sforcey[i] = h_energy_virial->sforcey[i];

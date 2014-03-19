@@ -231,4 +231,31 @@ void write_force <long long int> (const long long int fx,
 }
 // ----------------------------------------------------------------------------------------------
 
+//
+// Calculates box shift
+// 
+// On CPU this index is calculated as:
+//
+// ! shift index = 1...26*3+1
+// calc_ishift_{P*} = (is(1)+1 + (is(2)+1)*3 + (is(3)+1)*9 + 1)*3 - 2
+//
+// where is(1:3) = {-1, 0, 1}
+//
+__forceinline__ __device__
+float3 calc_box_shift(int ish,
+		      const float boxx,
+		      const float boxy,
+		      const float boxz) {
+  float3 sh;
+  ish = (ish+2)/3 - 1;
+  sh.z = (ish/9 - 1)*boxz;
+  ish -= (ish/9)*9;
+  sh.y = (ish/3 - 1)*boxy;
+  ish -= (ish/3)*3;
+  sh.x = (ish - 1)*boxx;
+  return sh;
+}
+
+// ----------------------------------------------------------------------------------------------
+
 #endif // GPU_UTILS_H
