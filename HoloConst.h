@@ -9,7 +9,8 @@ private:
   bool use_textures;
   void setup_textures(double *xyz0, double *xyz1, int stride);
 
-  void update_setup(int stride, double *xyz0, double *xyz1, double *xyz2);
+  void update_setup(int stride, double *xyz0, double *xyz1, double *xyz2,
+		    cudaStream_t stream=0);
 
   void set_solvent_ind(int nsolvent, int3 *h_solvent_ind);
 
@@ -89,7 +90,7 @@ public:
 			     double *h_quad_constr, double *h_quad_mass,
 			     int nsolvent, int3 *h_solvent_ind);
 
-  void apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1);
+  void apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1, cudaStream_t stream=0);
 
 };
 

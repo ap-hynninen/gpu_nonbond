@@ -310,7 +310,6 @@ static cudaDeviceProp gpu_prop;
 static int cuda_arch;
 
 void start_gpu(int numnode, int mynode) {
-  int devices[4] = {2, 3, 0, 1};
   //int devices[4] = {0, 1, 2, 3};
 
   int device_count;
@@ -320,7 +319,12 @@ void start_gpu(int numnode, int mynode) {
     exit(1);
   }
 
-  gpu_ind = devices[mynode % device_count];
+  if (device_count == 4) {
+    int devices[4] = {2, 3, 0, 1};
+    gpu_ind = devices[mynode % device_count];
+  } else {
+    gpu_ind = mynode % device_count;
+  }
   cudaCheck(cudaSetDevice(gpu_ind));
 
   cudaCheck(cudaThreadSynchronize());

@@ -668,7 +668,8 @@ void HoloConst::setup_ind_mass_constr(int npair, int2 *h_pair_ind,
 //
 // Updates h_setup and d_setup if neccessary
 //
-void HoloConst::update_setup(int stride, double *xyz0, double *xyz1, double *xyz2) {
+void HoloConst::update_setup(int stride, double *xyz0, double *xyz1, double *xyz2,
+			     cudaStream_t stream) {
 
   bool update = false;
 
@@ -742,7 +743,8 @@ void HoloConst::update_setup(int stride, double *xyz0, double *xyz1, double *xyz
     h_setup.xyz1 = xyz1;
     h_setup.xyz2 = xyz2;
 
-    cudaCheck(cudaMemcpyToSymbol(d_setup, &h_setup, sizeof(HoloConstSettings_t)));
+    cudaCheck(cudaMemcpyToSymbolAsync(d_setup, &h_setup, sizeof(HoloConstSettings_t),
+				      0, cudaMemcpyHostToDevice, stream));
   }
 
 }
@@ -868,7 +870,7 @@ void HoloConst::setup_textures(double *xyz0, double *xyz1, int stride) {
 //
 // Apply constraints
 //
-void HoloConst::apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1) {
+void HoloConst::apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1, cudaStream_t stream) {
 
   assert(xyz0->match(xyz1));
 
@@ -881,7 +883,7 @@ void HoloConst::apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1) {
 
   int nthread = 128;
   int nblock = (nsolvent + npair + ntrip + nquad - 1)/nthread + 1;
-  all_kernels<<< nblock, nthread >>>();
+  all_kernels<<< nblock, nthread, 0, stream >>>();
   cudaCheck(cudaGetLastError());
 
 

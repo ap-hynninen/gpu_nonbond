@@ -162,7 +162,7 @@ public:
 		  const int stride, AT *force, cudaStream_t stream=0);
 
 
-  void clear_energy_virial();
+  void clear_energy_virial(cudaStream_t stream=0);
   
   void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
 			 double *energy_vdw, double *energy_elec,

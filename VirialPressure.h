@@ -7,8 +7,11 @@ class VirialPressure {
 
 private:
 
-  // 9 doubles
-  double *global_buffer;
+  // vpress in device memory (9 doubles)
+  double *vpress;
+
+  // vpress in host memory (9 doubles)
+  double *h_vpress;
 
 public:
 
@@ -19,7 +22,7 @@ public:
 		   cudaXYZ<double> *force,
 		   float3 *xyz_shift,
 		   float boxx, float boxy, float boxz,
-		   double *vpress);
+		   double *vpress_out, cudaStream_t stream=0);
 
 };
 

@@ -6,10 +6,11 @@
 #include "VirialPressure.h"
 
 __global__ void calc_virial_kernel(const int ncoord, const int stride, const int stride_force,
-				   const double *coord, const double *force,
-				   const float3 *xyz_shift,
+				   const double* __restrict__ coord,
+				   const double* __restrict__ force,
+				   const float3* __restrict__ xyz_shift,
 				   const float boxx, const float boxy, const float boxz,
-				   double *global_buffer) {
+				   double* __restrict__ vpress_global) {
   // Shared memory:
   // Requires 9*sizeof(double)*blockDim.x
   extern __shared__ double sh_buffer[];
@@ -73,7 +74,7 @@ __global__ void calc_virial_kernel(const int ncoord, const int stride, const int
       vals[i] = sh_buffer[blockDim.x*i];
 #pragma unroll
     for (int i=0;i < 9;i++)
-      atomicAdd(&global_buffer[i], vals[i]);
+      atomicAdd(&vpress_global[i], vals[i]);
   }
 
 }
@@ -84,14 +85,16 @@ __global__ void calc_virial_kernel(const int ncoord, const int stride, const int
 // Class creator
 //
 VirialPressure::VirialPressure() {
-  allocate<double>(&global_buffer, 9);
+  allocate_host<double>(&h_vpress, 9);
+  allocate<double>(&vpress, 9);
 }
 
 //
 // Class destructor
 //
 VirialPressure::~VirialPressure() {
-  if (global_buffer != NULL) deallocate<double>(&global_buffer);
+  if (h_vpress != NULL) deallocate_host<double>(&h_vpress);
+  if (vpress != NULL) deallocate<double>(&vpress);
 }
 
 //
@@ -104,7 +107,7 @@ void VirialPressure::calc_virial(cudaXYZ<double> *coord,
 				 cudaXYZ<double> *force,
 				 float3 *xyz_shift,
 				 float boxx, float boxy, float boxz,
-				 double *vpress) {
+				 double *vpress_out, cudaStream_t stream) {
   assert(coord->match(force));
 
   int ncoord = coord->n;
@@ -115,13 +118,23 @@ void VirialPressure::calc_virial(cudaXYZ<double> *coord,
 
   int shmem_size = 9*sizeof(double)*nthread;
 
-  clear_gpu_array<double>(global_buffer, 9);
+  clear_gpu_array<double>(vpress, 9, stream);
   
-  calc_virial_kernel<<< nblock, nthread, shmem_size >>>
+  calc_virial_kernel<<< nblock, nthread, shmem_size, stream >>>
     (ncoord, stride, stride_force, coord->data, force->data, xyz_shift,
-     boxx, boxy, boxz, global_buffer);
-
-  copy_DtoH<double>(global_buffer, vpress, 9);
+     boxx, boxy, boxz, vpress);
 
   cudaCheck(cudaGetLastError());
+
+  copy_DtoH<double>(vpress, h_vpress, 9, stream);
+
+  // Wait here until CPU has the result
+  cudaCheck(cudaStreamSynchronize(stream));
 }
+
+//
+// Read value of vpress
+//
+//void VirialPressure::read_virial(double *vpress_out) {
+//  for (int i=0;i < 9;i++) vpress_out[i] = h_vpress[i];
+//}

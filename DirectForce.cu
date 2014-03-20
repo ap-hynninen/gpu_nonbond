@@ -2114,7 +2114,8 @@ void DirectForce<AT, CT>::calc_force(const float4 *xyzq,
 // Sets Energies and virials to zero
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::clear_energy_virial() {
+void DirectForce<AT, CT>::clear_energy_virial(cudaStream_t stream) {
+  //clear_gpu_array<DirectEnergyVirial_t>(&d_energy_virial, 1, stream);
   h_energy_virial->energy_vdw = 0.0;
   h_energy_virial->energy_elec = 0.0;
   h_energy_virial->energy_excl = 0.0;
@@ -2123,7 +2124,8 @@ void DirectForce<AT, CT>::clear_energy_virial() {
     h_energy_virial->sforcey[i] = 0.0;
     h_energy_virial->sforcez[i] = 0.0;
   }
-  cudaCheck(cudaMemcpyToSymbol(d_energy_virial, h_energy_virial, sizeof(DirectEnergyVirial_t)));
+  cudaCheck(cudaMemcpyToSymbolAsync(d_energy_virial, h_energy_virial, sizeof(DirectEnergyVirial_t),
+				    0, cudaMemcpyHostToDevice, stream));
 }
 
 //
