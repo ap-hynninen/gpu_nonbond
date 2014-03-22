@@ -85,16 +85,18 @@ __global__ void calc_virial_kernel(const int ncoord, const int stride, const int
 // Class creator
 //
 VirialPressure::VirialPressure() {
-  allocate_host<double>(&h_vpress, 9);
-  allocate<double>(&vpress, 9);
+  //allocate_host<double>(&h_vpress, 9);
+  //allocate<double>(&vpress, 9);
+  cudaCheck(cudaEventCreate(&copy_virial_done_event));
 }
 
 //
 // Class destructor
 //
 VirialPressure::~VirialPressure() {
-  if (h_vpress != NULL) deallocate_host<double>(&h_vpress);
-  if (vpress != NULL) deallocate<double>(&vpress);
+  //if (h_vpress != NULL) deallocate_host<double>(&h_vpress);
+  //if (vpress != NULL) deallocate<double>(&vpress);
+  cudaCheck(cudaEventDestroy(copy_virial_done_event));
 }
 
 //
@@ -107,7 +109,8 @@ void VirialPressure::calc_virial(cudaXYZ<double> *coord,
 				 cudaXYZ<double> *force,
 				 float3 *xyz_shift,
 				 float boxx, float boxy, float boxz,
-				 double *vpress_out, cudaStream_t stream) {
+				 double *d_vpress, double *h_vpress,
+				 cudaStream_t stream) {
   assert(coord->match(force));
 
   int ncoord = coord->n;
@@ -118,23 +121,31 @@ void VirialPressure::calc_virial(cudaXYZ<double> *coord,
 
   int shmem_size = 9*sizeof(double)*nthread;
 
-  clear_gpu_array<double>(vpress, 9, stream);
+  //clear_gpu_array<double>(vpress, 9, stream);
   
   calc_virial_kernel<<< nblock, nthread, shmem_size, stream >>>
     (ncoord, stride, stride_force, coord->data, force->data, xyz_shift,
-     boxx, boxy, boxz, vpress);
+     boxx, boxy, boxz, d_vpress);
 
   cudaCheck(cudaGetLastError());
 
-  copy_DtoH<double>(vpress, h_vpress, 9, stream);
+  copy_DtoH<double>(d_vpress, h_vpress, 9, stream);
 
-  // Wait here until CPU has the result
-  cudaCheck(cudaStreamSynchronize(stream));
+  cudaCheck(cudaEventRecord(copy_virial_done_event, stream));
 }
 
 //
-// Read value of vpress
+// Waits for the value of vpress calculated in "calc_virial"
 //
-//void VirialPressure::read_virial(double *vpress_out) {
-//  for (int i=0;i < 9;i++) vpress_out[i] = h_vpress[i];
-//}
+void VirialPressure::wait_virial() {
+  // Wait here until CPU has the result
+  cudaCheck(cudaEventSynchronize(copy_virial_done_event));
+}
+
+//
+// Read value of vpress calculated in "calc_virial"
+//
+void VirialPressure::read_virial(double *h_vpress, double *vpress_out) {
+  for (int i=0;i < 9;i++) vpress_out[i] = h_vpress[i];
+}
+
