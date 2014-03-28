@@ -132,6 +132,7 @@ void test() {
 
   //------------------ Virial pressure ---------------
 
+  /*
   VirialPressure vir;
   double vpress[9];
   cudaXYZ<double> coord;
@@ -152,5 +153,6 @@ void test() {
     std::cout<<"vpress comparison OK (tolerance " << tol << " max difference "
 	     << max_diff << ")" << std::endl;
   }
+  */
 
 }
