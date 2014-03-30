@@ -3,7 +3,7 @@
 #include <cuda.h>
 #include "cuda_utils.h"
 #include "gpu_utils.h"
-#include "const_reduce_lists.h"
+//#include "const_reduce_lists.h"
 #include "HoloConst.h"
 #include "hostXYZ.h"
 
