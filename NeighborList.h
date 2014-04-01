@@ -26,6 +26,14 @@ struct pairs_t {
 };
 
 //
+// Neighborlist parameter structure
+// NOTE: This is used to avoid GPU-CPU-GPU communication
+//
+struct NeighborListParam_t {
+  int ncell;
+};
+
+//
 // Bounding box structure
 //
 struct bb_t {
@@ -69,24 +77,60 @@ private:
   int tile_indj_sparse_len;
   int *tile_indj_sparse;
 
+  //
   // For building neighbor list on GPU
+  //
   int col_n_len;
   int *col_n;
 
   int col_pos_len;
   int *col_pos;
 
+  int col_pos_aligned_len;
+  int *col_pos_aligned;
+
   int col_ind_len;
   int *col_ind;
 
+  // Global -> local mapping index list
+  int loc2glo_ind_len;
+  int *loc2glo_ind;
+
+  // Atom indices where each cell start
+  int cell_start_len;
+  int *cell_start;
+
+  // Approximate upper bound for number of cells
+  int ncell_max;
+
+  NeighborListParam_t *h_nlist_param;
+
+  // Bounding boxes
   int bb_len;
   bb_t *bb;
 
   void set_cell_sizes(const int *zonelist,
 		      const float3 *max_xyz, const float3 *min_xyz,
-		      int *ncellx, int *ncelly, int *ncellz,
-		      float *celldx, float *celldy, float *celldz);
-  
+		      int *ncellx, int *ncelly, int *ncellz_max,
+		      float *celldx, float *celldy);
+
+  bool test_z_columns(const int* zonelist,
+		      const int* ncellx, const int* ncelly,
+		      const int ncol_tot,
+		      const float3* min_xyz,
+		      const float* inv_dx, const float* inv_dy,
+		      float4* xyzq, float4* xyzq_sorted,
+		      int* col_pos, int* loc2glo_ind);
+
+  bool test_sort(const int* zonelist,
+		 const int* ncellx, const int* ncelly,
+		 const int ncol_tot, const int ncell_max,
+		 const float3* min_xyz,
+		 const float* inv_dx, const float* inv_dy,
+		 float4* xyzq, float4* xyzq_sorted,
+		 int* col_pos, int* cell_start,
+		 int* loc2glo_ind);
+
 public:
   NeighborList();
   ~NeighborList();
@@ -101,6 +145,11 @@ public:
 			 const int *cell_start,
 			 const float4 *xyzq,
 			 cudaStream_t stream=0);
+
+  void build(const float boxx, const float boxy, const float boxz,
+	     const float roff,
+	     const float4 *xyzq,
+	     cudaStream_t stream=0);
 
   void build_excl(const float boxx, const float boxy, const float boxz,
 		  const float roff,

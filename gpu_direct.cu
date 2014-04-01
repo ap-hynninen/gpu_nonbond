@@ -90,8 +90,8 @@ void test() {
   // Load coordinates
   XYZQ xyzq("test_data/xyzq.txt", 32);
   XYZQ xyzq_unsorted("test_data/xyzq_unsorted.txt", 32);
-  XYZQ xyzq_sorted("test_data/xyzq_sorted.txt", 32);
-  XYZQ xyzq_work(ncoord, 32);
+  XYZQ xyzq_sorted_ref("test_data/xyzq_sorted.txt", 32);
+  XYZQ xyzq_sorted(ncoord, 32);
 
   double max_diff;
   double tol;
@@ -118,11 +118,11 @@ void test() {
   max_xyz[0].z = 31.80300;
 
   NeighborList<32> nlist;
-  nlist.sort(zonelist, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_work.xyzq);
+  nlist.sort(zonelist, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
 
-  tol = 7.71e-4;
-  if (!xyzq_work.compare(xyzq_sorted, tol, max_diff)) {
-  }
+  //tol = 7.71e-4;
+  //if (!xyzq_sorted_ref.compare(xyzq_sorted, tol, max_diff)) {
+  //}
 
   // ------------------- Non-bonded -----------------
 
@@ -136,8 +136,8 @@ void test() {
   if (!force_main.compare(&force, tol, max_diff)) {
     std::cout<<"Non-bonded (main) force comparison FAILED"<<std::endl;
   } else {
-    std::cout<<"Non-bonded (main) force comparison OK (tolerance " << tol << " max difference " 
-	     << max_diff << ")" << std::endl;
+    std::cout<<"Non-bonded (main) force comparison OK"<<std::endl;
+    std::cout<<"(tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
 
   dir.set_vdwparam14("test_data/vdwparam14.txt");
@@ -148,8 +148,8 @@ void test() {
   if (!force_total.compare(&force, tol, max_diff)) {
     std::cout<<"Non-bonded (total) force comparison FAILED"<<std::endl;
   } else {
-    std::cout<<"Non-bonded (total) force comparison OK (tolerance " << tol << " max difference " 
-	     << max_diff << ")" << std::endl;
+    std::cout<<"Non-bonded (total) force comparison OK"<<std::endl;
+    std::cout<<"(tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
 
   delete [] in14list;
