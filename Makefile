@@ -8,8 +8,13 @@ ifeq ($(DEFS),USE_MPI)
 CC = mpiicc
 CL = mpiicc
 else
+ifeq ($(OS),Linux)
 CC = icc
 CL = icc
+else
+CC = gcc
+CL = gcc
+endif
 endif
 
 OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o cuda_utils.o gpu_recip.o mpi_utils.o
@@ -18,17 +23,17 @@ OBJS_DIRECT = XYZQ.o Force.o cuda_utils.o mpi_utils.o DirectForce.o NeighborList
 
 OBJS_BONDED = XYZQ.o Force.o cuda_utils.o VirialPressure.o BondedForce.o gpu_bonded.o
 
-OBJS_CONST = cuda_utils.o gpu_const.o HoloConst.o const_reduce_lists.o
+OBJS_CONST = cuda_utils.o gpu_const.o HoloConst.o #const_reduce_lists.o
 
 CUDAROOT := $(subst /bin/,,$(dir $(shell which nvcc)))
 
 ifeq ($(OS),Linux)
 LFLAGS = -std=c++0x -L $(CUDAROOT)/lib64 -lcudart -lnvToolsExt -lcufft
 else
-LFLAGS = -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcuda -lstdc++.6 -lnvToolsExt
+LFLAGS = -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcufft -lcuda -lstdc++.6 -lnvToolsExt
 endif
 
-all: gpu_direct gpu_bonded gpu_const gpu_recip
+all: gpu_direct gpu_bonded gpu_recip gpu_const
 
 gpu_recip : $(OBJS_RECIP)
 	$(CL) $(LFLAGS) -o gpu_recip $(OBJS_RECIP)
@@ -51,8 +56,8 @@ clean:
 	rm -f gpu_const
 
 %.o : %.cu
-	nvcc -c -O3 -arch=sm_35 -fmad=true -use_fast_math -lineinfo -D$(DEFS) $<
+	nvcc -c -O3 -arch=sm_30 -fmad=true -use_fast_math -lineinfo -D$(DEFS) $<
 
 %.o : %.cpp
-	$(CC) -c -O3 -std=c++0x -D$(DEFS) $<
+	$(CC) -c -O3 -std=c++11 -D$(DEFS) $<
 

@@ -531,7 +531,6 @@ __forceinline__ __device__ void solvent_calc(int imol) {
     d_setup.xyz2[ind.z]         = xcm + trans11 * xc3p + trans12 * yc3p + trans13 * zc3p;
     d_setup.xyz2[ind.z+d_setup.stride]  = ycm + trans21 * xc3p + trans22 * yc3p + trans23 * zc3p;
     d_setup.xyz2[ind.z+d_setup.stride2] = zcm + trans31 * xc3p + trans32 * yc3p + trans33 * zc3p;
-
 }
 
 __global__ void all_kernels() {
@@ -590,7 +589,7 @@ HoloConst::HoloConst() {
   xyz1_texref_pointer = NULL;
   texref_stride = 0;
 
-  if (get_cuda_arch() <= 200) {
+  if (get_cuda_arch() < 350) {
     use_textures = true;
   } else {
     use_textures = false;
