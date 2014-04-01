@@ -1,6 +1,7 @@
 #include <iostream>
 #include <fstream>
-#include <thrust/sort.h>
+#include <thrust/device_ptr.h>
+#include <thrust/scan.h>
 #include "gpu_utils.h"
 #include "cuda_utils.h"
 #include "NeighborList.h"
@@ -42,6 +43,160 @@ __global__ void calc_tilex_ind_kernel(const int istart, const int iend,
 }
 
 //
+// Sort atoms into z-columns
+//
+// col_n[0..ncellx*ncelly-1] = number of atoms in each column
+// col_ind[istart..iend]     = column index for atoms 
+//
+__global__ void calc_z_column_index_kernel(const int istart, const int iend,
+					   const float4* __restrict__ xyzq,
+					   const int ind0,
+					   const int ncellx,
+					   const int ncelly,
+					   const float x0,
+					   const float y0,
+					   const float inv_dx,
+					   const float inv_dy,
+					   int* __restrict__ col_n,
+					   int* __restrict__ col_ind) {
+
+  const int i = threadIdx.x + blockIdx.x*blockDim.x + istart;
+  
+  if (i <= iend) {
+    float4 xyzq_val = xyzq[i];
+    float x = xyzq_val.x;
+    float y = xyzq_val.y;
+    int ix = (int)((x - x0)*inv_dx);
+    int iy = (int)((y - y0)*inv_dy);
+    int ind = ind0 + ix + iy*ncellx;
+    atomicAdd(&col_n[ind], 1);
+    col_ind[i] = ind;
+  }
+  
+}
+
+//
+// Computes z column position using parallel exclusive prefix sum
+// NOTE: Must have nblock = 1, we loop over buckets to avoid multiple kernel calls
+//
+__global__ void calc_z_column_pos_kernel(const int ncol_tot,
+					 int* __restrict__ col_n,
+					 int* __restrict__ col_pos) {
+  // Shared memory
+  // Requires: blockDim.x*sizeof(int)
+  extern __shared__ int shpos[];
+
+  if (threadIdx.x == 0) col_pos[0] = 0;
+
+  int offset = 0;
+  for (int base=0;base < ncol_tot;base += blockDim.x) {
+    int i = base + threadIdx.x;
+    shpos[threadIdx.x] = (i < ncol_tot) ? col_n[i] : 0;
+    if (i < ncol_tot) col_n[i] = 0;
+    __syncthreads();
+
+    for (int d=1;d < blockDim.x; d *= 2) {
+      int tmp = (threadIdx.x >= d) ? shpos[threadIdx.x-d] : 0;
+      __syncthreads();
+      shpos[threadIdx.x] += tmp;
+      __syncthreads();
+    }
+
+    if (i < ncol_tot) col_pos[i+1] = shpos[threadIdx.x] + offset;
+
+    offset += shpos[blockDim.x-1];
+  }
+
+}
+
+struct keyval_t {
+  float key;
+  int val;
+};
+
+//
+// Sorts atoms according to z coordinate
+//
+// Uses bitonic sort, see:
+// http://www.tools-of-computing.com/tc/CS/Sorts/bitonic_sort.htm
+//
+// Each thread block sorts a single z column
+//
+__global__ void sort_z_column_kernel(const int* __restrict__ col_pos,
+				     float4* __restrict__ xyzq) {
+
+  // Shared memory
+  // Requires: blockDim.x*sizeof(keyval_t)
+  extern __shared__ keyval_t sh_keyval[];
+
+  int col_pos0 = col_pos[blockIdx.x];
+  int n = col_pos[blockIdx.x+1] - col_pos0;
+
+  // Read keys and values into shared memory
+  keyval_t keyval;
+  keyval.key = (threadIdx.x < n) ? xyzq[threadIdx.x + col_pos0].z : 1.0e38;
+  keyval.val = (threadIdx.x < n) ? (threadIdx.x + col_pos0) : (n-1);
+  sh_keyval[threadIdx.x] = keyval;
+  __syncthreads();
+
+  for (int k = 2;k <= blockDim.x;k *= 2) {
+    for (int j = k/2; j > 0;j /= 2) {
+      int ixj = threadIdx.x ^ j;
+      if (ixj > threadIdx.x && ixj < n) {
+	// asc = true for ascending order
+	bool asc = ((threadIdx.x & k) == 0);
+	
+	// Read data
+	keyval_t keyval1 = sh_keyval[threadIdx.x];
+	keyval_t keyval2 = sh_keyval[ixj];
+	
+	float lo_key = asc ? keyval1.key : keyval2.key;
+	float hi_key = asc ? keyval2.key : keyval1.key;
+	
+	if (lo_key > hi_key) {
+	  // keys are in wrong order => exchange
+	  sh_keyval[threadIdx.x] = keyval2;
+	  sh_keyval[ixj]         = keyval1;
+	}
+	
+	//if ((i&k)==0 && get(i)>get(ixj)) exchange(i,ixj);
+	//if ((i&k)!=0 && get(i)<get(ixj)) exchange(i,ixj);
+      }
+      __syncthreads();
+    }
+  }
+
+  float4 xyzq_val;
+  if (threadIdx.x < n) xyzq_val = xyzq[sh_keyval[threadIdx.x].val];
+  __syncthreads();
+  if (threadIdx.x < n) xyzq[threadIdx.x + col_pos0] = xyzq_val;
+
+}
+
+
+//
+// Re-order atoms according to pos
+//
+__global__ void reorder_atoms_z_column_kernel(const int ncoord,
+					      const int* col_ind,
+					      int* col_n,
+					      const int* col_pos,
+					      const float4* __restrict__ xyzq_in,
+					      float4* __restrict__ xyzq_out) {
+  const int i = threadIdx.x + blockIdx.x*blockDim.x;
+  
+  if (i < ncoord) {
+    int ind = col_ind[i];
+    int pos = col_pos[ind];
+    int n = atomicAdd(&col_n[ind], 1);
+    // new position = pos + n
+    float4 xyzq_val = xyzq_in[i];
+    xyzq_out[pos+n] = xyzq_val;
+  }
+
+}
+
+//
 // Re-order atoms according to tilex_val
 //
 __global__ void reorder_atoms_kernel(const int ncoord,
@@ -62,20 +217,20 @@ __global__ void reorder_atoms_kernel(const int ncoord,
 //
 //
 template <int tilesize>
-void NeighborList<tilesize>::set_cell_sizes(const int *zonelist_atom,
+void NeighborList<tilesize>::set_cell_sizes(const int *zonelist,
 					    const float3 *max_xyz, const float3 *min_xyz,
-					    int *ncellx, int *ncelly,
-					    float *celldx, float *celldy) {
+					    int *ncellx, int *ncelly, int *ncellz,
+					    float *celldx, float *celldy, float *celldz) {
 
   for (int izone=0;izone < 8;izone++) {
     int nstart;
     if (izone > 0) {
-      nstart = zonelist_atom[izone-1] + 1;
+      nstart = zonelist[izone-1] + 1;
     } else {
       nstart = 1;
     }
     // ncoord_zone = number of atoms in this zone
-    int ncoord_zone = zonelist_atom[izone] - nstart + 1;
+    int ncoord_zone = zonelist[izone] - nstart + 1;
     if (ncoord_zone > 0) {
       // NOTE: we increase the cell sizes here by 0.001 to make sure no atoms drop outside cells
       float xsize = max_xyz[izone].x - min_xyz[izone].x + 0.001f;
@@ -84,14 +239,18 @@ void NeighborList<tilesize>::set_cell_sizes(const int *zonelist_atom,
       float delta = powf(xsize*ysize*zsize*tilesize/(float)ncoord_zone, 1.0f/3.0f);
       ncellx[izone] = max(1, (int)(xsize/delta));
       ncelly[izone] = max(1, (int)(ysize/delta));
+      // Approximation for ncellz = "uniform distribution of atoms"
+      ncellz[izone] = max(1, ncoord_zone/(ncellx[izone]*ncelly[izone]*tilesize));
       celldx[izone] = xsize/(float)(ncellx[izone]);
       celldy[izone] = ysize/(float)(ncelly[izone]);
-      // Increase ncellx and ncelly by one to account for bonded atoms outside the box
+      celldz[izone] = zsize/(float)(ncellz[izone]);
     } else {
       ncellx[izone] = 0;
       ncelly[izone] = 0;
+      ncellz[izone] = 0;
       celldx[izone] = 1.0f;
       celldy[izone] = 1.0f;
+      celldz[izone] = 1.0f;
     }
   }
 
@@ -101,49 +260,122 @@ void NeighborList<tilesize>::set_cell_sizes(const int *zonelist_atom,
 // Sorts atoms into tiles
 //
 template <int tilesize>
-void NeighborList<tilesize>::sort_tilex(const int *zonelist_atom,
-					const int ncoord,
-					const float3 *max_xyz, const float3 *min_xyz,
-					const float4 *xyzq,
-					float4 *xyzq_sorted,
-					cudaStream_t stream) {
+void NeighborList<tilesize>::sort(const int *zonelist,
+				  const float3 *max_xyz, const float3 *min_xyz,
+				  float4 *xyzq,
+				  float4 *xyzq_sorted,
+				  cudaStream_t stream) {
 
   int ncellx[8], ncelly[8], ncellz[8];
   float celldx[8], celldy[8], celldz[8];
   float inv_dx[8], inv_dy[8], inv_dz[8];
 
+  int ncoord = zonelist[7];
+
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
-  set_cell_sizes(zonelist_atom, max_xyz, min_xyz, ncellx, ncelly, celldx, celldy);
+  set_cell_sizes(zonelist, max_xyz, min_xyz, ncellx, ncelly, ncellz, celldx, celldy, celldz);
 
-  for (int i=0;i < 8;i++) {
-    inv_dx[i] = 1.0f/celldx[i];
-    inv_dy[i] = 1.0f/celldy[i];
+  int ncol_tot = 0;
+  for (int i=0;i < 8;i++) ncol_tot += ncellx[i]*ncelly[i];
+
+  reallocate<int>(&col_n, &col_n_len, ncol_tot, 1.2f);
+  reallocate<int>(&col_pos, &col_pos_len, ncol_tot+1, 1.2f);
+  reallocate<int>(&col_ind, &col_ind_len, ncoord, 1.2f);
+
+  clear_gpu_array<int>(col_n, ncol_tot, stream);
+
+  for (int izone=0;izone < 8;izone++) {
+    inv_dx[izone] = 1.0f/celldx[izone];
+    inv_dy[izone] = 1.0f/celldy[izone];
+    inv_dz[izone] = 1.0f/celldz[izone];
   }
 
-  for (int i=0;i < 8;i++) {
+  //
+  // Calculate number of atoms in each z-column
+  //
+  int ind0 = 0;
+  for (int izone=0;izone < 8;izone++) {
     int istart, iend;
-    if (i > 0) {
-      istart = zonelist_atom[i-1];
+    if (izone > 0) {
+      istart = zonelist[izone-1];
     } else {
       istart = 0;
     }
-    iend = zonelist_atom[i] - 1;
-    calc_tilex_ind_kernel<<< nblock, nthread >>>
-      (istart, iend, xyzq, 0, ncellx[i], ncelly[i], ncellz[i],
-       min_xyz[i].x, min_xyz[i].y, min_xyz[i].z,
-       inv_dx[i], inv_dy[i], inv_dz[i], tilex_key, tilex_val);
+    iend = zonelist[izone] - 1;
+    if (iend >= istart) {
 
-    cudaCheck(cudaGetLastError());
+      calc_z_column_index_kernel<<< nblock, nthread, 0, stream >>>
+	(istart, iend, xyzq, ind0, ncellx[izone], ncelly[izone], 
+	 min_xyz[izone].x, min_xyz[izone].y,
+	 inv_dx[izone], inv_dy[izone], col_n, col_ind);
+      cudaCheck(cudaGetLastError());
+
+      ind0 += ncellx[izone]*ncelly[izone];
+    }
   }
 
-  thrust::sort_by_key(tilex_key, tilex_key + ncoord, tilex_val);
+  /*
+  thrust::device_ptr<int> col_n_ptr(col_n);
+  thrust::device_ptr<int> col_pos_ptr(col_pos);
+  thrust::exclusive_scan(col_n_ptr, col_n_ptr + ncol_tot, col_pos_ptr);
+  clear_gpu_array<int>(col_n, ncol_tot, stream);
+  */
 
-  reorder_atoms_kernel<<< nblock, nthread >>>
-    (ncoord, tilex_val, xyzq, xyzq_sorted);
+  /*
+  {
+    int *h_tmp = new int[ncol_tot];
+    copy_DtoH<int>(col_n, h_tmp, ncol_tot);
+    for (int i=0;i < ncol_tot;i++)
+      std::cout << h_tmp[i] << " ";
+    std::cout << std::endl;
+    delete [] h_tmp;
+  }
+  */
 
+  //
+  // Calculate positions
+  //
+  nthread = min(((ncol_tot-1)/32+1)*32, get_max_nthread());
+  //std::cout << "nthread = " << nthread << std::endl;
+  int shmem_size = nthread*sizeof(int);
+  calc_z_column_pos_kernel<<< 1, nthread, shmem_size, stream >>>(ncol_tot, col_n, col_pos);
+
+  /*
+  std::cout << "--------------------------------------------------------" << std::endl;
+  {
+    int *h_tmp = new int[ncol_tot];
+    copy_DtoH<int>(col_pos, h_tmp, ncol_tot);
+    for (int i=0;i < ncol_tot;i++)
+      std::cout << h_tmp[i] << " ";
+    std::cout << std::endl;
+    delete [] h_tmp;
+  }
+  */
+
+  nthread = 512;
+  nblock = (ncoord-1)/nthread+1;
+  reorder_atoms_z_column_kernel<<< nblock, nthread, 0, stream >>>
+    (ncoord, col_ind, col_n, col_pos, xyzq, xyzq_sorted);
   cudaCheck(cudaGetLastError());
+
+  // Now sort according to z coordinate
+  nthread = 11*tilesize;
+  nblock = ncellx[0]*ncelly[0];
+  if (nthread < get_max_nthread()) {
+    shmem_size = nthread*sizeof(keyval_t);
+    sort_z_column_kernel<<< nblock, nthread, shmem_size, stream >>>
+      (col_pos, xyzq_sorted);
+    cudaCheck(cudaGetLastError());
+  } else {
+    std::cerr << "Neighborlist::sort, this version of sort_z_column_kernel not implemented yet"
+	      << std::endl;
+  }
+
+  //  reorder_atoms_kernel<<< nblock, nthread, 0, stream >>>
+  //    (ncoord, tilex_val, xyzq, xyzq_sorted);
+  //cudaCheck(cudaGetLastError());
 
 }
 
@@ -234,6 +466,16 @@ NeighborList<tilesize>::NeighborList() {
 
   tile_indj_sparse_len = NULL;
   tile_indj_sparse = NULL;
+
+  // Neighbor list building
+  col_n_len = 0;
+  col_n = NULL;
+
+  col_pos_len = 0;
+  col_pos = NULL;
+
+  col_ind_len = 0;
+  col_ind = NULL;
 }
 
 //
@@ -248,6 +490,10 @@ NeighborList<tilesize>::~NeighborList() {
   if (pairs != NULL) deallocate< pairs_t<tilesize> > (&pairs);
   if (ientry_sparse != NULL) deallocate<ientry_t>(&ientry_sparse);
   if (tile_indj_sparse != NULL) deallocate<int>(&tile_indj_sparse);
+  // Neighbor list building
+  if (col_n != NULL) deallocate<int>(&col_n);
+  if (col_pos != NULL) deallocate<int>(&col_pos);
+  if (col_ind != NULL) deallocate<int>(&col_ind);
 }
 
 //

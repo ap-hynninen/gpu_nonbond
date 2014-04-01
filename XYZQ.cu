@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <cassert>
 #include "cuda_utils.h"
 #include "XYZQ.h"
 
@@ -88,4 +89,47 @@ void XYZQ::set_ncoord(int ncoord, float fac) {
 //
 void XYZQ::set_xyzq(int ncopy, float4 *h_xyzq, size_t offset, cudaStream_t stream) {
   copy_HtoD<float4>(&h_xyzq[offset], &xyzq[offset], ncopy, stream);
+}
+
+//
+// Compares two XYZQ arrays
+//
+bool XYZQ::compare(XYZQ& xyzq_in, const double tol, double& max_diff) {
+  assert(xyzq_in.ncoord == ncoord);
+
+  float4 *h_xyzq = new float4[ncoord];
+  float4 *h_xyzq_in = new float4[ncoord];
+  copy_DtoH<float4>(xyzq, h_xyzq, ncoord);
+  copy_DtoH<float4>(xyzq_in.xyzq, h_xyzq_in, ncoord);
+
+  bool ok = true;
+
+  max_diff = 0.0;
+  int i;
+  double dx, dy, dz, dq;
+  double diff;
+  try {
+    for (i=0;i < ncoord;i++) {
+      dx = fabs(h_xyzq[i].x - h_xyzq_in[i].x);
+      dy = fabs(h_xyzq[i].y - h_xyzq_in[i].y);
+      dz = fabs(h_xyzq[i].z - h_xyzq_in[i].z);
+      dq = fabs(h_xyzq[i].w - h_xyzq_in[i].w);
+      diff = max(dx, max(dy, dz));
+      max_diff = max(max_diff, diff);
+      if (diff > tol || dq > 0.0) throw 1;
+    }
+  }
+  catch (int a) {
+    std::cout << "i = " << i << std::endl;
+    std::cout << "this: x,y,z,q = " << h_xyzq[i].x << " " << h_xyzq[i].y
+	      << " " << h_xyzq[i].z << " " << h_xyzq[i].w << std::endl;
+    std::cout << "in  : x,y,z,q = " << h_xyzq_in[i].x << " " << h_xyzq_in[i].y
+	      << " " << h_xyzq_in[i].z << " " << h_xyzq_in[i].w << std::endl;
+    ok = false;
+  }
+
+  delete [] h_xyzq;
+  delete [] h_xyzq_in;
+
+  return ok;
 }

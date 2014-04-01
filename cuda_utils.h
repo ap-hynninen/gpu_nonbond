@@ -290,6 +290,7 @@ int get_cuda_arch();
 
 #ifdef __CUDACC__
 int3 get_max_nblock();
+int get_max_nthread();
 int get_major();
 #endif
 

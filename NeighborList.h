@@ -70,32 +70,32 @@ private:
   int *tile_indj_sparse;
 
   // For building neighbor list on GPU
-  int ncellx, ncelly, ncellz;
-  
-  int tilex_key_len;
-  int *tilex_key;
+  int col_n_len;
+  int *col_n;
 
-  int tilex_val_len;
-  int *tilex_val;
+  int col_pos_len;
+  int *col_pos;
+
+  int col_ind_len;
+  int *col_ind;
 
   int bb_len;
   bb_t *bb;
 
-  void set_cell_sizes(const int *zonelist_atom,
+  void set_cell_sizes(const int *zonelist,
 		      const float3 *max_xyz, const float3 *min_xyz,
-		      int *ncellx, int *ncelly,
-		      float *celldx, float *celldy);
-
+		      int *ncellx, int *ncelly, int *ncellz,
+		      float *celldx, float *celldy, float *celldz);
+  
 public:
   NeighborList();
   ~NeighborList();
 
-  void sort_tilex(const int *zonelist_atom,
-		  const int ncoord,
-		  const float3 *max_xyz, const float3 *min_xyz,
-		  const float4 *xyzq,
-		  float4 *xyzq_sorted,
-		  cudaStream_t stream=0);
+  void sort(const int *zonelist_atom,
+	    const float3 *max_xyz, const float3 *min_xyz,
+	    float4 *xyzq,
+	    float4 *xyzq_sorted,
+	    cudaStream_t stream=0);
 
   void calc_bounding_box(const int ncell,
 			 const int *cell_start,

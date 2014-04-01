@@ -379,6 +379,10 @@ int3 get_max_nblock() {
   return max_nblock;
 }
 
+int get_max_nthread() {
+  return gpu_prop.maxThreadsPerBlock;
+}
+
 int get_major() {
   return gpu_prop.major;
 }

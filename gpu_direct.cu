@@ -89,12 +89,40 @@ void test() {
 
   // Load coordinates
   XYZQ xyzq("test_data/xyzq.txt", 32);
+  XYZQ xyzq_unsorted("test_data/xyzq_unsorted.txt", 32);
+  XYZQ xyzq_sorted("test_data/xyzq_sorted.txt", 32);
+  XYZQ xyzq_work(ncoord, 32);
 
-  NeighborList<32> nlist;
-  nlist.load("test_data/nlist.txt");
+  double max_diff;
+  double tol;
+
+  // ------------------- Neighborlist -----------------
+
+  NeighborList<32> nlist_ref;
+  nlist_ref.load("test_data/nlist.txt");
   //nlist.remove_empty_tiles();
   //nlist.split_dense_sparse(512);
-  nlist.analyze();
+  nlist_ref.analyze();
+
+  int *loc2glo_ind = new int[ncoord];
+  load_ind<int>(1, "test_data/loc2glo.txt", ncoord, loc2glo_ind);
+  for (int i=0;i < ncoord;i++) loc2glo_ind[i]--;
+
+  int zonelist[8] = {23558, 23558, 23558, 23558, 23558, 23558, 23558, 23558};
+  float3 min_xyz[8], max_xyz[8];
+  min_xyz[0].x = -31.74800;
+  min_xyz[0].y = -31.77600;
+  min_xyz[0].z = -31.77900;
+  max_xyz[0].x = 31.73900;
+  max_xyz[0].y = 31.80500;
+  max_xyz[0].z = 31.80300;
+
+  NeighborList<32> nlist;
+  nlist.sort(zonelist, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_work.xyzq);
+
+  tol = 7.71e-4;
+  if (!xyzq_work.compare(xyzq_sorted, tol, max_diff)) {
+  }
 
   // ------------------- Non-bonded -----------------
 
@@ -102,10 +130,9 @@ void test() {
   dir.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, VDW_VSH, EWALD, true, true);
   dir.set_vdwparam("test_data/vdwparam.txt");
   dir.set_vdwtype("test_data/vdwtype.txt");
-  dir.calc_force(xyzq.xyzq, &nlist, false, false, force_fp.xyz.stride, force_fp.xyz.data);
+  dir.calc_force(xyzq.xyzq, &nlist_ref, false, false, force_fp.xyz.stride, force_fp.xyz.data);
   force_fp.convert(&force);
-  double max_diff;
-  double tol = 7.71e-4;
+  tol = 7.71e-4;
   if (!force_main.compare(&force, tol, max_diff)) {
     std::cout<<"Non-bonded (main) force comparison FAILED"<<std::endl;
   } else {
@@ -127,6 +154,8 @@ void test() {
 
   delete [] in14list;
   delete [] ex14list;
+
+  delete [] loc2glo_ind;
 
   return;
 
