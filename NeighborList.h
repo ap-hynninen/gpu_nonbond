@@ -30,7 +30,28 @@ struct pairs_t {
 // NOTE: This is used to avoid GPU-CPU-GPU communication
 //
 struct NeighborListParam_t {
+  // Total number of cells
   int ncell;
+
+  // Number of cells for each zone
+  int ncellx[8];
+  int ncelly[8];
+  int ncellz[8];
+
+  // xy cell sizes
+  float celldx[8];
+  float celldy[8];
+
+  // z cell boundaries
+  float* cellbx[8];
+
+  // xy Image list. Maximum value of nimgxy is 9
+  int nimgxy;
+  int imgxy[9];
+
+  // Interaction zones
+  int int_zone[8][8];
+
 };
 
 //
@@ -104,6 +125,12 @@ private:
   int ncell_max;
 
   NeighborListParam_t *h_nlist_param;
+
+  // Cell x, y, z coordinates
+  int cellxyz_len;
+  int *cellx;
+  int *celly;
+  int *cellz;
 
   // Bounding boxes
   int bb_len;

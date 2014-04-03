@@ -3,7 +3,9 @@
 
 #include <cuda.h>
 #include <cufft.h>
+#if CUDA_VERSION >= 6000
 #include <cufftXt.h>
+#endif
 #include "Bspline.h"
 #include "Matrix3d.h"
 
