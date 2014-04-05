@@ -98,7 +98,7 @@ void test() {
 
   // ------------------- Neighborlist -----------------
 
-  NeighborList<32> nlist_ref;
+  NeighborList<32> nlist_ref(1, 1, 1);
   nlist_ref.load("test_data/nlist.txt");
   //nlist.remove_empty_tiles();
   //nlist.split_dense_sparse(512);
@@ -108,7 +108,7 @@ void test() {
   load_ind<int>(1, "test_data/loc2glo.txt", ncoord, loc2glo_ind);
   for (int i=0;i < ncoord;i++) loc2glo_ind[i]--;
 
-  int zonelist[8] = {23558, 23558, 23558, 23558, 23558, 23558, 23558, 23558};
+  int zone_patom[8] = {23558, 23558, 23558, 23558, 23558, 23558, 23558, 23558};
   float3 min_xyz[8], max_xyz[8];
   min_xyz[0].x = -31.74800;
   min_xyz[0].y = -31.77600;
@@ -117,8 +117,9 @@ void test() {
   max_xyz[0].y = 31.80500;
   max_xyz[0].z = 31.80300;
 
-  NeighborList<32> nlist;
-  nlist.sort(zonelist, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
+  NeighborList<32> nlist(1, 1, 1);
+  nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
+  nlist.build(boxx, boxy, boxz, roff, xyzq_sorted.xyzq);
 
   //tol = 7.71e-4;
   //if (!xyzq_sorted_ref.compare(xyzq_sorted, tol, max_diff)) {
