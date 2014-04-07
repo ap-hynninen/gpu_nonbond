@@ -56,7 +56,7 @@ clean:
 	rm -f gpu_const
 
 %.o : %.cu
-	nvcc -c -O3 -arch=sm_30 -fmad=true -use_fast_math -lineinfo -D$(DEFS) $<
+	nvcc -c -O3 -arch=sm_30 -lineinfo -fmad=true -use_fast_math -lineinfo -D$(DEFS) $<
 
 %.o : %.cpp
 	$(CC) -c -O3 -std=c++11 -D$(DEFS) $<

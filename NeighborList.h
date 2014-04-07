@@ -40,7 +40,7 @@ struct NeighborListParam_t {
   int ncell;
 
   // Minimum x and y for each zone
-  float2 minxy[8];
+  float3 minxyz[8];
 
   // Number of cells for each zone (NOTE: ncellz_max[i] is the maximum value for zone i)
   int ncellx[8];
@@ -138,6 +138,10 @@ private:
   int col_xy_zone_len;
   int3 *col_xy_zone;
 
+  // Starting cell index for each column
+  int col_cell_len;
+  int* col_cell;
+
   // Column index of each atom
   int atom_icol_len;
   int *atom_icol;
@@ -153,6 +157,10 @@ private:
   // (icellx, icelly, icellz, izone) for each cell
   int cell_xyz_zone_len;
   int4 *cell_xyz_zone;
+
+  // Cell z-boundaries
+  int cell_bz_len;
+  float *cell_bz;
 
   // Approximate upper bound for number of cells
   int ncell_max;
@@ -189,6 +197,9 @@ private:
 		 float4* xyzq, float4* xyzq_sorted,
 		 int* col_patom, int* cell_patom,
 		 int* loc2glo_ind);
+
+  void set_nlist_param(cudaStream_t stream);
+  void get_nlist_param();
 
 public:
   NeighborList(int nx, int ny, int nz);
