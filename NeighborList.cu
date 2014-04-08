@@ -218,7 +218,7 @@ __global__ void calc_ncellz_max(const int* __restrict__ col_ncellz) {
 }
 
 //
-// Re-order atoms according to pos
+// Re-order atoms according to pos. Non-deterministic version (because of atomicAdd())
 //
 __global__ void reorder_atoms_z_column_kernel(const int ncoord,
 					      const int* atom_icol,
@@ -230,9 +230,9 @@ __global__ void reorder_atoms_z_column_kernel(const int ncoord,
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
   
   if (i < ncoord) {
-    int ind = atom_icol[i];
-    int pos = col_patom[ind];
-    int n = atomicAdd(&col_natom[ind], 1);
+    int icol = atom_icol[i];
+    int pos = col_patom[icol];
+    int n = atomicAdd(&col_natom[icol], 1);
     // new position = pos + n
     int newpos = pos + n;
     loc2glo_ind[newpos] = i;
@@ -240,18 +240,43 @@ __global__ void reorder_atoms_z_column_kernel(const int ncoord,
     xyzq_out[newpos] = xyzq_val;
   }
 
-  /*
-  // Setup startcell_zone[izone]
-  if (i == 0) {
-    int p = 0;
-    for (int izone=0;izone <= 8;izone++) {
-      d_nlist_param.startcell_zone[izone] = p;
-      p += d_nlist_param.ncellx[izone]*d_nlist_param.ncelly[izone]*d_nlist_param.ncellz_max[izone];
+}
+
+/*
+//
+// Re-order atoms according to pos. Deterministic version. Single thread block only.
+//
+__global__ void reorder_atoms_z_column2_kernel(const int ncoord,
+					       const int* atom_icol,
+					       int* col_natom,
+					       const int* col_patom,
+					       const float4* __restrict__ xyzq_in,
+					       float4* __restrict__ xyzq_out,
+					       int* __restrict__ loc2glo_ind) {
+  // Shared memory
+  // Requires: blockDim.x*sizeof(int)
+  extern __shared__ int sh_n[];
+  
+  for (int ibase=0;ibase < ncoord;ibase+=blockDim.x) {
+    int i = ibase + threadIdx.x;
+    if (i < ncoord) {
+      int icol = atom_icol[i];
+      int pos = col_patom[icol];
     }
+
+    sh_
+
+    int n = atomicAdd(&col_natom[icol], 1);
+
+    // new position = pos + n
+    int newpos = pos + n;
+    loc2glo_ind[newpos] = i;
+    float4 xyzq_val = xyzq_in[i];
+    xyzq_out[newpos] = xyzq_val;
   }
-  */
 
 }
+*/
 
 //
 // Sorts atoms according to z coordinate
@@ -337,7 +362,8 @@ __global__ void sort_z_column_kernel(const int* __restrict__ col_patom,
 // zone ordering is: I,FZ,FY,EX,FX,EZ,EY,C = 0,...7
 //
 template <int tilesize>
-void NeighborList<tilesize>::set_int_zone(const int *zone_patom, int *n_int_zone, int int_zone[][8]) {
+void NeighborList<tilesize>::set_int_zone(const int *zone_natom, int *n_int_zone,
+					  int int_zone[][8]) {
   const int I=0,FZ=1,FY=2,EX=3/*,FX=4,EZ=5,EY=6,C=7*/;
   // Setup interaction order that maximizes communication-computation overlap
   const int zones[8][5] = { {I, -1, -1, -1, -1},  // I-I
@@ -348,29 +374,19 @@ void NeighborList<tilesize>::set_int_zone(const int *zone_patom, int *n_int_zone
 			    {I, FZ, -1, -1, -1},  // I-EZ, FZ-EZ
 			    {I, FY, -1, -1, -1},  // I-EY, FY-EY
 			    {I, -1, -1, -1, -1}}; // I-C
-  int ncoord_zone[8];
-
-  // ncoord_zone[izone] = number of atoms in zone "izone"
-  for (int izone=0;izone < 8;izone++) {
-    int nstart;
-    if (izone > 0) {
-      nstart = zone_patom[izone-1];
-    } else {
-      nstart = 0;
-    }
-    ncoord_zone[izone] = zone_patom[izone] - nstart;
-  }
 
   n_int_zone_max = 0;
   for (int izone=0;izone < 8;izone++) {
     n_int_zone[izone] = 0;
-    int j = 0;
-    while (zones[izone][j] > -1) {
-      if (ncoord_zone[zones[izone][j]] > 0) {
-	int_zone[izone][n_int_zone[izone]] = zones[izone][j];
-	n_int_zone[izone]++;
+    if (zone_natom[izone] > 0) {
+      int j = 0;
+      while (zones[izone][j] > -1) {
+	if (zone_natom[zones[izone][j]] > 0) {
+	  int_zone[izone][n_int_zone[izone]] = zones[izone][j];
+	  n_int_zone[izone]++;
+	}
+	j++;
       }
-      j++;
     }
     n_int_zone_max = max(n_int_zone_max, n_int_zone[izone]);
   }
@@ -381,37 +397,31 @@ void NeighborList<tilesize>::set_int_zone(const int *zone_patom, int *n_int_zone
 // Setup xy-cell sizes
 //
 template <int tilesize>
-void NeighborList<tilesize>::set_cell_sizes(const int *zone_patom,
+void NeighborList<tilesize>::set_cell_sizes(const int *zone_natom,
 					    const float3 *max_xyz, const float3 *min_xyz,
 					    int *ncellx, int *ncelly, int *ncellz_max,
-					    float *celldx, float *celldy) {
+					    float *celldx, float *celldy, float *celldz_min) {
 
   for (int izone=0;izone < 8;izone++) {
-    int nstart;
-    if (izone > 0) {
-      nstart = zone_patom[izone-1];
-    } else {
-      nstart = 0;
-    }
-    // ncoord_zone = number of atoms in this zone
-    int ncoord_zone = zone_patom[izone] - nstart;
-    if (ncoord_zone > 0) {
+    if (zone_natom[izone] > 0) {
       // NOTE: we increase the cell sizes here by 0.001 to make sure no atoms drop outside cells
       float xsize = max_xyz[izone].x - min_xyz[izone].x + 0.001f;
       float ysize = max_xyz[izone].y - min_xyz[izone].y + 0.001f;
       float zsize = max_xyz[izone].z - min_xyz[izone].z + 0.001f;
-      float delta = powf(xsize*ysize*zsize*tilesize/(float)ncoord_zone, 1.0f/3.0f);
+      float delta = powf(xsize*ysize*zsize*tilesize/(float)zone_natom[izone], 1.0f/3.0f);
       ncellx[izone] = max(1, (int)(xsize/delta));
       ncelly[izone] = max(1, (int)(ysize/delta));
       // Approximation for ncellz = 2 x "uniform distribution of atoms"
-      ncellz_max[izone] = max(1, 2*ncoord_zone/(ncellx[izone]*ncelly[izone]*tilesize));
+      ncellz_max[izone] = max(1, 2*zone_natom[izone]/(ncellx[izone]*ncelly[izone]*tilesize));
       celldx[izone] = xsize/(float)(ncellx[izone]);
       celldy[izone] = ysize/(float)(ncelly[izone]);
+      celldz_min[izone] = ysize/(float)(ncellz_max[izone]);
     } else {
       ncellx[izone] = 0;
       ncelly[izone] = 0;
       celldx[izone] = 1.0f;
       celldy[izone] = 1.0f;
+      celldz_min[izone] = 1.0f;
     }
   }
 
@@ -645,6 +655,34 @@ void NeighborList<tilesize>::get_nlist_param() {
 				 0, cudaMemcpyDeviceToHost));
 }
 
+//
+// Returns an estimate for the number of tiles
+//
+template <int tilesize>
+void NeighborList<tilesize>::get_tile_ientry_est(int *n_int_zone, int int_zone[][8],
+						 int *ncellx, int *ncelly, int *ncellz_max,
+						 float *celldx, float *celldy, float *celldz_min,
+						 float rcut, int &n_tile_est, int &n_ientry_est) {
+  n_tile_est = 0;
+  // Loop over all zone-zone interactions
+  for (int izone=0;izone < 8;izone++) {
+    for (int j=0;j < n_int_zone[izone];j++) {
+      int jzone = int_zone[izone][j];
+      int ncell_i = ncellx[izone]*ncelly[izone]*ncellz_max[izone];
+      int ncell_j = ncellx[jzone]*ncelly[jzone]*ncellz_max[jzone];
+      // Estimate the number of neighbors in each direction for the positive direction and multiply
+      // by the number of cells
+      int n_neigh_ij = ((int)ceilf(rcut/celldx[izone])+1)*((int)ceilf(rcut/celldy[izone])+1)
+	*((int)ceilf(rcut/celldz_min[izone])+1)*ncell_j;
+      int n_neigh_ji = ((int)ceilf(rcut/celldx[jzone])+1)*((int)ceilf(rcut/celldy[jzone])+1)
+	*((int)ceilf(rcut/celldz_min[jzone])+1)*ncell_i;
+      n_tile_est += max(n_neigh_ij, n_neigh_ji);
+    }
+  }
+
+  // Assume every i-j tile is in a separate ientry (worst case)
+  n_ientry_est = n_tile_est;
+}
 
 //
 // Sorts atoms into tiles
@@ -656,14 +694,25 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
 				  float4 *xyzq_sorted,
 				  cudaStream_t stream) {
 
-  int n_int_zone[8], int_zone[8][8];
-  int ncellx[8], ncelly[8], ncellz_max[8];
-  float celldx[8], celldy[8];
-
   int ncoord = zone_patom[7];
 
-  set_int_zone(zone_patom, n_int_zone, int_zone);
-  set_cell_sizes(zone_patom, max_xyz, min_xyz, ncellx, ncelly, ncellz_max, celldx, celldy);
+  //
+  // Calculate zone_natom
+  //
+  // zone_natom[izone] = number of atoms in zone "izone"
+  for (int izone=0;izone < 8;izone++) {
+    int nstart;
+    if (izone > 0) {
+      nstart = zone_patom[izone-1];
+    } else {
+      nstart = 0;
+    }
+    zone_natom[izone] = zone_patom[izone] - nstart;
+  }
+
+  set_int_zone(zone_natom, n_int_zone, int_zone);
+  set_cell_sizes(zone_natom, max_xyz, min_xyz, ncellx, ncelly, ncellz_max,
+		 celldx, celldy, celldz_min);
 
   // Setup nlist_param and copy it to GPU
   int ncol = 0;
@@ -716,7 +765,8 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
   int nthread, nblock;
 
   //
-  // Calculate number of atoms in each z-column (col_natom) and the column index for each atom (atom_icol)
+  // Calculate number of atoms in each z-column (col_natom)
+  // and the column index for each atom (atom_icol)
   //
   nthread = 512;
   nblock = (ncoord-1)/nthread+1;
@@ -869,6 +919,12 @@ __global__ void calc_bounding_box_kernel(const int* __restrict__ cell_patom,
     bb_val.wz = 0.5f*(maxz - minz);
     bb[icell] = bb_val;
   }
+  
+  // Zero n_ientry and n_tile -counters in preparation for neighbor list build
+  if (icell == 0) {
+    d_nlist_param.n_ientry = 0;
+    d_nlist_param.n_tile = 0;
+  }
 
 }
 
@@ -879,8 +935,8 @@ __global__ void calc_bounding_box_kernel(const int* __restrict__ cell_patom,
 //
 template <int tilesize>
 NeighborList<tilesize>::NeighborList(int nx, int ny, int nz) {
-  ni = 0;
-  ntot = 0;
+  n_ientry = 0;
+  n_tile = 0;
 
   tile_excl = NULL;
   tile_excl_len = 0;
@@ -892,8 +948,8 @@ NeighborList<tilesize>::NeighborList(int nx, int ny, int nz) {
   tile_indj_len = 0;
 
   // Sparse
-  ni_sparse = 0;
-  ntot_sparse = 0;
+  n_ientry_sparse = 0;
+  n_tile_sparse = 0;
 
   pairs_len = 0;
   pairs = NULL;
@@ -992,15 +1048,15 @@ NeighborList<tilesize>::~NeighborList() {
 // Sets ientry from host memory array
 //
 template <int tilesize>
-void NeighborList<tilesize>::set_ientry(int ni, ientry_t *h_ientry, cudaStream_t stream) {
+void NeighborList<tilesize>::set_ientry(int n_ientry, ientry_t *h_ientry, cudaStream_t stream) {
 
-  this->ni = ni;
+  this->n_ientry = n_ientry;
 
   // Allocate & reallocate d_ientry
-  reallocate<ientry_t>(&ientry, &ientry_len, ni, 1.4f);
+  reallocate<ientry_t>(&ientry, &ientry_len, n_ientry, 1.4f);
 
   // Copy to device
-  copy_HtoD<ientry_t>(h_ientry, ientry, ni, stream);
+  copy_HtoD<ientry_t>(h_ientry, ientry, n_ientry, stream);
 }
 
 //----------------------------------------------------------------------------------------
@@ -1017,7 +1073,7 @@ template <bool IvsI>
 __device__
 void get_cell_bounds_z(const int izone, const int jzone, const int icell, const int ncell,
 		       const float x0, const float x1, const float* __restrict__ bx,
-		       const float roff, int& jcell0, int& jcell1) {
+		       const float rcut, int& jcell0, int& jcell1) {
 
   int jcell_start_left, jcell_start_right;
 
@@ -1084,7 +1140,7 @@ void get_cell_bounds_z(const int izone, const int jzone, const int icell, const 
   //
   for (int j=jcell_start_left;j >= 0;j--) {
     float d = x0 - bx[j];
-    if (d > roff) break;
+    if (d > rcut) break;
     //dist[j] = max(0.0f, d);
     jcell0 = j;
   }
@@ -1098,7 +1154,7 @@ void get_cell_bounds_z(const int izone, const int jzone, const int icell, const 
   for (int j=jcell_start_right;j < ncell;j++) {
     float bx_j = (j > 0) ? bx[j-1] : d_nlist_param.minxyz[jzone].z;
     float d = bx_j - x1;
-    if (d > roff) break;
+    if (d > rcut) break;
     //dist[j] = max(0.0f, d);
     jcell1 = j;
   }
@@ -1116,7 +1172,7 @@ __device__
 void get_cell_bounds_xy(const int izone, const int jzone, const int icell,
 			const int ncell,
 			const float x0, const float x1,
-			const float dx, const float roff,
+			const float dx, const float rcut,
 			int& jcell0, int& jcell1) {
 
   if (IvsI) {
@@ -1128,10 +1184,10 @@ void get_cell_bounds_xy(const int izone, const int jzone, const int icell,
     //
     // Cell right boundary is at bx
     // portion inside i-cell is (x0-bx)
-    // => what is left of roff on the left of i-cell is roff-(x0-bx)
+    // => what is left of rcut on the left of i-cell is rcut-(x0-bx)
     //
     float bx = d_nlist_param.minxyz[0].x + icell*dx;
-    jcell0 = max(0, icell - (int)ceilf((roff - (x0 - bx))/dx));
+    jcell0 = max(0, icell - (int)ceilf((rcut - (x0 - bx))/dx));
 
     //
     // Check cells at right, stop once the distance to the cell left boundary
@@ -1139,10 +1195,10 @@ void get_cell_bounds_xy(const int izone, const int jzone, const int icell,
     //
     // Cell left boundary is at bx
     // portion inside i-cell is (bx-x1)
-    // => what is left of roff on the right of i-cell is roff-(bx-x1)
+    // => what is left of rcut on the right of i-cell is rcut-(bx-x1)
     //
     bx = d_nlist_param.minxyz[0].x + (icell+1)*dx;
-    jcell1 = min(ncell-1, icell + (int)ceilf((roff - (bx - x1))/dx));
+    jcell1 = min(ncell-1, icell + (int)ceilf((rcut - (bx - x1))/dx));
 
     //
     // Take care of the boundaries:
@@ -1223,6 +1279,17 @@ __forceinline__ __device__ void minmax_shfl(int z0, int z1, int &z0_min, int &z1
 }
 
 //
+// Broadcasts value from lane 0 to all lanes
+//
+__forceinline__ __device__ int bcast_shfl(int val) {
+#if __CUDA_ARCH__ >= 300
+  return __shfl(val, 0);
+#else
+  return 0;
+#endif
+}
+
+//
 // Calculates exclusive plus-scan across warp for binary (0 or 1) values
 //
 // wid = warp ID = threadIdx.x % warpsize
@@ -1248,20 +1315,15 @@ __forceinline__ __device__ int binary_reduce(int val) {
 // wid = warp thread index (0...warpSize-1)
 //
 template <int tilesize>
-__device__ int get_dist_excl_mask(const int wid, const int icell, const int jcell,
+__device__ int get_dist_excl_mask(const int wid,
+				  const int istart, const int iend,
+				  const int jstart, const int jend,
 				  const int ish,
 				  const float boxx, const float boxy, const float boxz,
-				  const float roff2,
+				  const float rcut2,
 				  const float4* __restrict__ xyzq,
-				  const int* __restrict__ cell_patom,
 				  volatile float3* __restrict__ sh_xyzi
 				  ) {
-
-  int istart = cell_patom[icell] - 1;
-  int iend   = cell_patom[icell+1] - 2;
-
-  int jstart = cell_patom[jcell] - 1;
-  int jend   = cell_patom[jcell+1] - 2;
 
   // Load atom i coordinates to shared memory
   // NOTE: volatile -keyword 
@@ -1297,6 +1359,8 @@ __device__ int get_dist_excl_mask(const int wid, const int icell, const int jcel
     zj = 100000000.0f;
   }
 
+  int q_samecell = (istart == jstart);
+
   // Calculate shift
   int ish_t = ish;
   float zsh = (ish_t/9 - 1)*boxz;
@@ -1309,8 +1373,6 @@ __device__ int get_dist_excl_mask(const int wid, const int icell, const int jcel
   yj -= ysh;
   zj -= zsh;
   
-  int q_samecell = (icell == jcell);
-
   unsigned int excl = 0;
   int t;
   if (tilesize == 32) {
@@ -1321,7 +1383,7 @@ __device__ int get_dist_excl_mask(const int wid, const int icell, const int jcel
       float dy = sh_xyzi[i].y - yj;
       float dz = sh_xyzi[i].z - zj;
       float r2 = dx*dx + dy*dy + dz*dz;
-      excl |= ((r2 >= roff2) | (q_samecell && (wid <= i)) ) << t;
+      excl |= ((r2 >= rcut2) | (q_samecell && (wid <= i)) ) << t;
     }
 
   } else {
@@ -1334,7 +1396,7 @@ __device__ int get_dist_excl_mask(const int wid, const int icell, const int jcel
       float dy = sh_xyzi[ii].y - yj;
       float dz = sh_xyzi[ii].z - zj;
       float r2 = dx*dx + dy*dy + dz*dz;
-      excl |= ((r2 >= roff2) | (q_samecell && (load_ij <= load_i)) ) << t;
+      excl |= ((r2 >= rcut2) | (q_samecell && (load_ij <= load_i)) ) << t;
     }
     // excl is a 8 bit exclusion mask.
     // The full 32 bit exclusion mask is contained in 4 threads:
@@ -1369,15 +1431,16 @@ __device__ int get_dist_excl_mask(const int wid, const int icell, const int jcel
   return excl;
 }
 
+/*
 //
 // Builds top_excl_pos[] and top_excl[] for local coordinate indexing
 //
-__global__ void build_local_top_excl(const int ncoord,
-				     const int* __restrict__ loc2glo_ind,
-				     const int* __restrict__ glo_top_excl_pos,
-				     const int* __restrict__ glo_top_excl,
-				     int* __restrict__ top_excl_pos,
-				     int* __restrict__ top_excl) {
+__global__ void build_local_top_excl_kernel(const int ncoord,
+					    const int* __restrict__ loc2glo_ind,
+					    const int* __restrict__ glo_top_excl_pos,
+					    const int* __restrict__ glo_top_excl,
+					    int* __restrict__ top_excl_pos,
+					    int* __restrict__ top_excl) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
   
   if (i < ncoord) {
@@ -1386,11 +1449,30 @@ __global__ void build_local_top_excl(const int ncoord,
     int jend   = glo_top_excl_pos[j+1] - 1;
     for (int j=jstart;j <= jend;j++) {
       int k = glo_top_excl[j];
-      
     }
   }
 }
 
+//
+// Apply topological exclusions to the neighborlist
+//
+__global__ void apply_top_excl_kernel(const int n_top_excl_pair,
+				      const int2* __restrict__ top_excl_pair,
+				      const int* __restrict__ atom_cell) {
+  const int itop = threadIdx.x + blockIdx.x*blockDim.x;
+  
+  if (itop < n_top_excl_pair) {
+    int2 val = top_excl_pair[itop];
+    int i = val.x;
+    int j = val.y;
+    int icell = atom_cell[i];
+    int jcell = atom_cell[j];
+    //atomicOr(&excl[iexcl], top_mask);
+  }
+}
+*/
+
+/*
 //
 // Returns topological exclusion mask
 //
@@ -1418,12 +1500,80 @@ __device__ int get_top_excl_mask(const int wid, const int icell, const int jcell
 
   return excl;
 }
+*/
+
+//
+// Flush jlist into global memory
+//
+template <int tilesize>
+__device__ void flush_jlist(const int wid, const int icell, const int n_jlist,
+			    volatile int* __restrict__ sh_jlist, const int ish,
+			    const float boxx, const float boxy, const float boxz,
+			    const float rcut2, const float4* __restrict__ xyzq,
+			    const int* __restrict__ cell_patom,
+			    volatile float3* __restrict__ sh_xyzi,
+			    int* __restrict__ tile_indj,
+			    tile_excl_t<tilesize>* __restrict__ tile_excl,
+			    ientry_t* __restrict__ ientry) {
+
+  // Allocate space on the global tile_excl and tile_indj -lists
+  // NOTE: we are allocating space for n_jlist entries. However, not all of these are used
+  //       because some of the i-j tiles will be empty. If we don't want to keep these
+  //       "ghost" tiles in the list, we need to setup another shared memory buffer for
+  //       exclusion masks and then only add the tiles that are non-empty.
+  int jtile_start;
+  if (wid == 0) {
+    jtile_start = atomicAdd(&d_nlist_param.n_tile, n_jlist);
+  }
+#if __CUDA_ARCH__ < 300
+  printf("flush_jlist, bcast_shfl not implemented for __CUDA_ARCH__ < 300\n");
+#else
+  jtile_start = bcast_shfl(jtile_start);
+#endif
+
+  // Calculate exclusion mask (=check for distance exclusions)
+  int n_jlist_new = 0;
+  int istart = cell_patom[icell] - 1;
+  int iend   = cell_patom[icell+1] - 2;
+  for (int i=0;i < n_jlist;i++) {
+    int jcell = sh_jlist[i];
+    int jstart = cell_patom[jcell] - 1;
+    int jend   = cell_patom[jcell+1] - 2;
+    int excl = get_dist_excl_mask<tilesize>(wid, istart, iend, jstart, jend, ish, 
+					    boxx, boxy, boxz, rcut2, xyzq, sh_xyzi);
+    // We keep this j-cell in the list if any of the exclusion masks are
+    // not all-exclusive
+    // NOTE: writing out exclusion mask here voids the need for storing these in
+    //       shared memory
+    if (__any(excl != -1)) {
+      // Keep in list
+      int jtile = jtile_start + n_jlist_new;
+      tile_excl[jtile].excl[wid] = excl;
+      if (wid == 0) tile_indj[jtile] = jstart;
+      n_jlist_new++;
+    }
+  }
+  
+  // Add to ientry list
+  if (wid == 0) {
+    int ientry_ind = atomicAdd(&d_nlist_param.n_ientry, 1);
+    int jtile_end = jtile_start + n_jlist_new - 1;
+    ientry_t ientry_val;
+    ientry_val.indi    = istart;
+    ientry_val.ish     = ish;
+    ientry_val.startj  = jtile_start;
+    ientry_val.endj    = jtile_end;
+    ientry[ientry_ind] = ientry_val;
+  }
+
+}
 
 const int n_jlist_max = 100;
 
 //
 // Build neighborlist for one zone at the time
-// One warp takes care of one cell
+//
+// NOTE: One warp takes care of one cell
 //
 template < int tilesize, bool IvsI >
 __global__
@@ -1434,8 +1584,11 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
 		  const int* __restrict__ cell_patom,
 		  const float4* __restrict__ xyzq,
 		  const float boxx, const float boxy, const float boxz,
-		  const float roff, const float roff2,
-		  const bb_t* __restrict__ bb) {
+		  const float rcut, const float rcut2,
+		  const bb_t* __restrict__ bb,
+		  int* __restrict__ tile_indj,
+		  tile_excl_t<tilesize>* __restrict__ tile_excl,
+		  ientry_t* __restrict__ ientry) {
 
   // Shared memory
   extern __shared__ char shbuf[];
@@ -1498,7 +1651,7 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
     if (IvsI) {
       get_cell_bounds_xy<IvsI>(0, 0, icellx + imx*d_nlist_param.ncellx[0],
 			       d_nlist_param.ncellx[0], imbbx0-ibb.wx, imbbx0+ibb.wx,
-			       d_nlist_param.celldx[0], roff, jcellx_min, jcellx_max);
+			       d_nlist_param.celldx[0], rcut, jcellx_min, jcellx_max);
       n_jcellx = max(0, jcellx_max - jcellx_min + 1);
       if (n_jcellx == 0) continue;
     } else {
@@ -1507,7 +1660,7 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
 	int jcellx0_t, jcellx1_t;
 	get_cell_bounds_xy<IvsI>(izone, jzone, icellx + imx*d_nlist_param.ncellx[izone],
 				 d_nlist_param.ncellx[jzone], imbbx0-ibb.wx, imbbx0+ibb.wx,
-				 d_nlist_param.celldx[jzone], roff, jcellx0_t, jcellx1_t);
+				 d_nlist_param.celldx[jzone], rcut, jcellx0_t, jcellx1_t);
 	n_jcellx = max(0, jcellx1_t-jcellx0_t+1);
 	sh_jcellxy[wid].x = jcellx0_t;
 	sh_jcellxy[wid].y = jcellx1_t;
@@ -1522,7 +1675,7 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
       if (IvsI) {
 	get_cell_bounds_xy<IvsI>(0, 0, icelly + imy*d_nlist_param.ncelly[0],
 				 d_nlist_param.ncelly[0], imbby0-ibb.wy, imbby0+ibb.wy,
-				 d_nlist_param.celldy[0], roff, jcelly_min, jcelly_max);
+				 d_nlist_param.celldy[0], rcut, jcelly_min, jcelly_max);
 	n_jcelly = max(0, jcelly_max - jcelly_min + 1);
 	if (n_jcelly == 0) continue;
       } else {
@@ -1531,7 +1684,7 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
 	  int jcelly0_t, jcelly1_t;
 	  get_cell_bounds_xy<IvsI>(izone, jzone, icelly + imy*d_nlist_param.ncelly[izone],
 				   d_nlist_param.ncelly[jzone], imbby0-ibb.wy, imbby0+ibb.wy,
-				   d_nlist_param.celldy[jzone], roff, jcelly0_t, jcelly1_t);
+				   d_nlist_param.celldy[jzone], rcut, jcelly0_t, jcelly1_t);
 	  n_jcelly = max(0, jcelly1_t-jcelly0_t+1);
 	  sh_jcellxy[wid].z = jcelly0_t;
 	  sh_jcellxy[wid].w = jcelly1_t;
@@ -1547,9 +1700,11 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
 
 	if (IvsI) {
 	  int total_xy = n_jcellx*n_jcelly;
+	  /*
 	  if (threadIdx.x == 0 && icell == 0 && imz == 0) {
 	    printf("%d %d %d icell = %d total_xy = %d\n",imx,imy,imz,icell,total_xy);
 	  }
+	  */
 	  int jcellz_min=1000000, jcellz_max=0;
 	  for (int ibase=0;ibase < total_xy;ibase+=warpsize) {
 	    int i = ibase + wid;
@@ -1563,13 +1718,15 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
 	      int cell0 = col_cell[jcol];
 	      get_cell_bounds_z<IvsI>(0, 0, icellz + imz*col_ncellz[jcol],
 				      col_ncellz[jcol], imbbz0-ibb.wz, imbbz0+ibb.wz,
-				      &cell_bz[cell0], roff, jcellz0_t, jcellz1_t);
+				      &cell_bz[cell0], rcut, jcellz0_t, jcellz1_t);
+	      /*
 	      if (icell == 0 && imx == 0 && imy == 0 && imz == 0) {
 		printf("jcell %d %d %d %d, %f %f cell_bz = %f %f %f\n",
 		       jcellx,jcelly,jcellz0_t,jcellz1_t,imbbz0-ibb.wz, imbbz0+ibb.wz,
 		       d_nlist_param.minxyz[0].z,
 		       cell_bz[cell0],cell_bz[cell0+1]);
 	      }
+	      */
 	    }
 #if __CUDA_ARCH__ < 300
 	    printf("build_kernel: minmax_shfl not implemented for __CUDA_ARCH__ < 300\n");
@@ -1580,10 +1737,12 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
 
 	  int n_jcellz = jcellz_max - jcellz_min + 1;
 	  int total_xyz = n_jcellx*n_jcelly*n_jcellz;
+	  /*
 	  if (threadIdx.x == 0 && icell == 0 && imz == 0) {
 	    printf("%d %d %d icell = %d total_xyz = %d jcellz = %d %d\n",imx,imy,imz,icell,
 		   total_xyz,jcellz_min,jcellz_max);
 	  }
+	  */
 	  //
 	  // Final loop that goes through the cells
 	  //
@@ -1614,11 +1773,13 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
 		float dy = max(0.0f, fabsf(imbby0 - jbb.y) - ibb.wy - jbb.wy);
 		float dz = max(0.0f, fabsf(imbbz0 - jbb.z) - ibb.wz - jbb.wz);
 		float r2 = dx*dx + dy*dy + dz*dz;
-		if (r2 < roff2) {
+		if (r2 < rcut2) {
+		  /*
 		  if (icell == 0 && imx == 0 && imy == 0 && imz == 0) {
 		    printf("jcell = %d, jcellxyz = %d %d %d r2 = %f %f %f %f\n",
 			   jcell,jcellx,jcelly,jcellz,r2,dx,dy,dz);
 		  }
+		  */
 		  ok = 1;
 		}
 	      }
@@ -1628,26 +1789,54 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
 	    //
 	    // First reduce to calculate position for each thread in warp
 	    int pos = binary_scan(ok, wid);
-	    if (ok) sh_jlist[n_jlist + pos] = jcell;
-	    n_jlist += binary_reduce(ok);
-	  }
+	    int n_jlist_add = binary_reduce(ok);
 
-	  // Calculate exclusion mask (=check for distance and topological exclusions)
-	  for (int i=0;i < n_jlist;i++) {
-	    int jcell = sh_jlist[i];
-	    int excl = get_dist_excl_mask<tilesize>(wid, icell, jcell, ish, 
-						    boxx, boxy, boxz, roff2, xyzq,
-						    cell_patom, sh_xyzi);
+	    /*
+	    //
+	    // Compute flags:
+	    // buffer_full    = buffer will overflow after adding current j-cells
+	    // last_iteration = we are on the last iteration of the loop
+	    //
+	    // NOTE: This rather complicated programming structure allows us to have only
+	    //       one call to flush_jlist
+	    bool buffer_full = ((n_jlist + n_jlist_add) > n_jlist_max);
+	    bool last_iteration = (ibase + warpsize >= total_xyz);
 
-	    if (icell == 0 && imx == 0 && imy == 0 && imz == 0) {
-	      if (__all(excl == -1)) {
-		if (wid == 0) printf("jcell = %d excl = %x\n",jcell,excl);
-	      }
+	    //
+	    // There are two possibilities why we have to flush:
+	    // 1) we are on the last iteration
+	    // 2) buffer is full
+	    //
+	    if (last_iteration || buffer_full) {
+	      // Buffer is not full => add items to it
+	      if (!buffer_full && ok) sh_jlist[n_jlist + pos] = jcell;
+	      if (!buffer_full) n_jlist += n_jlist_add;
+	      // Flush jlist
+	      flush_jlist();
+	      // Restart jlist
+	      n_jlist = 0;
+	      // If buffer was full, we need to add the items to it now
+	      if (buffer_full && ok) sh_jlist[pos] = jcell;
+	      if (buffer_full) n_jlist = n_jlist_add;
 	    }
+	    */
 
-	    int top_excl = get_top_excl_mask<tilesize>();
+	    // Flush if the buffer is full
+	    if ((n_jlist + n_jlist_add) > n_jlist_max) {
+	      flush_jlist<tilesize>(wid, icell, n_jlist, sh_jlist, ish,
+				    boxx, boxy, boxz, rcut2, xyzq, cell_patom,
+				    sh_xyzi, tile_indj, tile_excl, ientry);
+	      n_jlist = 0;
+	    }
+	    n_jlist += n_jlist_add;
 
 	  }
+
+	  if (n_jlist > 0) flush_jlist<tilesize>(wid, icell, n_jlist, sh_jlist, ish,
+						 boxx, boxy, boxz, rcut2, xyzq, cell_patom,
+						 sh_xyzi, tile_indj, tile_excl, ientry);
+
+
 
 	} else {
 	  int n_jcellx_tot = n_jcellx;
@@ -1664,195 +1853,10 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
 	  int total = n_jcellx_tot*n_jcelly_tot*n_jzone;
 	}
 
-	// Flush j-cells into global memory
-	// j-cell list is in sh_jlist[0...n_jlist-1].
-	
-
-	//        for (int i = wid;i < total;i += warpsize) {
-	//	}
 
       } // for (int imz=imz_lo;imz <= imz_hi;imz++)
     } // for (int imy=imy_lo;imy <= imy_hi;imy++)
   } // for (int imx=imx_lo;imx <= imx_hi;imx++)
-
-  /*
-  // Go through xy-images
-  // NOTE: maximum nimgxy = 9
-  int img = wid % d_nlist_param.nimgxy; // img = 0 ... d_nlist_param.nimgxy-1
-
-  // Per thread shared memory array
-  int4 *jcellxy_t = (int4 *)&shbuf[((threadIdx.x/warpsize)*d_nlist_param.nimgxy + img)
-				   *n_jzone*sizeof(int4)];
-
-  int *n_jcellxy_t = (int *)&shbuf[blockDim.x*d_nlist_param.nimgxy*n_jzone*sizeof(int4) +
-				   ((threadIdx.x/warpsize)*d_nlist_param.nimgxy + img)
-				   *n_jzone*sizeof(int)];
-
-  int2 im = d_nlist_param.imgxy[img];
-  float imbbx0 = ibb.x + im.x*boxx;
-  float imbby0 = ibb.y + im.y*boxy;
-  int n_jcellxy = 0;
-  for (int jjzone=wid/d_nlist_param.nimgxy;jjzone < n_jzone;jjzone+=d_nlist_param.nimgxy) {
-    int jzone = IvsI ? 0 : d_nlist_param.int_zone[izone][jjzone];
-    
-    int jcellx0, jcellx1;
-    get_cell_bounds_xy<IvsI>(izone, jzone, icellx + im.x*d_nlist_param.ncellx[izone],
-			     d_nlist_param.ncellx[jzone], imbbx0-ibb.wx, imbbx0+ibb.wx,
-			     d_nlist_param.celldx[jzone], roff, jcellx0, jcellx1);
-    int n_jcellxy_add = max(0, jcellx1-jcellx0+1);
-    int4 jcellxy_tmp;
-    jcellxy_tmp.x = jcellx0;
-    jcellxy_tmp.y = jcellx1;
-
-    int jcelly0, jcelly1;
-    get_cell_bounds_xy<IvsI>(izone, jzone, icelly + im.y*d_nlist_param.ncelly[izone],
-			     d_nlist_param.ncelly[jzone], imbby0-ibb.wy, imbby0+ibb.wy,
-			     d_nlist_param.celldy[jzone], roff, jcelly0, jcelly1);
-    n_jcellxy_add *= max(0, jcelly1-jcelly0+1);
-    jcellxy_tmp.z = jcelly0;
-    jcellxy_tmp.w = jcelly1;
-    
-    n_jcellxy += n_jcellxy_add;
-
-    jcellxy_t[jzone] = jcell_val;
-    n_jcellxy_t[jzone] = (n_jcellxy_add == 0) ? 0 : 1;
-
-    // Found neighboring xy-cells:
-    // (jcellx0 ... jcellx1) x (jcelly0 ... jcelly1)
-  }
-  // Neighboring xy-cells are in jcellxy_t[0...n_jzone-1]
-  // Total list of xy-cells is in jcellxy[]
-
-  volatile int4 *jcellxy = (int *)&shbuf[(threadIdx.x/warpsize)*d_nlist_param.nimgxy
-					 *n_jzone*sizeof(int4)];
-
-  // Found n_jcellxy xy-cells. Put them into a combined list in shared memory.
-  // Position in the list is calculated using prefix sum.
-
-  int pos_jcellxy;
-#if __CUDA_ARCH__ < 300
-  // NOT IMPLEMENTED YET
-  //sh_n_jcellxy[wid] = n_jcellxy;
-#else
-  pos_jcellxy = n_jcellxy;
-  for (int i=0;i < warpsize;i *= 2) {
-    int val = __shfl_up(pos_jcellxy, 1);
-    if (wid >= i) pos_jcellxy += val;
-  }
-  pos_jcellxy -= n_jcellxy;
-#endif
-  // Now pos_jcellxy gives the position where this thread is to write
-  for (int i=0;i < n_jcellxy;i++) {
-    jcellxy[pos_jcellxy + i] = jcellx0[cbase];
-  }
-
-  // Total number of cells to check = n_jcellxy_tot*nimgz*n_jzone
-  */
-
-  /*
-  for (int jjzone = wid/nimgz;jjzone < n_jzone;jjzone += nimgz) {
-    int jzone = IvsI ? 0 : d_nlist_param.int_zone[izone][jjzone];
-
-    if (jcelly1[jzone] >= jcelly0[jzone] && jcellx1[jzone] >= jcellx0[jzone]) {
-
-      // Loop over j-cells
-      // NOTE: we do this in order y, x, z so that the resulting tile list
-      //       is ordered
-      
-      for (int jcelly=jcelly0[jzone]; jcelly <= jcelly1(jzone);jcelly++) {
-	float celldist1 = ydist[ydist_pos + jcelly];
-	celldist1 *= celldist1;
-	jcellx0_t = jcellx0[jzone];
-	for (int jcellx=jcellx0_t; jcellx <= jcellx1[jzone]; jcellx++) {
-	  
-	}
-      }
-    }
-  }
-
-
-
-  for (int imx=imx_lo;imx <= imx_hi;imx++) {
-    float imbbx0 = ibb.x + imx*boxx;
-    int n_jcellx = 0;
-    for (int jjzone=0;jjzone < n_jzone;jjzone++) {
-      int jzone = IvsI ? 0 : d_nlist_param.int_zone[izone][jjzone];
-      int jcellx0_t, jcellx1_t;
-      get_cell_bounds<IvsI>(izone, jzone, icellx + imx*ncellx[izone], ncellx[jzone],
-			    imbbx0-ibb.wx, imbbx0+ibb.wx, cellbx[jzone], roff,
-			    jcellx0_t, jcellx1_t);
-      n_jcellx += max(0, jcellx1_t-jcellx0_t+1);
-      jcellx0[jzone] = jcellx0_t;
-      jcellx1[jzone] = jcellx1_t;
-    }
-
-    for (int imy=imy_lo;imy <= imy_hi;imy++) {
-      float imbby0 = ibb.y + imy*boxy;
-      int n_jcelly = 0;
-      for (int jjzone=0;jjzone < n_jzone;jjzone++) {
-	int jzone = IvsI ? 0 : d_nlist_param.int_zone[izone][jjzone];
-	int jcelly0_t, jcelly1_t;
-	get_cell_bounds<IvsI>(izone, jzone, icelly + imy*ncelly[izone], ncelly[jzone],
-			      imbby0-ibb.wy, imbby0+ibb.wy, cellby[jzone], roff,
-			      jcelly0_t, jcelly1_t);
-	n_jcelly += max(0, jcelly1_t-jcelly0_t+1);
-	jcelly0[jzone] = jcelly0_t;
-	jcelly1[jzone] = jcelly1_t;
-      }
-    } // for (int imy=imy_lo;imy <= imy_hi;imy++)
-
-    for (int imz=imz_lo;imz <= imz_hi;imz++) {
-	float imbbz0 = ibb.z + imz*boxz;
-	
-	int ish = imx+1 + 3*(imy+1 + 3*(imz+1));
-	
-	for (int jjzone=0;jjzone < n_jzone;jjzone++) {
-	  int jzone = IvsI ? 0 : d_nlist_param.int_zone[izone][jjzone];
-
-	  if (jcelly1[jzone] >= jcelly0[jzone] && jcellx1[jzone] >= jcellx0[jzone]) {
-	    // Loop over j-cells
-	    // NOTE: we do this in order y, x, z so that the resulting tile list
-	    //       is ordered
-	    for (int jcelly=jcelly0[jzone]; jcelly <= jcelly1(jzone);jcelly++) {
-	      float celldist1 = ydist[ydist_pos + jcelly];
-	      celldist1 *= celldist1;
-	      jcellx0_t = jcellx0[jzone];
-	      for (int jcellx=jcellx0_t; jcellx <= jcellx1[jzone]; jcellx++) {
-		float celldist2 = celldist1 + xdist[xdist_pos + jcellx];
-		celldist2 *= celldist2;
-		if (celldist2 > cutsq) continue;
-		// Get jcellz limits (jcellz0, jcellz1)
-		pos_xy = jcellx + (jcelly-1)*ncellx[jzone];
-		pos_cellbz = (max_ncellz(jzone)+1)*(pos_xy - 1);
-		pos_ncellz = pos_xy + startcol_zone[jzone];
-		get_cell_bounds<IvsI>(izone, jzone, icellz_im,
-				      ncellz[pos_ncellz], imbbz0-ibb.wz, imbbz0+ibb.wz,
-				      cellbz[jzone]%array(pos_cellbz:), roff,
-				      jcellz0, jcellz1, zdist);
-		for (int jcellz=jcellz0; jcellz <= jcellz1; jcellz++) {
-		  if (celldist2 + zdist(jcellz)**2 > cutsq) continue;
-		  // j-cell index is calculated as jcellz + start of the column cells
-		  jcell = jcellz + startcell_col[pos_ncellz];
-
-		  // Read bounding box for j-cell
-		  bb_t jbb = bb[jcell];
-                               
-		  // Calculate distance between i- and j-cell bounding boxes
-		  float bbxdist = max(0.0f, fabs(imbbx0 - jbb.x) - ibb.wx - jbb.wx);
-		  float bbydist = max(0.0f, fabs(imbby0 - jbb.y) - ibb.wy - jbb.wy);
-		  float bbzdist = max(0.0f, fabs(imbbz0 - jbb.z) - ibb.wz - jbb.wz);
-
-		  if (bbxdist**2 + bbydist**2 + bbzdist**2 < cutsq) {
-		  }
-
-
-	}
-	
-    } // for (int imz=imz_lo;imz <= imz_hi;imz++)
-
-
-  } // for (int imx=imx_lo;imx <= imx_hi;imx++)
-  */
 
 }
 
@@ -1861,14 +1865,24 @@ void build_kernel(const int4* __restrict__ cell_xyz_zone,
 //
 template <int tilesize>
 void NeighborList<tilesize>::build(const float boxx, const float boxy, const float boxz,
-				   const float roff,
+				   const float rcut,
 				   const float4 *xyzq,
 				   cudaStream_t stream) {
 
   get_nlist_param();
   std::cout << "ncell = " << h_nlist_param->ncell << " ncell_max = " << ncell_max << std::endl;
-
   reallocate<bb_t>(&bb, &bb_len, ncell_max, 1.2f);
+
+  int n_tile_est, n_ientry_est;
+  get_tile_ientry_est(n_int_zone, int_zone, ncellx, ncelly, ncellz_max,
+		      celldx, celldy, celldz_min, rcut,
+		      n_tile_est, n_ientry_est);
+  std::cout << "n_ientry_est = " << n_ientry_est << " n_tile_est = " << n_tile_est << std::endl;
+
+  reallocate<ientry_t>(&ientry, &ientry_len, n_ientry_est, 1.0f);
+  reallocate<tile_excl_t<tilesize> >(&tile_excl, &tile_excl_len, n_tile_est, 1.0f);
+  reallocate<int>(&tile_indj, &tile_indj_len, n_tile_est, 1.0f);
+
 
   int nthread = 512;
   int nblock = (ncell_max-1)/nthread + 1;
@@ -1881,16 +1895,174 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
   // (blockDim.x/warpsize)*( (~IvsI)*n_jzone*sizeof(int4) + n_jlist_max*sizeof(int) 
   //                         + tilesize*sizeof(float3))
   int shmem_size = (nthread/warpsize)*( n_jlist_max*sizeof(int) + tilesize*sizeof(float3));
+  // For !IvsI, shmem_size += (nthread/warpsize)*n_int_zone_max*sizeof(int4)
   std::cout << "NeighborList::build, shmem_size = " << shmem_size << std::endl;
 
+  nthread = 512;
+  nblock = (ncell_max-1)/(nthread/warpsize) + 1;
   build_kernel<tilesize, true>
     <<< nblock, nthread, shmem_size, stream >>>
     (cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom, xyzq,
-     boxx, boxy, boxz, roff, roff*roff, bb);
+     boxx, boxy, boxz, rcut, rcut*rcut, bb, tile_indj, tile_excl, ientry);
   cudaCheck(cudaGetLastError());
 
-  //int shmem_size = (nthread/warpsize)*n_int_zone_max*sizeof(int4);
+  cudaCheck(cudaDeviceSynchronize());
+  get_nlist_param();
+  std::cout << "n_ientry = " << h_nlist_param->n_ientry
+	    << " n_tile = " << h_nlist_param->n_tile << std::endl;
 
+}
+
+//
+// Test neighbor list building with a simple N^2 algorithm
+//
+template <int tilesize>
+void NeighborList<tilesize>::test_build(const int *zone_patom,
+					const float boxx, const float boxy, const float boxz,
+					const float rcut, const float4 *xyzq) {
+
+  cudaCheck(cudaDeviceSynchronize());
+  get_nlist_param();
+
+  int n_ientry = h_nlist_param->n_ientry;
+  int n_tile = h_nlist_param->n_tile;
+
+  int ncoord = zone_patom[7];
+
+  float4* h_xyzq = new float4[ncoord];
+  copy_DtoH<float4>(xyzq, h_xyzq, ncoord);
+
+  float rcut2 = rcut*rcut;
+
+  float hboxx = 0.5f*boxx;
+  float hboxy = 0.5f*boxy;
+  float hboxz = 0.5f*boxz;
+
+  int npair_cpu = 0;
+  for (int izone=0;izone < 8;izone++) {
+    for (int jzone=0;jzone < 8;jzone++) {
+      //if (izone == 0 && izone == jzone && icell > jcell) cycle;
+      if (izone == 1 && jzone != 5) continue;
+      if (izone == 2 && jzone != 1 && jzone != 6) continue;
+      if (izone == 4 && jzone != 1 && jzone != 2 && jzone != 3) continue;
+
+      int istart = (izone > 0) ? istart = zone_patom[izone-1] : 0;
+      int jstart = (jzone > 0) ? jstart = zone_patom[jzone-1] : 0;
+      int iend = zone_patom[izone];
+      int jend = zone_patom[jzone];
+
+      for (int i=istart;i < iend;i++) {
+	float xi = h_xyzq[i].x;
+	float yi = h_xyzq[i].y;
+	float zi = h_xyzq[i].z;
+	int npair_i = 0;
+	if (izone == 0 && jzone == 0) jstart = i + 1;
+	for (int j=jstart;j < jend;j++) {
+	  float xj = h_xyzq[j].x;
+	  float yj = h_xyzq[j].y;
+	  float zj = h_xyzq[j].z;
+	  float dx = xi - xj;
+	  float dy = yi - yj;
+	  float dz = zi - zj;
+	  int imx=0, imy=0, imz=0;
+	  if (dx > hboxx) {
+	    imx = -1;
+	  } else if (dx < -hboxx) {
+	    imx = 1;
+	  }
+	  if (dy > hboxy) {
+	    imy = -1;
+	  } else if (dy < -hboxy) {
+	    imy = 1;
+	  }
+	  if (dz > hboxz) {
+	    imz = -1;
+	  } else if (dz < -hboxz) {
+	    imz = 1;
+	  }
+	  dx += imx*boxx;
+	  dy += imy*boxy;
+	  dz += imz*boxz;
+	  float r2 = dx*dx + dy*dy + dz*dz;
+	  if (r2 < rcut2) {
+	    npair_i++;
+	    npair_cpu++;
+	  }
+	}
+	//
+      }
+    }
+  }
+
+  ientry_t* h_ientry = new ientry_t[n_ientry];
+  tile_excl_t<tilesize>* h_tile_excl = new tile_excl_t<tilesize>[n_tile];
+  int* h_tile_indj = new int[n_tile];
+  copy_DtoH<ientry_t>(ientry, h_ientry, n_ientry);
+  copy_DtoH<tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
+  copy_DtoH<int>(tile_indj, h_tile_indj, n_tile);
+
+  int npair_gpu = 0;
+  int n = 0;
+  for (int ind=0;ind < n_ientry;ind++) {
+    int istart = h_ientry[ind].indi;
+    int ish    = h_ientry[ind].ish;
+    int startj = h_ientry[ind].startj;
+    int endj   = h_ientry[ind].endj;
+    n += endj - startj + 1;
+    for (int jtile=startj;jtile <= endj;jtile++) {
+      for (int wid=0;wid < (num_excl<tilesize>::val);wid++) {
+	npair_gpu += 32 - BitCount_ref(h_tile_excl[jtile].excl[wid]);
+      }
+    }
+  }
+
+  delete [] h_xyzq;
+  delete [] h_ientry;
+  delete [] h_tile_excl;
+  delete [] h_tile_indj;
+
+  if (npair_cpu != npair_gpu) {
+    std::cout << "##################################################" << std::endl;
+    std::cout << "test_build FAILED" << std::endl;
+    std::cout << "n = " << n << std::endl;
+    std::cout << "n_ientry = " << n_ientry << " n_tile = " << n_tile << std::endl;
+    std::cout << "npair_cpu = " << npair_cpu << " npair_gpu = " << npair_gpu << std::endl;
+    std::cout << "##################################################" << std::endl;
+  } else {
+    std::cout << "test_build OK" << std::endl;
+  }
+}
+
+//
+// Setups topological exclusions from data structure used in CHARMM
+//
+template <int tilesize>
+void NeighborList<tilesize>::setup_top_excl(int ncoord, int *iblo14, int *inb14) {
+
+  int *nexcl = new int[ncoord];
+
+  // Count the number of exclusions to nexcl[0 ... ncoord-1]
+  for (int i=0;i < ncoord;i++) nexcl[i] = 0;
+
+  for (int i=0;i < ncoord;i++) {
+    int excl_start;
+    if (i > 0) {
+      excl_start = iblo14[i-1];
+    } else {
+      excl_start = 0;
+    }
+    int excl_end = iblo14[i] - 1;
+    nexcl[i] += excl_end - excl_start + 1;
+    for (int excl_i=excl_start; excl_i <= excl_end;excl_i++) {
+      int j = abs(inb14[excl_i]) - 1;
+      // add i-j exclusion to atom j
+      nexcl[j]++;
+    }
+  }
+
+  
+
+  delete [] nexcl;
 }
 
 //----------------------------------------------------------------------------------------
@@ -1909,7 +2081,7 @@ __global__ void build_excl_kernel(const unsigned int base_tid, const int n_ijlis
 				  int *tile_indj,
 				  tile_excl_t<tilesize> *tile_excl,
 				  const float boxx, const float boxy, const float boxz,
-				  const float roff2) {
+				  const float rcut2) {
   const int num_thread_per_excl = (32/(num_excl<tilesize>::val));
 
   // Global thread index
@@ -2011,7 +2183,7 @@ __global__ void build_excl_kernel(const unsigned int base_tid, const int n_ijlis
       float dy = sh_xyzi[ii].y - yj;
       float dz = sh_xyzi[ii].z - zj;
       float r2 = dx*dx + dy*dy + dz*dz;
-      excl |= ((r2 >= roff2) | (q_samecell && (tid <= i)) ) << t;
+      excl |= ((r2 >= rcut2) | (q_samecell && (tid <= i)) ) << t;
     }
     tile_indj[wid] = jstart;
     tile_excl[wid].excl[stid] = excl;
@@ -2025,7 +2197,7 @@ __global__ void build_excl_kernel(const unsigned int base_tid, const int n_ijlis
       float dy = sh_xyzi[ii].y - yj;
       float dz = sh_xyzi[ii].z - zj;
       float r2 = dx*dx + dy*dy + dz*dz;
-      excl |= ((r2 >= roff2) | (q_samecell && (load_ij <= load_i)) ) << t;
+      excl |= ((r2 >= rcut2) | (q_samecell && (load_ij <= load_i)) ) << t;
     }
     // excl is a 8 bit exclusion mask.
     // The full 32 bit exclusion mask is contained in 4 threads:
@@ -2064,7 +2236,7 @@ void test_excl_dist_index(const int n_ijlist, const int3 *d_ijlist,
 			  int *d_tile_indj,
 			  tile_excl_t *d_tile_excl,
 			  const float boxx, const float boxy, const float boxz,
-			  const float roff2) {
+			  const float rcut2) {
 
   int3 *h_ijlist;
   int *h_cell_patom;
@@ -2142,12 +2314,12 @@ void test_excl_dist_index(const int n_ijlist, const int3 *d_ijlist,
 	int shbit = (ij % TILESIZE);
 #endif
 	unsigned int ibit = 1 << shbit;
-	unsigned int excl = ((r2 >= roff2) | (q_samecell && (j <= i)) ) << shbit;
+	unsigned int excl = ((r2 >= rcut2) | (q_samecell && (j <= i)) ) << shbit;
 	unsigned int excl_gpu = h_tile_excl[wid].excl[iexcl];
-	if ( ((excl_gpu & ibit) ^ excl) != 0 && fabsf(r2-roff2) > 7.0e-5) {
+	if ( ((excl_gpu & ibit) ^ excl) != 0 && fabsf(r2-rcut2) > 7.0e-5) {
 	  printf("Error found in test_excl_dist_index:\n");
 	  printf("wid = %d i = %d j = %d iexcl = %d shbit = %d\n",wid,i,j,iexcl,shbit);
-	  printf("ii = %d jj = %d %d %d %d %d\n",ii,jj,r2 >= roff2,
+	  printf("ii = %d jj = %d %d %d %d %d\n",ii,jj,r2 >= rcut2,
 		 (q_samecell && (j <= i)),icell,jcell);
 	  printf("%x ^ %x = %x \n",excl_gpu & ibit, excl, (excl_gpu & ibit) ^ excl);
 	  printf("i:  %f %f %f\n",xi,yi,zi);
@@ -2155,7 +2327,7 @@ void test_excl_dist_index(const int n_ijlist, const int3 *d_ijlist,
 	  printf("jo: %f %f %f\n",xyzq_j.x,xyzq_j.y,xyzq_j.z);
 	  printf("sh: %f %f %f\n",xsh,ysh,zsh);
 	  printf("dx: %1.8f %1.8f %1.8f\n",dx,dy,dz);
-	  printf("r2: %f %e\n",r2,fabsf(r2-roff2));
+	  printf("r2: %f %e\n",r2,fabsf(r2-rcut2));
 	  exit(1);
 	}
       }
@@ -2179,7 +2351,7 @@ void test_excl_dist_index(const int n_ijlist, const int3 *d_ijlist,
 //
 template <int tilesize>
 void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, const float boxz,
-					const float roff,
+					const float rcut,
 					const int n_ijlist, const int3 *ijlist,
 					const int *cell_patom,
 					const float4 *xyzq,
@@ -2191,7 +2363,7 @@ void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, cons
   reallocate<int>(&tile_indj, &tile_indj_len, n_ijlist, 1.2f);
   reallocate<tile_excl_t<tilesize> >(&tile_excl, &tile_excl_len, n_ijlist, 1.2f);
 
-  float roff2 = roff*roff;
+  float rcut2 = rcut*rcut;
 
   int nthread = nwarp_build_excl_dist*warpsize;
   int nblock_tot = (n_ijlist-1)/(nthread/warpsize) + 1;
@@ -2215,7 +2387,7 @@ void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, cons
       (base_tid, n_ijlist, ijlist, cell_patom,
        xyzq, tile_indj, tile_excl,
        boxx, boxy, boxz,
-       roff2);
+       rcut2);
 
     base_tid += nblock*nthread;
 
@@ -2227,7 +2399,7 @@ void NeighborList<tilesize>::build_excl(const float boxx, const float boxy, cons
     test_excl_dist_index(mdsim.n_ijlist, mdsim.ijlist, mdsim.cell_patom,
 			 mdsim.xyzq.xyzq, mdsim.tile_indj, mdsim.tile_excl,
 			 boxx, boxy, boxz,
-			 roff2);
+			 rcut2);
   }
   */
 
@@ -2289,7 +2461,6 @@ static int BitCount(unsigned int u)
             & 030707070707) % 63;
  }
 
-/*
 static int BitCount_ref(unsigned int u) {
   unsigned int x = u;
   int res = 0;
@@ -2299,7 +2470,6 @@ static int BitCount_ref(unsigned int u) {
   }
   return res;
 }
-*/
 
 //
 // Splits neighbor list into dense and sparse parts
@@ -2307,29 +2477,29 @@ static int BitCount_ref(unsigned int u) {
 template <int tilesize>
 void NeighborList<tilesize>::split_dense_sparse(int npair_cutoff) {
 
-  ientry_t *h_ientry = new ientry_t[ni];
-  int *h_tile_indj = new int[ntot];
-  tile_excl_t<tilesize> *h_tile_excl = new tile_excl_t<tilesize>[ntot];
+  ientry_t *h_ientry = new ientry_t[n_ientry];
+  int *h_tile_indj = new int[n_tile];
+  tile_excl_t<tilesize> *h_tile_excl = new tile_excl_t<tilesize>[n_tile];
 
-  ientry_t *h_ientry_dense = new ientry_t[ni];
-  int *h_tile_indj_dense = new int[ntot];
-  tile_excl_t<tilesize> *h_tile_excl_dense = new tile_excl_t<tilesize>[ntot];
+  ientry_t *h_ientry_dense = new ientry_t[n_ientry];
+  int *h_tile_indj_dense = new int[n_tile];
+  tile_excl_t<tilesize> *h_tile_excl_dense = new tile_excl_t<tilesize>[n_tile];
 
-  ientry_t *h_ientry_sparse = new ientry_t[ni];
-  int *h_tile_indj_sparse = new int[ntot];
-  pairs_t<tilesize> *h_pairs = new pairs_t<tilesize>[ntot];
+  ientry_t *h_ientry_sparse = new ientry_t[n_ientry];
+  int *h_tile_indj_sparse = new int[n_tile];
+  pairs_t<tilesize> *h_pairs = new pairs_t<tilesize>[n_tile];
 
-  copy_DtoH<ientry_t>(ientry, h_ientry, ni);
-  copy_DtoH<int>(tile_indj, h_tile_indj, ntot);
-  copy_DtoH< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, ntot);
+  copy_DtoH<ientry_t>(ientry, h_ientry, n_ientry);
+  copy_DtoH<int>(tile_indj, h_tile_indj, n_tile);
+  copy_DtoH< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
 
-  int ni_dense = 0;
-  int ntot_dense = 0;
-  ni_sparse = 0;
-  ntot_sparse = 0;
-  for (int i=0;i < ni;i++) {
+  int n_ientry_dense = 0;
+  int n_tile_dense = 0;
+  n_ientry_sparse = 0;
+  n_tile_sparse = 0;
+  for (int i=0;i < n_ientry;i++) {
     bool sparse_i_tiles = true;
-    int startj_dense = ntot_dense;
+    int startj_dense = n_tile_dense;
     for (int j=h_ientry[i].startj;j <= h_ientry[i].endj;j++) {
       int npair = 0;
       for (int k=0;k < (num_excl<tilesize>::val);k++) {
@@ -2342,15 +2512,15 @@ void NeighborList<tilesize>::split_dense_sparse(int npair_cutoff) {
 	for (int k=0;k < (num_excl<tilesize>::val);k++) {
 	  
 	}
-	h_tile_indj_sparse[ntot_sparse] = h_tile_indj[j];
-	ntot_sparse++;
+	h_tile_indj_sparse[n_tile_sparse] = h_tile_indj[j];
+	n_tile_sparse++;
       } else {
 	// Dense
 	for (int k=0;k < (num_excl<tilesize>::val);k++) {
-	  h_tile_excl_dense[ntot_dense].excl[k] = h_tile_excl[j].excl[k];
+	  h_tile_excl_dense[n_tile_dense].excl[k] = h_tile_excl[j].excl[k];
 	}
-	h_tile_indj_dense[ntot_dense] = h_tile_indj[j];
-	ntot_dense++;
+	h_tile_indj_dense[n_tile_dense] = h_tile_indj[j];
+	n_tile_dense++;
 	sparse_i_tiles = false;
       }
 
@@ -2359,30 +2529,30 @@ void NeighborList<tilesize>::split_dense_sparse(int npair_cutoff) {
     if (sparse_i_tiles) {
       // Sparse
     } else {
-      h_ientry_dense[ni_dense] = h_ientry[i];
-      h_ientry_dense[ni_dense].startj = startj_dense;
-      h_ientry_dense[ni_dense].endj = ntot_dense - 1;
-      ni_dense++;
+      h_ientry_dense[n_ientry_dense] = h_ientry[i];
+      h_ientry_dense[n_ientry_dense].startj = startj_dense;
+      h_ientry_dense[n_ientry_dense].endj = n_tile_dense - 1;
+      n_ientry_dense++;
     }
   }
 
-  ni = ni_dense;
-  ntot = ntot_dense;
+  n_ientry = n_ientry_dense;
+  n_tile = n_tile_dense;
 
-  copy_HtoD<ientry_t>(h_ientry_dense, ientry, ni);
-  copy_HtoD<int>(h_tile_indj_dense, tile_indj, ntot);
-  copy_HtoD< tile_excl_t<tilesize> >(h_tile_excl_dense, tile_excl, ntot);
+  copy_HtoD<ientry_t>(h_ientry_dense, ientry, n_ientry);
+  copy_HtoD<int>(h_tile_indj_dense, tile_indj, n_tile);
+  copy_HtoD< tile_excl_t<tilesize> >(h_tile_excl_dense, tile_excl, n_tile);
 
-  allocate<ientry_t>(&ientry_sparse, ni_sparse);
-  allocate<int>(&tile_indj_sparse, ntot_sparse);
-  allocate< pairs_t<tilesize> >(&pairs, ntot_sparse);
-  ientry_sparse_len = ni_sparse;
-  tile_indj_sparse_len = ntot_sparse;
-  pairs_len = ntot_sparse;
+  allocate<ientry_t>(&ientry_sparse, n_ientry_sparse);
+  allocate<int>(&tile_indj_sparse, n_tile_sparse);
+  allocate< pairs_t<tilesize> >(&pairs, n_tile_sparse);
+  ientry_sparse_len = n_ientry_sparse;
+  tile_indj_sparse_len = n_tile_sparse;
+  pairs_len = n_tile_sparse;
 
-  copy_HtoD<ientry_t>(h_ientry_sparse, ientry_sparse, ni_sparse);
-  copy_HtoD<int>(h_tile_indj_sparse, tile_indj_sparse, ntot_sparse);
-  copy_HtoD< pairs_t<tilesize> >(h_pairs, pairs, ntot_sparse);
+  copy_HtoD<ientry_t>(h_ientry_sparse, ientry_sparse, n_ientry_sparse);
+  copy_HtoD<int>(h_tile_indj_sparse, tile_indj_sparse, n_tile_sparse);
+  copy_HtoD< pairs_t<tilesize> >(h_pairs, pairs, n_tile_sparse);
 
   delete [] h_ientry;
   delete [] h_tile_indj;
@@ -2404,23 +2574,23 @@ void NeighborList<tilesize>::split_dense_sparse(int npair_cutoff) {
 template <int tilesize>
 void NeighborList<tilesize>::remove_empty_tiles() {
 
-  ientry_t *h_ientry = new ientry_t[ni];
-  int *h_tile_indj = new int[ntot];
-  tile_excl_t<tilesize> *h_tile_excl = new tile_excl_t<tilesize>[ntot];
+  ientry_t *h_ientry = new ientry_t[n_ientry];
+  int *h_tile_indj = new int[n_tile];
+  tile_excl_t<tilesize> *h_tile_excl = new tile_excl_t<tilesize>[n_tile];
 
-  ientry_t *h_ientry_noempty = new ientry_t[ni];
-  int *h_tile_indj_noempty = new int[ntot];
-  tile_excl_t<tilesize> *h_tile_excl_noempty = new tile_excl_t<tilesize>[ntot];
+  ientry_t *h_ientry_noempty = new ientry_t[n_ientry];
+  int *h_tile_indj_noempty = new int[n_tile];
+  tile_excl_t<tilesize> *h_tile_excl_noempty = new tile_excl_t<tilesize>[n_tile];
 
-  copy_DtoH<ientry_t>(ientry, h_ientry, ni);
-  copy_DtoH<int>(tile_indj, h_tile_indj, ntot);
-  copy_DtoH< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, ntot);
+  copy_DtoH<ientry_t>(ientry, h_ientry, n_ientry);
+  copy_DtoH<int>(tile_indj, h_tile_indj, n_tile);
+  copy_DtoH< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
 
-  int ni_noempty = 0;
-  int ntot_noempty = 0;
-  for (int i=0;i < ni;i++) {
+  int n_ientry_noempty = 0;
+  int n_tile_noempty = 0;
+  for (int i=0;i < n_ientry;i++) {
     bool empty_i_tiles = true;
-    int startj_noempty = ntot_noempty;
+    int startj_noempty = n_tile_noempty;
     for (int j=h_ientry[i].startj;j <= h_ientry[i].endj;j++) {
       bool empty_tile = true;
       for (int k=0;k < (num_excl<tilesize>::val);k++) {
@@ -2430,28 +2600,28 @@ void NeighborList<tilesize>::remove_empty_tiles() {
 
       if (!empty_tile) {
 	for (int k=0;k < (num_excl<tilesize>::val);k++) {
-	  h_tile_excl_noempty[ntot_noempty].excl[k] = h_tile_excl[j].excl[k];
+	  h_tile_excl_noempty[n_tile_noempty].excl[k] = h_tile_excl[j].excl[k];
 	}
-	h_tile_indj_noempty[ntot_noempty] = h_tile_indj[j];
-	ntot_noempty++;
+	h_tile_indj_noempty[n_tile_noempty] = h_tile_indj[j];
+	n_tile_noempty++;
 	empty_i_tiles = false;
       }
     }
 
     if (!empty_i_tiles) {
-      h_ientry_noempty[ni_noempty] = h_ientry[i];
-      h_ientry_noempty[ni_noempty].startj = startj_noempty;
-      h_ientry_noempty[ni_noempty].endj = ntot_noempty - 1;
-      ni_noempty++;
+      h_ientry_noempty[n_ientry_noempty] = h_ientry[i];
+      h_ientry_noempty[n_ientry_noempty].startj = startj_noempty;
+      h_ientry_noempty[n_ientry_noempty].endj = n_tile_noempty - 1;
+      n_ientry_noempty++;
     }
   }
 
-  ni = ni_noempty;
-  ntot = ntot_noempty;
+  n_ientry = n_ientry_noempty;
+  n_tile = n_tile_noempty;
 
-  copy_HtoD<ientry_t>(h_ientry_noempty, ientry, ni);
-  copy_HtoD<int>(h_tile_indj_noempty, tile_indj, ntot);
-  copy_HtoD< tile_excl_t<tilesize> >(h_tile_excl_noempty, tile_excl, ntot);
+  copy_HtoD<ientry_t>(h_ientry_noempty, ientry, n_ientry);
+  copy_HtoD<int>(h_tile_indj_noempty, tile_indj, n_tile);
+  copy_HtoD< tile_excl_t<tilesize> >(h_tile_excl_noempty, tile_excl, n_tile);
 
   delete [] h_ientry;
   delete [] h_tile_indj;
@@ -2469,15 +2639,16 @@ void NeighborList<tilesize>::remove_empty_tiles() {
 template <int tilesize>
 void NeighborList<tilesize>::analyze() {
 
-  ientry_t *h_ientry = new ientry_t[ni];
-  int *h_tile_indj = new int[ntot];
-  tile_excl_t<tilesize> *h_tile_excl = new tile_excl_t<tilesize>[ntot];
+  ientry_t *h_ientry = new ientry_t[n_ientry];
+  int *h_tile_indj = new int[n_tile];
+  tile_excl_t<tilesize> *h_tile_excl = new tile_excl_t<tilesize>[n_tile];
 
-  copy_DtoH<ientry_t>(ientry, h_ientry, ni);
-  copy_DtoH<int>(tile_indj, h_tile_indj, ntot);
-  copy_DtoH< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, ntot);
+  copy_DtoH<ientry_t>(ientry, h_ientry, n_ientry);
+  copy_DtoH<int>(tile_indj, h_tile_indj, n_tile);
+  copy_DtoH< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
 
-  std::cout << "Number of i-tiles = " << ni << ", total number of tiles = " << ntot << std::endl;
+  std::cout << "Number of i-tiles = " << n_ientry << ", total number of tiles = " 
+	    << n_tile << std::endl;
 
   std::ofstream file_npair("npair.txt", std::ofstream::out);
   std::ofstream file_nj("nj.txt", std::ofstream::out);
@@ -2486,7 +2657,7 @@ void NeighborList<tilesize>::analyze() {
   unsigned int nexcl_bit_self = 0;
   unsigned int nempty_tile = 0;
   unsigned int nempty_line = 0;
-  for (int i=0;i < ni;i++) {
+  for (int i=0;i < n_ientry;i++) {
     file_nj << h_ientry[i].endj - h_ientry[i].startj + 1 << std::endl;
     for (int j=h_ientry[i].startj;j <= h_ientry[i].endj;j++) {
       int npair = 0;
@@ -2517,16 +2688,16 @@ void NeighborList<tilesize>::analyze() {
   file_npair.close();
   file_nj.close();
 
-  unsigned int ntot_pairs = ntot*tilesize*tilesize;
-  std::cout << "Total number of pairs = " << ntot_pairs << std::endl;
+  unsigned int n_tile_pairs = n_tile*tilesize*tilesize;
+  std::cout << "Total number of pairs = " << n_tile_pairs << std::endl;
   std::cout << "Number of excluded pairs = " << nexcl_bit << " (" << 
-    ((double)nexcl_bit*100)/(double)ntot_pairs << "%)" << std::endl;
+    ((double)nexcl_bit*100)/(double)n_tile_pairs << "%)" << std::endl;
   std::cout << "Number of excluded pairs in self (i==j) tiles = " << nexcl_bit_self << " (" << 
-    ((double)nexcl_bit_self*100)/(double)ntot_pairs << "%)" << std::endl;
+    ((double)nexcl_bit_self*100)/(double)n_tile_pairs << "%)" << std::endl;
   std::cout << "Number of empty lines = " << nempty_line << " (" <<
-    ((double)nempty_line*100)/((double)(ntot*tilesize)) << "%)" << std::endl;
+    ((double)nempty_line*100)/((double)(n_tile*tilesize)) << "%)" << std::endl;
   std::cout << "Number of empty tiles = " << nempty_tile << " (" <<
-    ((double)nempty_tile*100)/(double)ntot << "%)" << std::endl;
+    ((double)nempty_tile*100)/(double)n_tile << "%)" << std::endl;
 
   delete [] h_ientry;
   delete [] h_tile_indj;
@@ -2550,13 +2721,13 @@ void NeighborList<tilesize>::load(const char *filename) {
     // Open file
     file.open(filename);
 
-    file >> ni >> ntot;
+    file >> n_ientry >> n_tile;
 
-    h_ientry = new ientry_t[ni];
-    h_tile_indj = new int[ntot];
-    h_tile_excl = new tile_excl_t<tilesize>[ntot];
+    h_ientry = new ientry_t[n_ientry];
+    h_tile_indj = new int[n_tile];
+    h_tile_excl = new tile_excl_t<tilesize>[n_tile];
 
-    for (int i=0;i < ni;i++) {
+    for (int i=0;i < n_ientry;i++) {
       file >> std::dec >> h_ientry[i].indi >> h_ientry[i].ish >> 
 	h_ientry[i].startj >> h_ientry[i].endj;
       for (int j=h_ientry[i].startj;j <= h_ientry[i].endj;j++) {
@@ -2574,13 +2745,13 @@ void NeighborList<tilesize>::load(const char *filename) {
     exit(1);
   }
 
-  reallocate<ientry_t>(&ientry, &ientry_len, ni, 1.2f);
-  reallocate<int>(&tile_indj, &tile_indj_len, ntot, 1.2f);
-  reallocate< tile_excl_t<tilesize> >(&tile_excl, &tile_excl_len, ntot, 1.2f);
+  reallocate<ientry_t>(&ientry, &ientry_len, n_ientry, 1.2f);
+  reallocate<int>(&tile_indj, &tile_indj_len, n_tile, 1.2f);
+  reallocate< tile_excl_t<tilesize> >(&tile_excl, &tile_excl_len, n_tile, 1.2f);
 
-  copy_HtoD<ientry_t>(h_ientry, ientry, ni);
-  copy_HtoD<int>(h_tile_indj, tile_indj, ntot);
-  copy_HtoD< tile_excl_t<tilesize> >(h_tile_excl, tile_excl, ntot);
+  copy_HtoD<ientry_t>(h_ientry, ientry, n_ientry);
+  copy_HtoD<int>(h_tile_indj, tile_indj, n_tile);
+  copy_HtoD< tile_excl_t<tilesize> >(h_tile_excl, tile_excl, n_tile);
 
   delete [] h_ientry;
   delete [] h_tile_indj;

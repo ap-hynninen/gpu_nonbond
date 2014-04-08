@@ -67,6 +67,7 @@ void test() {
   const double boxy = 62.23;
   const double boxz = 62.23;
   const double kappa = 0.320;
+  const double rcut = 11.0;
   const double roff = 9.0;
   const double ron = 7.5;
   const double e14fac = 1.5;
@@ -98,6 +99,13 @@ void test() {
 
   // ------------------- Neighborlist -----------------
 
+  const int niblo14 = 23558;
+  const int ninb14 = 34709;
+  int *iblo14 = new int[niblo14];
+  int *inb14 = new int[ninb14];
+  load_ind<int>(1, "test_data/iblo14.txt", niblo14, iblo14);
+  load_ind<int>(1, "test_data/inb14.txt", ninb14, inb14);
+
   NeighborList<32> nlist_ref(1, 1, 1);
   nlist_ref.load("test_data/nlist.txt");
   //nlist.remove_empty_tiles();
@@ -119,7 +127,9 @@ void test() {
 
   NeighborList<32> nlist(1, 1, 1);
   nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
-  nlist.build(boxx, boxy, boxz, roff, xyzq_sorted.xyzq);
+  nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
+
+  nlist.test_build(zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
 
   //tol = 7.71e-4;
   //if (!xyzq_sorted_ref.compare(xyzq_sorted, tol, max_diff)) {
@@ -157,6 +167,9 @@ void test() {
   delete [] ex14list;
 
   delete [] loc2glo_ind;
+
+  delete [] iblo14;
+  delete [] inb14;
 
   return;
 

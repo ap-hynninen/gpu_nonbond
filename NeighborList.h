@@ -72,6 +72,12 @@ struct NeighborListParam_t {
 
   // cell start index for each zone, plus one to cap it off
   //int startcell_zone[9];
+
+  // Number of entries in ientry -table
+  int n_ientry;
+
+  // Number of tiles
+  int n_tile;
 };
 
 //
@@ -90,10 +96,10 @@ class NeighborList {
 private:
 
   // Number of i tiles
-  int ni;
+  int n_ientry;
 
   // Total number of tiles
-  int ntot;
+  int n_tile;
 
   int tile_excl_len;
   tile_excl_t<tilesize> *tile_excl;
@@ -105,9 +111,8 @@ private:
   int *tile_indj;
 
   // Sparse:
-  int ni_sparse;
-
-  int ntot_sparse;
+  int n_ientry_sparse;
+  int n_tile_sparse;
 
   int pairs_len;
   pairs_t<tilesize> *pairs;
@@ -174,12 +179,23 @@ private:
   int bb_len;
   bb_t *bb;
 
-  void set_int_zone(const int *zone_patom, int *n_int_zone, int int_zone[][8]);
+  // Host memory
+  int n_int_zone[8], int_zone[8][8];
+  int ncellx[8], ncelly[8], ncellz_max[8];
+  int zone_natom[8];
+  float celldx[8], celldy[8], celldz_min[8];
 
-  void set_cell_sizes(const int *zone_patom,
+  void get_tile_ientry_est(int *n_int_zone, int int_zone[][8],
+			   int *ncellx, int *ncelly, int *ncellz_max,
+			   float *celldx, float *celldy, float *celldz_min,
+			   float rcut, int &n_tile_est, int &n_ientry_est);
+
+  void set_int_zone(const int *zone_natom, int *n_int_zone, int int_zone[][8]);
+
+  void set_cell_sizes(const int *zone_natom,
 		      const float3 *max_xyz, const float3 *min_xyz,
 		      int *ncellx, int *ncelly, int *ncellz_max,
-		      float *celldx, float *celldy);
+		      float *celldx, float *celldy, float *celldz_min);
 
   bool test_z_columns(const int* zone_patom,
 		      const int* ncellx, const int* ncelly,
@@ -212,12 +228,18 @@ public:
 	    cudaStream_t stream=0);
 
   void build(const float boxx, const float boxy, const float boxz,
-	     const float roff,
+	     const float rcut,
 	     const float4 *xyzq,
 	     cudaStream_t stream=0);
 
+  void test_build(const int *zone_patom,
+		  const float boxx, const float boxy, const float boxz,
+		  const float rcut, const float4 *xyzq);
+  
+  void setup_top_excl(int ncoord, int *iblo14, int *inb14);
+
   void build_excl(const float boxx, const float boxy, const float boxz,
-		  const float roff,
+		  const float rcut,
 		  const int n_ijlist, const int3 *ijlist,
 		  const int *cell_patom,
 		  const float4 *xyzq,
@@ -227,7 +249,7 @@ public:
 		    const tile_excl_t<tilesize> *tile_excl_top,
 		    cudaStream_t stream=0);
 
-  void set_ientry(int ni, ientry_t *h_ientry, cudaStream_t stream=0);
+  void set_ientry(int n_ientry, ientry_t *h_ientry, cudaStream_t stream=0);
 
   void split_dense_sparse(int npair_cutoff);
   void remove_empty_tiles();
