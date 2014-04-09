@@ -78,6 +78,9 @@ struct NeighborListParam_t {
 
   // Number of tiles
   int n_tile;
+
+  // Number of cell-cell exclusions
+  int nexcl;
 };
 
 //
@@ -94,6 +97,9 @@ template <int tilesize>
 class NeighborList {
   friend class DirectForce<long long int, float>;
 private:
+
+  // Global total number of atoms in this system
+  int ncoord_glo;
 
   // Number of i tiles
   int n_ientry;
@@ -155,9 +161,17 @@ private:
   int loc2glo_ind_len;
   int *loc2glo_ind;
 
+  // Local -> global mapping index list
+  int glo2loc_ind_len;
+  int *glo2loc_ind;
+
   // Atom indices where each cell start
   int cell_patom_len;
   int *cell_patom;
+
+  // Cell indices for each atom
+  int atom_pcell_len;
+  int *atom_pcell;
 
   // (icellx, icelly, icellz, izone) for each cell
   int cell_xyz_zone_len;
@@ -178,6 +192,20 @@ private:
   // Bounding boxes
   int bb_len;
   bb_t *bb;
+
+  // Cell-cell exclusions:
+  int cell_excl_pos_len;
+  int *cell_excl_pos;
+
+  int cell_excl_len;
+  int *cell_excl;
+
+  // Atom-atom exclusions
+  int atom_excl_pos_len;
+  int *atom_excl_pos;
+
+  int atom_excl_len;
+  int *atom_excl;
 
   // Host memory
   int n_int_zone[8], int_zone[8][8];
@@ -218,7 +246,7 @@ private:
   void get_nlist_param();
 
 public:
-  NeighborList(int nx, int ny, int nz);
+  NeighborList(int ncoord_glo, int nx, int ny, int nz);
   ~NeighborList();
 
   void sort(const int *zone_patom,

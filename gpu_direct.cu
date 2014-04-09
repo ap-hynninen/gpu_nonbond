@@ -106,7 +106,7 @@ void test() {
   load_ind<int>(1, "test_data/iblo14.txt", niblo14, iblo14);
   load_ind<int>(1, "test_data/inb14.txt", ninb14, inb14);
 
-  NeighborList<32> nlist_ref(1, 1, 1);
+  NeighborList<32> nlist_ref(ncoord, 1, 1, 1);
   nlist_ref.load("test_data/nlist.txt");
   //nlist.remove_empty_tiles();
   //nlist.split_dense_sparse(512);
@@ -125,11 +125,10 @@ void test() {
   max_xyz[0].y = 31.80500;
   max_xyz[0].z = 31.80300;
 
-  NeighborList<32> nlist(1, 1, 1);
+  NeighborList<32> nlist(ncoord, 1, 1, 1);
   nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
-  nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
-
-  nlist.test_build(zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
+  //nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
+  //nlist.test_build(zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
 
   //tol = 7.71e-4;
   //if (!xyzq_sorted_ref.compare(xyzq_sorted, tol, max_diff)) {

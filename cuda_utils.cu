@@ -155,6 +155,17 @@ void clear_gpu_array_T(void *data, const int ndata, const size_t sizeofT) {
 
 //----------------------------------------------------------------------------------------
 
+void set_gpu_array_async_T(void *data, const int ndata, const int value,
+			   cudaStream_t stream, const size_t sizeofT) {
+  cudaCheck(cudaMemsetAsync(data, value, sizeofT*ndata, stream));
+}
+
+void set_gpu_array_T(void *data, const int ndata, const int value, const size_t sizeofT) {
+  cudaCheck(cudaMemset(data, value, sizeofT*ndata));
+}
+
+//----------------------------------------------------------------------------------------
+
 void copy3D_HtoD_T(void* src_data, void* dst_data,
 		   int src_x0, int src_y0, int src_z0,
 		   size_t src_xsize, size_t src_ysize,
