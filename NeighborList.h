@@ -207,6 +207,12 @@ private:
   int atom_excl_len;
   int *atom_excl;
 
+  int cell_excl_buffer_len;
+  int* cell_excl_buffer;
+
+  // Maximum number of atom-atom exclusions
+  int max_nexcl;
+
   // Host memory
   int n_int_zone[8], int_zone[8][8];
   int ncellx[8], ncelly[8], ncellz_max[8];
@@ -246,7 +252,7 @@ private:
   void get_nlist_param();
 
 public:
-  NeighborList(int ncoord_glo, int nx, int ny, int nz);
+  NeighborList(int nx, int ny, int nz);
   ~NeighborList();
 
   void sort(const int *zone_patom,
