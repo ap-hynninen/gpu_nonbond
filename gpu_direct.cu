@@ -129,7 +129,7 @@ void test() {
   nlist.setup_top_excl(ncoord, iblo14, inb14);
   nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
   nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
-  //nlist.test_build(zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
+  nlist.test_build(zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
 
   //tol = 7.71e-4;
   //if (!xyzq_sorted_ref.compare(xyzq_sorted, tol, max_diff)) {

@@ -3,6 +3,11 @@
 
 #include <cuda.h>
 
+// Constants
+const int n_jlist_max = 64;
+const int n_jlist_max_shift = 6;
+const int n_jlist_max_mask = (1<<6) - 1;
+
 template <int tilesize>
 struct num_excl {
   static const int val = ((tilesize*tilesize-1)/32 + 1);
@@ -207,8 +212,8 @@ private:
   int atom_excl_len;
   int *atom_excl;
 
-  int cell_excl_buffer_len;
-  int* cell_excl_buffer;
+  int excl_atom_heap_len;
+  int* excl_atom_heap;
 
   // Maximum number of atom-atom exclusions
   int max_nexcl;

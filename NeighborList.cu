@@ -150,6 +150,8 @@ __global__ void calc_z_column_pos_kernel(const int ncol_tot,
   }
 
   if (threadIdx.x == 0) {
+    // Cap off cell_patom
+    cell_patom[offset.y] = offset.x;
     // Write ncell into global GPU buffer
     d_nlist_param.ncell = offset.y;
     // Clear nexcl
@@ -860,7 +862,7 @@ __global__ void calc_bounding_box_kernel(const int* __restrict__ cell_patom,
     float maxy = xyzq_val.y;
     float maxz = xyzq_val.z;
 
-    for (int i=istart+1;i < iend;i++) {
+    for (int i=istart+1;i <= iend;i++) {
       xyzq_val = xyzq[i];
       minx = min(minx, xyzq_val.x);
       miny = min(miny, xyzq_val.y);
@@ -965,8 +967,8 @@ NeighborList<tilesize>::NeighborList(int nx, int ny, int nz) {
   atom_excl_len = 0;
   atom_excl = NULL;
 
-  cell_excl_buffer_len = 0;
-  cell_excl_buffer = NULL;
+  excl_atom_heap_len = 0;
+  excl_atom_heap = NULL;
 
   cell_excl_pos_len = 0;
   cell_excl_pos = NULL;
@@ -1027,7 +1029,7 @@ NeighborList<tilesize>::~NeighborList() {
   if (cell_bz != NULL) deallocate<float>(&cell_bz);
   if (atom_excl_pos != NULL) deallocate<int>(&atom_excl_pos);
   if (atom_excl != NULL) deallocate<int>(&atom_excl);
-  if (cell_excl_buffer != NULL) deallocate<int>(&cell_excl_buffer);
+  if (excl_atom_heap != NULL) deallocate<int>(&excl_atom_heap);
   if (cell_excl_pos != NULL) deallocate<int>(&cell_excl_pos);
   if (cell_excl != NULL) deallocate<int>(&cell_excl);
   if (bb != NULL) deallocate<bb_t>(&bb);
@@ -1261,6 +1263,8 @@ void get_cell_bounds_xy(const int izone, const int jzone, const int icell,
 //
 __forceinline__ __device__ void minmax_shfl(int z0, int z1, int &z0_min, int &z1_max) {
 #if __CUDA_ARCH__ >= 300
+  z0_min = z0;
+  z1_max = z1;
   for (int i=16;i >= 1;i/=2) {
     z0_min = min(z0_min, __shfl_xor(z0, i));
     z1_max = max(z1_max, __shfl_xor(z1, i));
@@ -1269,23 +1273,21 @@ __forceinline__ __device__ void minmax_shfl(int z0, int z1, int &z0_min, int &z1
 }
 
 __forceinline__ __device__ int min_shfl(int val) {
-  int val_min;
 #if __CUDA_ARCH__ >= 300
-  for (int i=16;i >= 1;i/=2) val_min = min(val_min, __shfl_xor(val, i));
+  for (int i=16;i >= 1;i/=2) val = min(val, __shfl_xor(val, i));
 #else
-  val_min = 0;
+  val = 0;
 #endif
-  return val_min;
+  return val;
 }
 
 __forceinline__ __device__ int max_shfl(int val) {
-  int val_max;
 #if __CUDA_ARCH__ >= 300
-  for (int i=16;i >= 1;i/=2) val_max = max(val_max, __shfl_xor(val, i));
+  for (int i=16;i >= 1;i/=2) val = max(val, __shfl_xor(val, i));
 #else
-  val_max = 0;
+  val = 0;
 #endif
-  return val_max;
+  return val;
 }
 
 __forceinline__ __device__ int min_shmem(int val, const int wid, volatile int* shbuf) {
@@ -1326,7 +1328,7 @@ __forceinline__ __device__ int bcast_shmem(int val, const int srclane, const int
 //
 // Calculates inclusive plus scan across warp
 //
-__forceinline__ __device__ int scan_shfl(int val, const int wid, const int scansize=warpsize) {
+__forceinline__ __device__ int incl_scan_shfl(int val, const int wid, const int scansize=warpsize) {
 #if __CUDA_ARCH__ >= 300
   for (int i=1;i < scansize;i*=2) {
     int n = __shfl_up(val, i, scansize);
@@ -1338,8 +1340,8 @@ __forceinline__ __device__ int scan_shfl(int val, const int wid, const int scans
   return val;
 }
 
-__forceinline__ __device__ int scan_shmem(int val, const int wid, volatile int* shbuf,
-					  const int scansize=warpsize) {
+__forceinline__ __device__ int incl_scan_shmem(int val, const int wid, volatile int* shbuf,
+					       const int scansize=warpsize) {
   shbuf[wid] = val;
   for (int i=1;i < scansize;i*=2) {
     int n = (wid >= i) ? shbuf[wid - i] : 0;
@@ -1375,7 +1377,7 @@ __forceinline__ __device__ int sum_shmem(int val, const int wid, volatile int* s
 //
 // wid = warp ID = threadIdx.x % warpsize
 //
-__forceinline__ __device__ int binary_scan(int val, int wid) {
+__forceinline__ __device__ int binary_excl_scan(int val, int wid) {
   return __popc( __ballot(val) & ((1 << wid) - 1) );
 }
 
@@ -1570,9 +1572,9 @@ __launch_bounds__(1024)
     }
     int jlen = jend - jstart + 1;
 #if __CUDA_ARCH__ >= 300
-    int pos = scan_shfl(jlen, wid);
+    int pos = incl_scan_shfl(jlen, wid);
 #else
-    int pos = scan_shmem(jlen, wid, shflmem);
+    int pos = incl_scan_shmem(jlen, wid, shflmem);
 #endif
     // Get the total number of excluded atoms by broadcasting the last value
     // across all threads in the warp
@@ -1634,7 +1636,7 @@ __launch_bounds__(1024)
       int val1 = (i < nexcl_tot) ? sh_excl[i] : -2;
       int val2 = (i+1 < nexcl_tot) ? sh_excl[i+1] : -2;
       int border = ((val1 != val2) && (val1 != -1));        // We're skipping -1 values
-      int pos = binary_scan(border, wid);
+      int pos = binary_excl_scan(border, wid);
       if (border) sh_excl[pos0 + pos] = val1;
 #if __CUDA_ARCH__ >= 300
       pos0 += bcast_shfl(pos + border, warpsize-1);
@@ -1655,9 +1657,9 @@ __launch_bounds__(1024)
       int scansize = blockDim.x/warpsize;
       int val = (wid < scansize) ? sh_nexcl_tot[wid] : 0;
 #if __CUDA_ARCH__ >= 300
-      int pexcl = scan_shfl(val, wid, scansize);
+      int pexcl = incl_scan_shfl(val, wid, scansize);
 #else
-      int pexcl = scan_shmem(val, wid, shflmem, scansize);
+      int pexcl = incl_scan_shmem(val, wid, shflmem, scansize);
 #endif
 
       // Write result to shared memory
@@ -1690,15 +1692,65 @@ __launch_bounds__(1024)
 }
 
 //
+//
+//
+template <int tilesize>
+__forceinline__ __device__ void flush_atomj(const int wid, const int istart,
+					    volatile int* __restrict__ sh_jlist,
+					    const int* __restrict__ cell_patom,
+					    const int min_atomj, const int max_atomj,
+					    const int n_atomj, volatile int* __restrict__ sh_atomj,
+					    const int min_excl_atom, const int max_excl_atom,
+					    const int n_excl_atom, const int* __restrict__ excl_atom,
+					    const int jtile_start,
+					    tile_excl_t<tilesize>* __restrict__ tile_excl) {
+
+  if ((min_atomj <= max_excl_atom) && (max_atomj >= min_excl_atom)) {
+    int atomj = (wid < n_atomj) ? (sh_atomj[wid] >> n_jlist_max_shift) : -1;
+    for (int ibase=0;ibase < n_excl_atom;ibase+=warpsize) {
+      int i = ibase + wid;
+      // Load excluded atom from global memory
+      int atomi = (i < n_excl_atom) ? excl_atom[i] : -1;
+      int has_excl = __ballot((atomi >= min_atomj) && (atomi <= max_atomj));
+      // Loop through possible exclusions
+      while (has_excl) {
+	// Get bit position for the exclusion
+	int bitpos = __ffs(has_excl) - 1;
+	i = ibase + bitpos;
+	atomi = excl_atom[i];
+	// Check atomi vs. sh_atomj[0...warpsize-1]
+	if (atomi == atomj) {
+	  // Thread wid found exclusion between atomi and atomj
+	  // NOTE: Only a single thread per warp enters here
+	  int i_jlist = (sh_atomj[wid] & n_jlist_max_mask);
+	  int jtile = jtile_start + i_jlist;
+	  int jcell = sh_jlist[i_jlist];
+	  int jstart = cell_patom[jcell];
+	  int excl_i = atomj - jstart;
+	  int excl_m = 1 << (atomi - istart);
+	  //tile_excl[jtile].excl[excl_i] |= excl_m;
+	}
+	// Remove bit from has_excl
+	has_excl ^= 1 << bitpos;
+      }
+    }
+  }
+}
+
+//
 // Flush jlist into global memory
 //
 template <int tilesize>
-__device__ void flush_jlist(const int wid, const int icell, const int n_jlist,
-			    volatile int* __restrict__ sh_jlist, const int ish,
-			    const float boxx, const float boxy, const float boxz,
-			    const float rcut2, const float4* __restrict__ xyzq,
+__device__ void flush_jlist(const int wid, const int istart, const int iend,
+			    const int n_jlist, volatile int* __restrict__ sh_jlist,
+			    const int ish,
+			    const float rcut2, const float xi, const float yi, const float zi,
+			    const float4* __restrict__ xyzq,
 			    const int* __restrict__ cell_patom,
-			    volatile float3* __restrict__ sh_xyzi,
+			    volatile float3* __restrict__ sh_xyzj,
+			    volatile int* __restrict__ sh_atomj,
+			    const int min_excl_atom, const int max_excl_atom,
+			    const int n_excl_atom, const int* __restrict__ excl_atom,
 			    int* __restrict__ tile_indj,
 			    tile_excl_t<tilesize>* __restrict__ tile_excl,
 			    ientry_t* __restrict__ ientry
@@ -1713,42 +1765,52 @@ __device__ void flush_jlist(const int wid, const int icell, const int n_jlist,
   //       "ghost" tiles in the list, we need to setup another shared memory buffer for
   //       exclusion masks and then only add the tiles that are non-empty.
   int jtile_start;
-  if (wid == 0) {
-    jtile_start = atomicAdd(&d_nlist_param.n_tile, n_jlist);
-  }
+  if (wid == 0) jtile_start = atomicAdd(&d_nlist_param.n_tile, n_jlist);
 #if __CUDA_ARCH__ >= 300
   jtile_start = bcast_shfl(jtile_start, 0);
 #else
   jtile_start = bcast_shmem(jtile_start, 0, wid, shflmem);
 #endif
 
-  // Calculate exclusion mask (=check for distance exclusions)
+  int min_atomj = 1 << 30;
+  int max_atomj = 0;
+  int n_atomj = 0;
   int n_jlist_new = 0;
-  int istart = cell_patom[icell] - 1;
-  int iend   = cell_patom[icell+1] - 2;
+  // Loop through j-cells
   for (int i_jlist=0;i_jlist < n_jlist;i_jlist++) {
     int jcell = sh_jlist[i_jlist];
-    int jstart = cell_patom[jcell] - 1;
-    int jend   = cell_patom[jcell+1] - 2;
+    int jstart = cell_patom[jcell];
+    int jend   = cell_patom[jcell + 1] - 1;
 
     //---------------------------------------------------------------------------------------
     //
-    // Exclusion check
+    // Exclusion check with jcell
     //
 
     // Load j-cell atoms
     float4 xyzq_j;
-    if (jstart + wid <= jend) xyzq[jstart + wid];
+    if (jstart + wid <= jend) xyzq_j = xyzq[jstart + wid];
+#if __CUDA_ARCH__ >= 300
     float xj = xyzq_j.x;
     float yj = xyzq_j.y;
     float zj = xyzq_j.z;
-    
+#else
+    sh_xyzj[wid].x = xyzq_j.x;
+    sh_xyzj[wid].y = xyzq_j.y;
+    sh_xyzj[wid].z = xyzq_j.z;
+#endif
+
+    bool any_incut = false;
+    bool first = true;
     for (int j=0;j <= jend-jstart;j++) {
 #if __CUDA_ARCH__ >= 300
       float xt = __shfl(xj, j);
       float yt = __shfl(yj, j);
       float zt = __shfl(zj, j);
 #else
+      float xt = sh_xyzj[j].x;
+      float yt = sh_xyzj[j].y;
+      float zt = sh_xyzj[j].z;
 #endif
       float dx = xi - xt;
       float dy = yi - yt;
@@ -1756,32 +1818,58 @@ __device__ void flush_jlist(const int wid, const int icell, const int n_jlist,
       
       float r2 = dx*dx + dy*dy + dz*dz;
 
-      int incut = (r2 < rcut2);
+      if (__any((r2 < rcut2))) {
+	any_incut = true;
 
-      int b = __ballot(incut);
-      // Bits in b are set for i -atoms that are within the cut-off of this j atom
-      while (b) {
-      }
+	// Set initial exclusion masks
+	if (first) {
+	  int jtile = jtile_start + n_jlist_new;
+	  // NOTE: In case i,j cells are less than tilesize atoms, add exclusions
+	  int mask = (jstart + wid <= jend) ? 0 : 0xffffffff;   // j contribution
+	  mask |= (1 << (tilesize-(iend-istart+1))) - 1;        // i contribution
+	  tile_excl[jtile].excl[wid] = mask;
+	  first = false;
+	}
 
-    }
+	// This j-atom is within rcut of one of the i-atoms => add to exclusion check list
+	// Add j-atom to the exclusion check list
+	int atomj = jstart + j;
+	min_atomj = min(min_atomj, atomj);
+	max_atomj = max(max_atomj, atomj);
+	sh_atomj[n_atomj++] = (atomj << n_jlist_max_shift) | n_jlist_new;
+	
+	// Check sh_atomj[0...warpsize-1] for exclusions with any
+	// of the i atoms in excl_atom[0...n_excl_atom-1]
+	if (n_atomj == warpsize) {
+	  // Check for topological exclusions
+	  flush_atomj<tilesize>(wid, istart, sh_jlist, cell_patom,
+				min_atomj, max_atomj, n_atomj, sh_atomj,
+				min_excl_atom, max_excl_atom, n_excl_atom, excl_atom,
+				jtile_start, tile_excl);
+	  min_atomj = 1 << 30;
+	  max_atomj = 0;
+	  n_atomj = 0;
+
+	} // if (natomj == warpsize)
+      } // if (__any((r2 < rcut2)))
+    } // for (int j=0;j <= jend-jstart;j++)
 
     //---------------------------------------------------------------------------------------
 
-    int excl = get_dist_excl_mask<tilesize>(wid, istart, iend, jstart, jend, ish, 
-    					    boxx, boxy, boxz, rcut2, xyzq, sh_xyzi);
-
-    // We keep this j-cell in the list if any of the exclusion masks are
-    // not all-exclusive
-    // NOTE: writing out exclusion mask here voids the need for storing these in
-    //       shared memory
-    if (__any(excl != -1)) {
+    if (any_incut) {
       // Keep in list
       int jtile = jtile_start + n_jlist_new;
-      tile_excl[jtile].excl[wid] = excl;
       if (wid == 0) tile_indj[jtile] = jstart;
+      // Re-store jcell so that flush_atomj can read it off
+      sh_jlist[n_jlist_new] = jcell;
       n_jlist_new++;
     }
   }
+
+  flush_atomj<tilesize>(wid, istart, sh_jlist, cell_patom,
+			min_atomj, max_atomj, n_atomj, sh_atomj,
+			min_excl_atom, max_excl_atom, n_excl_atom, excl_atom,
+			jtile_start, tile_excl);
   
   // Add to ientry list
   if (wid == 0) {
@@ -1796,8 +1884,6 @@ __device__ void flush_jlist(const int wid, const int icell, const int n_jlist,
   }
 
 }
-
-const int n_jlist_max = 100;
 
 //
 // Build neighborlist for one zone at the time
@@ -1820,7 +1906,7 @@ void build_kernel(const int max_nexcl,
 		  const float boxx, const float boxy, const float boxz,
 		  const float rcut, const float rcut2,
 		  const bb_t* __restrict__ bb,
-		  int* __restrict__ cell_excl_buffer,
+		  int* __restrict__ excl_atom_heap,
 		  int* __restrict__ tile_indj,
 		  tile_excl_t<tilesize>* __restrict__ tile_excl,
 		  ientry_t* __restrict__ ientry) {
@@ -1830,11 +1916,10 @@ void build_kernel(const int max_nexcl,
 
   // Index of the i-cell
   const int icell = (threadIdx.x + blockIdx.x*blockDim.x)/warpsize;
-
-  if (icell >= d_nlist_param.ncell) return;
-
   // Warp index
   const int wid = threadIdx.x % warpsize;
+
+  if (icell >= d_nlist_param.ncell) return;
 
   // Get (icellx, icelly, icellz, izone):
   int4 icell_xyz_zone = cell_xyz_zone[icell];
@@ -1858,10 +1943,11 @@ void build_kernel(const int max_nexcl,
   //                         + tilesize*sizeof(float3))
   //
   // Required space:
-  // shflmem:  blockDim.x*sizeof(int)
-  // jcellxy:  (blockDim.x/warpsize)*n_jzone*sizeof(int4)
+  // shflmem:  blockDim.x*sizeof(int)                           (Only for __CUDA_ARCH__ < 300)  
+  // jcellxy:  (blockDim.x/warpsize)*n_jzone*sizeof(int4)       (Only for IvsI = false)
   // sh_jlist: (blockDim.x/warpsize)*n_jlist_max*sizeof(int)
   // sh_xyzi:  (blockDim.x/warpsize)*tilesize*sizeof(float3)
+  // sh_atomj: blockDim.x*sizeof(int)
   //
   // NOTE: Each warp has its own jcellxy[]
   int shbuf_pos = 0;
@@ -1879,9 +1965,16 @@ void build_kernel(const int max_nexcl,
 					 (threadIdx.x/warpsize)*n_jlist_max*sizeof(int)];
   shbuf_pos += (blockDim.x/warpsize)*n_jlist_max*sizeof(int);
 
-  // i-cell coordinates (x, y, z)
-  volatile float3* sh_xyzi = (float3 *)&shbuf[shbuf_pos + 
+  // j coordinates (x, y, z) for flush_jlist
+  volatile float3* sh_xyzj = (float3 *)&shbuf[shbuf_pos + 
 					      (threadIdx.x/warpsize)*tilesize*sizeof(float3)];
+
+  shbuf_pos += (blockDim.x/warpsize)*tilesize*sizeof(float3);
+
+  volatile int* sh_atomj = (int *)&shbuf[shbuf_pos + 
+					 (threadIdx.x/warpsize)*warpsize*sizeof(int)];
+
+  shbuf_pos += blockDim.x*sizeof(int);
   // ----------------------------------------------------------------
 
   //
@@ -1890,47 +1983,52 @@ void build_kernel(const int max_nexcl,
 
   // Allocate space for exclusions in global memory
   // Each warp (icell) has tilesize*max_nexcl amount of space
-  int* __restrict__ cell_excl = &cell_excl_buffer[icell*tilesize*max_nexcl];
+  int* __restrict__ excl_atom = &excl_atom_heap[icell*tilesize*max_nexcl];
 
   int istart = cell_patom[icell];
   int iend   = cell_patom[icell+1] - 1;
   int iatom = istart + wid;
   int jstart = 0;
   int jend = -1;
+  float4 xyzq_i;
   if (iatom <= iend) {
     int ig = loc2glo_ind[iatom];
     jstart = atom_excl_pos[ig];
     jend   = atom_excl_pos[ig+1] - 1;
+    xyzq_i = xyzq[istart + wid];
   }
+  float xi = xyzq_i.x;
+  float yi = xyzq_i.y;
+  float zi = xyzq_i.z;
   int jlen = jend - jstart + 1;
 #if __CUDA_ARCH__ >= 300
-  int pos = scan_shfl(jlen, wid);
+  int pos = incl_scan_shfl(jlen, wid);
 #else
-  int pos = scan_shmem(jlen, wid, shflmem);
+  int pos = incl_scan_shmem(jlen, wid, shflmem);
 #endif
   // Get the total number of excluded atoms by broadcasting the last value
   // across all threads in the warp
 #if __CUDA_ARCH__ >= 300
-  int nexcl_tot = bcast_shfl(pos, warpsize-1);
+  int n_excl_atom = bcast_shfl(pos, warpsize-1);
 #else
-  int nexcl_tot = bcast_shmem(pos, warpsize-1, wid, shflmem);
+  int n_excl_atom = bcast_shmem(pos, warpsize-1, wid, shflmem);
 #endif
   // Get the exclusive sum position
   pos -= jlen;
   // Loop through excluded atoms:
   // Find min and max indices
-  // Store atom indices to cell_excl -buffer
-  int min_excl_atom = 1 << 31;                    // (= big number)
+  // Store atom indices to excl_atom -buffer
+  int min_excl_atom = 1 << 30;                    // (= big number)
   int max_excl_atom = 0;
   int nexcl = 0;
   for (int jatom=jstart;jatom <= jend;jatom++) {
-    int excl_atom = glo2loc_ind[atom_excl[jatom]];
+    int atom = glo2loc_ind[atom_excl[jatom]];
     // Atoms that are not on this node are marked in glo2loc_ind[] by value -1
-    if (excl_atom >= 0) {
-      min_excl_atom = min(min_excl_atom, excl_atom);
-      max_excl_atom = max(max_excl_atom, excl_atom);
+    if (atom >= 0) {
+      min_excl_atom = min(min_excl_atom, atom);
+      max_excl_atom = max(max_excl_atom, atom);
     }
-    cell_excl[pos + nexcl++] = excl_atom;
+    excl_atom[pos + nexcl++] = atom;
   }
   // Reduce min_excl_atom and max_excl_atom across the warp
 #if __CUDA_ARCH__ >= 300
@@ -1993,14 +2091,20 @@ void build_kernel(const int max_nexcl,
 	float imbbz0 = ibb.z + imz*boxz;
 	int ish = imx+1 + 3*(imy+1 + 3*(imz+1));
 
+	float imxi = xi + imx*boxx;
+	float imyi = yi + imy*boxy;
+	float imzi = zi + imz*boxz;
+
 	int n_jlist = 0;
 
 	if (IvsI) {
 	  int total_xy = n_jcellx*n_jcelly;
-	  int jcellz_min=1000000, jcellz_max=0;
+	  int jcellz_min = 1<<30;
+	  int jcellz_max = 0;
 	  for (int ibase=0;ibase < total_xy;ibase+=warpsize) {
 	    int i = ibase + wid;
-	    int jcellz0_t=1000000, jcellz1_t=0;
+	    int jcellz0_t = 1<<30;
+	    int jcellz1_t = 0;
 	    if (i < total_xy) {
 	      int jcelly = i/n_jcellx;
 	      int jcellx = i - jcelly*n_jcellx;
@@ -2013,7 +2117,8 @@ void build_kernel(const int max_nexcl,
 				      &cell_bz[cell0], rcut, jcellz0_t, jcellz1_t);
 	    }
 #if __CUDA_ARCH__ >= 300
-	    minmax_shfl(jcellz0_t, jcellz1_t, jcellz_min, jcellz_max);
+	    jcellz_min = min_shfl(jcellz0_t);
+	    jcellz_max = max_shfl(jcellz1_t);
 #else
 	    jcellz_min = min_shmem(jcellz0_t, wid, shflmem);
 	    jcellz_max = max_shmem(jcellz1_t, wid, shflmem);
@@ -2022,11 +2127,13 @@ void build_kernel(const int max_nexcl,
 
 	  int n_jcellz_max = jcellz_max - jcellz_min + 1;
 	  int total_xyz = n_jcellx*n_jcelly*n_jcellz_max;
+
 	  //
 	  // Final loop that goes through the cells
 	  //
 	  // Cells are ordered in (y, x, z). (i.e. z first, x second, y third)
 	  //
+
 	  for (int ibase=0;ibase < total_xyz;ibase+=warpsize) {
 	    int i = ibase + wid;
 	    int ok = 0;
@@ -2060,7 +2167,7 @@ void build_kernel(const int max_nexcl,
 	    // Add j-cells into temporary list (in shared memory)
 	    //
 	    // First reduce to calculate position for each thread in warp
-	    int pos = binary_scan(ok, wid);
+	    int pos = binary_excl_scan(ok, wid);
 	    int n_jlist_add = binary_reduce(ok);
 
 	    /*
@@ -2095,30 +2202,34 @@ void build_kernel(const int max_nexcl,
 
 	    // Flush if the buffer is full
 	    if ((n_jlist + n_jlist_add) > n_jlist_max) {
-	      flush_jlist<tilesize>(wid, icell, n_jlist, sh_jlist, ish,
-				    boxx, boxy, boxz, rcut2, xyzq, cell_patom,
-				    sh_xyzi, tile_indj, tile_excl, ientry
+	      flush_jlist<tilesize>(wid, istart, iend, n_jlist, sh_jlist, ish,
+				    rcut2, imxi, imyi, imzi, xyzq, cell_patom,
+				    sh_xyzj, sh_atomj,
+				    min_excl_atom, max_excl_atom, n_excl_atom, excl_atom,
+				    tile_indj, tile_excl, ientry
 #if __CUDA_ARCH__ < 300
 				    ,shflmem
 #endif
 				    );
 	      n_jlist = 0;
 	    }
-
+	    
 	    // Add to list
 	    if (ok) sh_jlist[n_jlist + pos] = jcell;
 	    n_jlist += n_jlist_add;
 
 	  }
 
-	  if (n_jlist > 0) flush_jlist<tilesize>(wid, icell, n_jlist, sh_jlist, ish,
-						 boxx, boxy, boxz, rcut2, xyzq, cell_patom,
-						 sh_xyzi, tile_indj, tile_excl, ientry
+
+	  if (n_jlist > 0) flush_jlist<tilesize>(wid, istart, iend, n_jlist, sh_jlist, ish,
+						 rcut2, imxi, imyi, imzi, xyzq, cell_patom,
+						 sh_xyzj, sh_atomj,
+						 min_excl_atom, max_excl_atom, n_excl_atom, excl_atom,
+						 tile_indj, tile_excl, ientry
 #if __CUDA_ARCH__ < 300
 						 ,shflmem
 #endif
 						 );
-
 
 
 	} else {
@@ -2167,10 +2278,12 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
 
   int nthread = 512;
   int nblock = (ncell_max-1)/nthread + 1;
+  int shmem_size = 0;
   calc_bounding_box_kernel<tilesize> <<< nblock, nthread, 0, stream >>>
     (cell_patom, xyzq, bb, cell_bz);
   cudaCheck(cudaGetLastError());
 
+  /*
   std::cout << "ncell_max*max_nexcl = " << ncell_max*max_nexcl << std::endl;
   reallocate<int>(&cell_excl_pos, &cell_excl_pos_len, ncell_max, 1.2f);
   reallocate<int>(&cell_excl, &cell_excl_len, ncell_max*max_nexcl, 1.2f);
@@ -2185,13 +2298,15 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
     (max_nexcl, loc2glo_ind, glo2loc_ind, cell_patom, atom_pcell, atom_excl_pos, atom_excl,
      cell_excl_pos, cell_excl);
   cudaCheck(cudaGetLastError());
+  */
 
-  reallocate<int>(&cell_excl_buffer, &cell_excl_buffer_len, ncell_max*tilesize*max_nexcl, 1.2f);
+  reallocate<int>(&excl_atom_heap, &excl_atom_heap_len, ncell_max*tilesize*max_nexcl, 1.2f);
 
   // Shared memory requirements:
   // (blockDim.x/warpsize)*( (~IvsI)*n_jzone*sizeof(int4) + n_jlist_max*sizeof(int) 
   //                         + tilesize*sizeof(float3))
-  shmem_size = (nthread/warpsize)*( n_jlist_max*sizeof(int) + tilesize*sizeof(float3));
+  shmem_size = (nthread/warpsize)*( n_jlist_max*sizeof(int) + tilesize*sizeof(float3)) + nthread*sizeof(int);
+  if (get_cuda_arch() < 300) shmem_size += nthread*sizeof(int);
   // For !IvsI, shmem_size += (nthread/warpsize)*n_int_zone_max*sizeof(int4)
   std::cout << "NeighborList::build, shmem_size = " << shmem_size << std::endl;
 
@@ -2200,7 +2315,7 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
   build_kernel<tilesize, true>
     <<< nblock, nthread, shmem_size, stream >>>
     (max_nexcl, cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom, loc2glo_ind, glo2loc_ind,
-     atom_excl_pos, atom_excl, xyzq, boxx, boxy, boxz, rcut, rcut*rcut, bb, cell_excl_buffer,
+     atom_excl_pos, atom_excl, xyzq, boxx, boxy, boxz, rcut, rcut*rcut, bb, excl_atom_heap,
      tile_indj, tile_excl, ientry);
   cudaCheck(cudaGetLastError());
 
@@ -2308,11 +2423,36 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
     int ish    = h_ientry[ind].ish;
     int startj = h_ientry[ind].startj;
     int endj   = h_ientry[ind].endj;
+
+    int ish_tmp = ish;
+    float shz = (ish_tmp/9 - 1)*boxz;
+    ish_tmp -= (ish_tmp/9)*9;
+    float shy = (ish_tmp/3 - 1)*boxy;
+    ish_tmp -= (ish_tmp/3)*3;
+    float shx = (ish_tmp - 1)*boxx;
+
     n += endj - startj + 1;
     for (int jtile=startj;jtile <= endj;jtile++) {
-      for (int wid=0;wid < (num_excl<tilesize>::val);wid++) {
-	npair_gpu += 32 - BitCount_ref(h_tile_excl[jtile].excl[wid]);
+      for (int i=istart;i < istart+tilesize;i++) {
+	float xi = h_xyzq[i].x + shx;
+	float yi = h_xyzq[i].y + shy;
+	float zi = h_xyzq[i].z + shz;
+	int jstart = h_tile_indj[jtile];
+	for (int j=jstart;j < jstart+tilesize;j++) {
+	  int excl = h_tile_excl[jtile].excl[j-jstart] >> (i-istart);
+	  float xj = h_xyzq[j].x;
+	  float yj = h_xyzq[j].y;
+	  float zj = h_xyzq[j].z;
+	  float dx = xi - xj;
+	  float dy = yi - yj;
+	  float dz = zi - zj;
+	  float r2 = dx*dx + dy*dy + dz*dz;
+	  if (r2 < rcut2 && !(excl & 1)) npair_gpu++;
+	}
       }
+      //for (int wid=0;wid < (num_excl<tilesize>::val);wid++) {
+      //npair_gpu += tilesize - BitCount_ref(h_tile_excl[jtile].excl[wid]);
+      //}
     }
   }
 
@@ -2367,8 +2507,6 @@ void NeighborList<tilesize>::setup_top_excl(int ncoord_glo, int *iblo14, int *in
   max_nexcl = 0;
   for (int i=0;i < ncoord_glo;i++) max_nexcl = max(max_nexcl, nexcl[i]);  
 
-  std::cout << "max_nexcl = " << max_nexcl << std::endl;
-
   int *h_atom_excl_pos = new int[ncoord_glo+1];
 
   // Use exclusive cumulative sum to calculate positions
@@ -2378,6 +2516,9 @@ void NeighborList<tilesize>::setup_top_excl(int ncoord_glo, int *iblo14, int *in
     nexcl_tot += nexcl[i];
   }
   h_atom_excl_pos[ncoord_glo] = nexcl_tot;
+
+  std::cout << "NeighborList<tilesize>::setup_top_excl, max_nexcl = " << max_nexcl 
+	    << " nexcl_tot = " << nexcl_tot << std::endl;
 
   int *h_atom_excl = new int[nexcl_tot];
 
