@@ -1825,8 +1825,16 @@ __device__ void flush_jlist(const int wid, const int istart, const int iend,
 	if (first) {
 	  int jtile = jtile_start + n_jlist_new;
 	  // NOTE: In case i,j cells are less than tilesize atoms, add exclusions
-	  int mask = (jstart + wid <= jend) ? 0 : 0xffffffff;   // j contribution
-	  mask |= (1 << (tilesize-(iend-istart+1))) - 1;        // i contribution
+	  int ni = (iend-istart+1);
+	  unsigned int mask = (jstart + wid <= jend) ? 0 : 0xffffffff;   // j contribution
+	  int up = (ni >= wid) ? ni-wid : tilesize + ni-wid;
+	  int dw = (wid >= ni) ? wid-ni : tilesize + wid-ni;
+	  unsigned int imask = (1 << (tilesize-ni)) - 1;
+	  mask |= (imask << up) | (imask >> dw);                // i contribution
+	  // Diagonal tile
+	  if (istart == jstart) {
+	    mask |= (0xffffffff << (tilesize-wid)) | 1;
+	  }
 	  tile_excl[jtile].excl[wid] = mask;
 	  first = false;
 	}
@@ -2341,6 +2349,7 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 
   int n_ientry = h_nlist_param->n_ientry;
   int n_tile = h_nlist_param->n_tile;
+  int ncell = h_nlist_param->ncell;
 
   int ncoord = zone_patom[7];
 
@@ -2379,25 +2388,21 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 	  float dx = xi - xj;
 	  float dy = yi - yj;
 	  float dz = zi - zj;
-	  int imx=0, imy=0, imz=0;
 	  if (dx > hboxx) {
-	    imx = -1;
+	    dx = (xi-boxx) - xj;
 	  } else if (dx < -hboxx) {
-	    imx = 1;
+	    dx = (xi+boxx) - xj;
 	  }
 	  if (dy > hboxy) {
-	    imy = -1;
+	    dy = (yi-boxy) - yj;
 	  } else if (dy < -hboxy) {
-	    imy = 1;
+	    dy = (yi+boxy) - yj;
 	  }
 	  if (dz > hboxz) {
-	    imz = -1;
+	    dz = (zi-boxz) - zj;
 	  } else if (dz < -hboxz) {
-	    imz = 1;
+	    dz = (zi+boxz) - zj;
 	  }
-	  dx += imx*boxx;
-	  dy += imy*boxy;
-	  dz += imz*boxz;
 	  float r2 = dx*dx + dy*dy + dz*dz;
 	  if (r2 < rcut2) {
 	    npair_i++;
@@ -2409,13 +2414,21 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
     }
   }
 
+  
+
   ientry_t* h_ientry = new ientry_t[n_ientry];
   tile_excl_t<tilesize>* h_tile_excl = new tile_excl_t<tilesize>[n_tile];
   int* h_tile_indj = new int[n_tile];
+  int* h_cell_patom = new int[ncell+1];
+
   copy_DtoH<ientry_t>(ientry, h_ientry, n_ientry);
   copy_DtoH<tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
   copy_DtoH<int>(tile_indj, h_tile_indj, n_tile);
+  copy_DtoH<int>(cell_patom, h_cell_patom, ncell+1);
 
+  //
+  // Go through the cell neighbor list
+  //
   int npair_gpu = 0;
   int n = 0;
   for (int ind=0;ind < n_ientry;ind++) {
@@ -2439,7 +2452,8 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 	float zi = h_xyzq[i].z + shz;
 	int jstart = h_tile_indj[jtile];
 	for (int j=jstart;j < jstart+tilesize;j++) {
-	  int excl = h_tile_excl[jtile].excl[j-jstart] >> (i-istart);
+	  int bitpos = ((i-istart) - (j-jstart) + tilesize) % tilesize;
+	  int excl = h_tile_excl[jtile].excl[j-jstart] >> bitpos;
 	  float xj = h_xyzq[j].x;
 	  float yj = h_xyzq[j].y;
 	  float zj = h_xyzq[j].z;
@@ -2455,18 +2469,158 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
       //}
     }
   }
+  
+  //
+  // Go through all cell pairs
+  //
+  int npair_gpu2 = 0;
+  int ncell_pair = 0;
+  for (int icell=0;icell < ncell;icell++) {
+    for (int jcell=icell;jcell < ncell;jcell++) {
+      int istart = h_cell_patom[icell];
+      int iend   = h_cell_patom[icell+1]-1;
+      int jstart = h_cell_patom[jcell];
+      int jend   = h_cell_patom[jcell+1]-1;
+      int npair_tile1 = 0;
+      bool pair = false;
+      for (int i=istart;i <= iend;i++) {
+	float xi = h_xyzq[i].x;
+	float yi = h_xyzq[i].y;
+	float zi = h_xyzq[i].z;
+	for (int j=jstart;j <= jend;j++) {
+	  if (icell == jcell && i >= j) continue;
+	  float xj = h_xyzq[j].x;
+	  float yj = h_xyzq[j].y;
+	  float zj = h_xyzq[j].z;
+	  float dx = xi - xj;
+	  float dy = yi - yj;
+	  float dz = zi - zj;
+	  if (dx > hboxx) {
+	    dx = (xi-boxx) - xj;
+	  } else if (dx < -hboxx) {
+	    dx = (xi+boxx) - xj;
+	  }
+	  if (dy > hboxy) {
+	    dy = (yi-boxy) - yj;
+	  } else if (dy < -hboxy) {
+	    dy = (yi+boxy) - yj;
+	  }
+	  if (dz > hboxz) {
+	    dz = (zi-boxz) - zj;
+	  } else if (dz < -hboxz) {
+	    dz = (zi+boxz) - zj;
+	  }
+	  float r2 = dx*dx + dy*dy + dz*dz;
+	  if (r2 < rcut2) {
+	    npair_gpu2++;
+	    npair_tile1++;
+	    pair = true;
+	  }
+	}
+      } // for (int i=istart;i <= iend;i++)
+
+      if (pair) {
+	// Pair of cells with atoms starting at istart and jstart
+	bool found_this_pair = false;
+	int ind, jtile;
+	for (ind=0;ind < n_ientry;ind++) {
+	  if (h_ientry[ind].indi != istart &&
+	      h_ientry[ind].indi != jstart) continue;
+	  int startj = h_ientry[ind].startj;
+	  int endj   = h_ientry[ind].endj;
+	  for (jtile=startj;jtile <= endj;jtile++) {
+	    if ((h_ientry[ind].indi == istart && h_tile_indj[jtile] == jstart) ||
+		(h_ientry[ind].indi == jstart && h_tile_indj[jtile] == istart)) {
+	      found_this_pair = true;
+	      break;
+	    }
+	  }
+	  if (found_this_pair) break;
+	}
+
+ 	if (found_this_pair) {
+	  // Check the tile we found (ind, jtile)
+	  int istart0, jstart0;
+	  if (istart == h_ientry[ind].indi &&
+	      jstart == h_tile_indj[jtile]) {
+	    istart0 = h_ientry[ind].indi;
+	    jstart0 = h_tile_indj[jtile];
+	  } else {
+	    jstart0 = h_ientry[ind].indi;
+	    istart0 = h_tile_indj[jtile];
+	  }
+
+	  int ish     = h_ientry[ind].ish;
+	  int ish_tmp = ish;
+	  float shz = (ish_tmp/9 - 1)*boxz;
+	  ish_tmp -= (ish_tmp/9)*9;
+	  float shy = (ish_tmp/3 - 1)*boxy;
+	  ish_tmp -= (ish_tmp/3)*3;
+	  float shx = (ish_tmp - 1)*boxx;
+
+	  int npair_tile2 = 0;
+	  for (int i=istart0;i < istart0+tilesize;i++) {
+	    float xi = h_xyzq[i].x + shx;
+	    float yi = h_xyzq[i].y + shy;
+	    float zi = h_xyzq[i].z + shz;
+	    for (int j=jstart0;j < jstart0+tilesize;j++) {
+	      int bitpos = ((i-istart) - (j-jstart) + tilesize) % tilesize;
+	      unsigned int excl = h_tile_excl[jtile].excl[j-jstart0] >> bitpos;
+	      float xj = h_xyzq[j].x;
+	      float yj = h_xyzq[j].y;
+	      float zj = h_xyzq[j].z;
+	      float dx = xi - xj;
+	      float dy = yi - yj;
+	      float dz = zi - zj;
+	      float r2 = dx*dx + dy*dy + dz*dz;
+	      if (r2 < rcut2 && !(excl & 1)) npair_tile2++;
+	    }
+	  }
+
+	  if (npair_tile1 != npair_tile2) {
+	    std::cout << "tile pair ERROR: icell = " << icell << " jcell = " << jcell 
+		      << " npair_tile1 = " << npair_tile1 << " npair_tile2 = " << npair_tile2 << std::endl;
+	    std::cout << " istart0 = " << istart0 << " jstart0 = " << jstart0 << std::endl;
+	    std::cout << " istart,iend  = " << istart << " " << iend 
+		      << " jstart,jend  = " << jstart << " " << jend << std::endl;
+	    /*
+	    for (int j=jstart0;j < jstart0+tilesize;j++) {
+	      for (int i=istart0;i < istart0+tilesize;i++) {
+		int bitpos = ((i-istart) - (j-jstart) + tilesize) % tilesize;
+		unsigned int excl = h_tile_excl[jtile].excl[j-jstart0] >> bitpos;
+		std::cout << (excl & 1);
+	      }
+	      std::cout << std::endl;
+	    }
+	    std::cout << std::endl;
+	    exit(1);
+	    */
+	  }
+	  
+	} else {
+	  std::cout << "tile pair with istart = " << istart << " jstart = " << jstart
+		    << " NOT FOUND" << std::endl;
+	  exit(1);
+	}
+      }
+
+      if (pair) ncell_pair++;
+    } // for (int jcell=icell;jcell < ncell;jcell++)
+  }
 
   delete [] h_xyzq;
   delete [] h_ientry;
   delete [] h_tile_excl;
   delete [] h_tile_indj;
+  delete [] h_cell_patom;
 
   if (npair_cpu != npair_gpu) {
     std::cout << "##################################################" << std::endl;
     std::cout << "test_build FAILED" << std::endl;
-    std::cout << "n = " << n << std::endl;
+    std::cout << "n = " << n << " ncell_pair = " << ncell_pair << std::endl;
     std::cout << "n_ientry = " << n_ientry << " n_tile = " << n_tile << std::endl;
-    std::cout << "npair_cpu = " << npair_cpu << " npair_gpu = " << npair_gpu << std::endl;
+    std::cout << "npair_cpu = " << npair_cpu << " npair_gpu = " << npair_gpu 
+	      << " npair_gpu2 = " << npair_gpu2 << std::endl;
     std::cout << "##################################################" << std::endl;
   } else {
     std::cout << "test_build OK" << std::endl;
