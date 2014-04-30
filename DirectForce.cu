@@ -393,6 +393,183 @@ __global__ void calc_14_force_kernel(const int nin14list, const int nex14list,
 }
 
 //
+// Nonbonded virial
+//
+template <typename AT, typename CT>
+__global__ void calc_virial_kernel(const int ncoord, const float4* __restrict__ xyzq,
+				   const int stride, const AT* __restrict__ force) {
+  // Shared memory:
+  // Required memory
+  // blockDim.x*9*sizeof(double) for __CUDA_ARCH__ < 300
+  // blockDim.x*9*sizeof(double)/warpsize for __CUDA_ARCH__ >= 300
+  extern __shared__ volatile double sh_vir[];
+
+  const int i = threadIdx.x + blockIdx.x*blockDim.x;
+  const int ish = i - ncoord;
+
+  double vir[9];
+  if (i < ncoord) {
+    float4 xyzqi = xyzq[i];
+    double x = (double)xyzqi.x;
+    double y = (double)xyzqi.y;
+    double z = (double)xyzqi.z;
+    double fx = ((double)force[i])*INV_FORCE_SCALE;
+    double fy = ((double)force[i+stride])*INV_FORCE_SCALE;
+    double fz = ((double)force[i+stride*2])*INV_FORCE_SCALE;
+    vir[0] = x*fx;
+    vir[1] = x*fy;
+    vir[2] = x*fz;
+    vir[3] = y*fx;
+    vir[4] = y*fy;
+    vir[5] = y*fz;
+    vir[6] = z*fx;
+    vir[7] = z*fy;
+    vir[8] = z*fz;
+  } else if (ish >= 0 && ish <= 26) {
+    double sforcex = d_energy_virial.sforcex[ish];
+    double sforcey = d_energy_virial.sforcey[ish];
+    double sforcez = d_energy_virial.sforcez[ish];
+    int ish_tmp = ish;
+    double shz = (double)((ish_tmp/9 - 1)*d_setup.boxz);
+    ish_tmp -= (ish_tmp/9)*9;
+    double shy = (double)((ish_tmp/3 - 1)*d_setup.boxy);
+    ish_tmp -= (ish_tmp/3)*3;
+    double shx = (double)((ish_tmp - 1)*d_setup.boxx);
+    vir[0] = shx*sforcex;
+    vir[1] = shx*sforcey;
+    vir[2] = shx*sforcez;
+    vir[3] = shy*sforcex;
+    vir[4] = shy*sforcey;
+    vir[5] = shy*sforcez;
+    vir[6] = shz*sforcex;
+    vir[7] = shz*sforcey;
+    vir[8] = shz*sforcez;
+  } else {
+#pragma unroll
+    for (int k=0;k < 9;k++)
+      vir[k] = 0.0;
+  }
+
+  // Reduce
+  //#if __CUDA_ARCH__ < 300
+  // 0-2
+#pragma unroll
+  for (int k=0;k < 3;k++)
+    sh_vir[threadIdx.x + k*blockDim.x] = vir[k];
+  __syncthreads();
+  for (int i=1;i < blockDim.x;i *= 2) {
+    int pos = threadIdx.x + i;
+    double vir_val[3];
+#pragma unroll
+    for (int k=0;k < 3;k++)
+      vir_val[k] = (pos < blockDim.x) ? sh_vir[pos + k*blockDim.x] : 0.0;
+    __syncthreads();
+#pragma unroll
+    for (int k=0;k < 3;k++)
+      sh_vir[threadIdx.x + k*blockDim.x] += vir_val[k];
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+#pragma unroll
+    for (int k=0;k < 3;k++)
+      atomicAdd(&d_energy_virial.vir[k], -sh_vir[k*blockDim.x]);
+  }
+
+  // 3-5
+#pragma unroll
+  for (int k=0;k < 3;k++)
+    sh_vir[threadIdx.x + k*blockDim.x] = vir[k+3];
+  __syncthreads();
+  for (int i=1;i < blockDim.x;i *= 2) {
+    int pos = threadIdx.x + i;
+    double vir_val[3];
+#pragma unroll
+    for (int k=0;k < 3;k++)
+      vir_val[k] = (pos < blockDim.x) ? sh_vir[pos + k*blockDim.x] : 0.0;
+    __syncthreads();
+#pragma unroll
+    for (int k=0;k < 3;k++)
+      sh_vir[threadIdx.x + k*blockDim.x] += vir_val[k];
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+#pragma unroll
+    for (int k=0;k < 3;k++)
+      atomicAdd(&d_energy_virial.vir[k+3], -sh_vir[k*blockDim.x]);
+  }
+
+  // 6-8
+#pragma unroll
+  for (int k=0;k < 3;k++)
+    sh_vir[threadIdx.x + k*blockDim.x] = vir[k+6];
+  __syncthreads();
+  for (int i=1;i < blockDim.x;i *= 2) {
+    int pos = threadIdx.x + i;
+    double vir_val[3];
+#pragma unroll
+    for (int k=0;k < 3;k++)
+      vir_val[k] = (pos < blockDim.x) ? sh_vir[pos + k*blockDim.x] : 0.0;
+    __syncthreads();
+#pragma unroll
+    for (int k=0;k < 3;k++)
+      sh_vir[threadIdx.x + k*blockDim.x] += vir_val[k];
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+#pragma unroll
+    for (int k=0;k < 3;k++)
+      atomicAdd(&d_energy_virial.vir[k+6], -sh_vir[k*blockDim.x]);
+  }
+
+  /*
+#else
+
+  // Warp index
+  const int wid = threadIdx.x / warpsize;
+  // Thread index within warp
+  const int tid = threadIdx.x % warpsize;
+
+  int blockdim = blockDim.x;
+  while (blockdim > 0) {
+    // Reduce within warp
+    for (int i=16;i >= 1;i /= 2) {
+#pragma unroll
+      for (int k=0;k < 9;k++)
+	vir[k] += __hiloint2double(__shfl_xor(__double2hiint(vir[k]), i),
+				   __shfl_xor(__double2loint(vir[k]), i));
+    }
+
+    // After reducing withing warps, block size is reduced by a factor warpsize
+    blockdim /= warpsize;
+
+    // Root thread of the warp stores result into shared memory
+    if (tid == 0) {
+#pragma unroll
+      for (int k=0;k < 9;k++)
+	sh_vir[wid + k*blockdim] = vir[k];
+    }
+    __syncthreads();
+
+    if (threadIdx.x < blockdim) {
+#pragma unroll
+      for (int k=0;k < 9;k++)
+	vir[k] = sh_vir[threadIdx.x + k*blockdim];
+    }
+
+  }
+
+  if (threadIdx.x == 0) {
+#pragma unroll
+    for (int k=0;k < 9;k++)
+      atomicAdd(&d_energy_virial.vir[k], -vir[k]);
+  }
+
+#endif
+  */
+
+}
+
+//
 // Nonbonded force kernel
 //
 template <typename AT, typename CT, int tilesize, int vdw_model, int elec_model,
@@ -404,7 +581,7 @@ __global__ void calc_force_kernel(const int base,
 				  const int stride,
 				  const float* __restrict__ vdwparam, const int nvdwparam,
 				  const float4* __restrict__ xyzq, const int* __restrict__ vdwtype,
-				  AT *force) {
+				  AT* __restrict__ force) {
 
   // Pre-computed constants
   const int num_excl = ((tilesize*tilesize-1)/32 + 1);
@@ -420,7 +597,7 @@ __global__ void calc_force_kernel(const int base,
   // Warp index (0...warpsize-1)
   const int wid = threadIdx.x % warpsize;
 
-  // Load index
+  // Load index (0...15 or 0...31)
   const int lid = (tilesize == 16) ? (wid % tilesize) : wid;
 
   int shmem_pos = 0;
@@ -471,13 +648,13 @@ __global__ void calc_force_kernel(const int base,
     endj   = ientry[ientry_ind].endj;
   } else {
     indi = 0;
-    ish  = 0;
+    ish  = 1;
     startj = 1;
     endj = 0;
   }
 
   // Calculate shift for i-atom
-  // ish = 1...27
+  // ish = 0...26
   int ish_tmp = ish;
   float shz = (ish_tmp/9 - 1)*d_setup.boxz;
   ish_tmp -= (ish_tmp/9)*9;
@@ -640,32 +817,30 @@ __global__ void calc_force_kernel(const int base,
   write_force<AT>(sh_fix[wid], sh_fiy[wid], sh_fiz[wid], indi + lid, stride, force);
 
   if (calc_virial) {
+    // Virial is calculated from (sh_fix[], sh_fiy[], sh_fiz[])
     // Variable "ish" depends on warp => Reduce within warp
-    __syncthreads();
-    // Shared memory required:
-    // blockDim.x*sizeof(double)*3
-    int shmempos = 0;
-    volatile double* sh_sforcex = (double *)&shmem[shmempos + 
-						(threadIdx.x/warpsize)*warpsize*sizeof(double)];
-    shmempos += blockDim.x*sizeof(double);
-    volatile double* sh_sforcey = (double *)&shmem[shmempos + 
-						(threadIdx.x/warpsize)*warpsize*sizeof(double)];
-    shmempos += blockDim.x*sizeof(double);
-    volatile double* sh_sforcez = (double *)&shmem[shmempos + 
-						(threadIdx.x/warpsize)*warpsize*sizeof(double)];
+
+    // Convert into double
+    volatile double *sh_sfix = (double *)sh_fix;
+    volatile double *sh_sfiy = (double *)sh_fiy;
+    volatile double *sh_sfiz = (double *)sh_fiz;
+
+    sh_sfix[wid] = ((double)sh_fix[wid])*INV_FORCE_SCALE;
+    sh_sfiy[wid] = ((double)sh_fiy[wid])*INV_FORCE_SCALE;
+    sh_sfiz[wid] = ((double)sh_fiz[wid])*INV_FORCE_SCALE;
 
     for (int d=16;d >= 1;d/=2) {
-      sh_sforcex[wid] += sh_sforcex[wid + d];
-      sh_sforcey[wid] += sh_sforcey[wid + d];
-      sh_sforcez[wid] += sh_sforcez[wid + d];
+      if (wid < d) {
+	sh_sfix[wid] += sh_sfix[wid + d];
+	sh_sfiy[wid] += sh_sfiy[wid + d];
+	sh_sfiz[wid] += sh_sfiz[wid + d];
+      }
     }
-
     if (wid == 0) {
-      atomicAdd(&d_energy_virial.sforcex[ish-1], sh_sforcex[0]);
-      atomicAdd(&d_energy_virial.sforcey[ish-1], sh_sforcey[0]);
-      atomicAdd(&d_energy_virial.sforcez[ish-1], sh_sforcez[0]);
+      atomicAdd(&d_energy_virial.sforcex[ish], sh_sfix[0]);
+      atomicAdd(&d_energy_virial.sforcey[ish], sh_sfiy[0]);
+      atomicAdd(&d_energy_virial.sforcez[ish], sh_sfiz[0]);
     }
-
   }
 
   if (calc_energy) {
@@ -1286,6 +1461,12 @@ template <typename AT, typename CT>
 void DirectForce<AT, CT>::calc_14_force(const float4 *xyzq,
 					const bool calc_energy, const bool calc_virial,
 					const int stride, AT *force, cudaStream_t stream) {
+
+  if (!vdwparam_texref_bound) {
+    std::cerr << "DirectForce<AT, CT>::calc_14_force, vdwparam14_texref must be bound" << std::endl;
+    exit(1);
+  }
+
   int nthread = 512;
   //int nblock = (nin14list + nex14list - 1)/nthread + 1;
   int nin14block = (nin14list - 1)/nthread + 1;
@@ -1655,6 +1836,11 @@ void DirectForce<AT, CT>::calc_force(const float4 *xyzq,
 				     const int stride, AT *force, cudaStream_t stream) {
 
   const int tilesize = 32;
+
+  if (!vdwparam_texref_bound) {
+    std::cerr << "DirectForce<AT, CT>::calc_force, vdwparam_texref must be bound" << std::endl;
+    exit(1);
+  }
 
   if (nlist->n_ientry == 0) return;
   int vdw_model_loc = calc_vdw ? vdw_model : NONE;
@@ -2133,6 +2319,26 @@ void DirectForce<AT, CT>::calc_force(const float4 *xyzq,
 }
 
 //
+// Calculates virial
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::calc_virial(const int ncoord, const float4 *xyzq,
+				      const int stride, AT *force,
+				      cudaStream_t stream) {
+
+  int nthread, nblock, shmem_size;
+  nthread = 256;
+  nblock = (ncoord+27-1)/nthread + 1;
+  shmem_size = nthread*3*sizeof(double);
+
+  calc_virial_kernel <AT, CT>
+    <<< nblock, nthread, shmem_size, stream>>>
+    (ncoord, xyzq, stride, force);
+
+  cudaCheck(cudaGetLastError());
+}
+
+//
 // Sets Energies and virials to zero
 //
 template <typename AT, typename CT>
@@ -2141,6 +2347,8 @@ void DirectForce<AT, CT>::clear_energy_virial(cudaStream_t stream) {
   h_energy_virial->energy_vdw = 0.0;
   h_energy_virial->energy_elec = 0.0;
   h_energy_virial->energy_excl = 0.0;
+  for (int i=0;i < 9;i++)
+    h_energy_virial->vir[i] = 0.0;
   for (int i=0;i < 27;i++) {
     h_energy_virial->sforcex[i] = 0.0;
     h_energy_virial->sforcey[i] = 0.0;
@@ -2159,23 +2367,22 @@ template <typename AT, typename CT>
 void DirectForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
 					    double *energy_vdw, double *energy_elec,
 					    double *energy_excl,
-					    double *sforcex, double *sforcey, double *sforcez) {
+					    double *vir) {
   if (prev_calc_energy && prev_calc_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(DirectEnergyVirial_t)));
+    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, (3+9)*sizeof(double) ));
   } else if (prev_calc_energy) {
     cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 3*sizeof(double)));
   } else if (prev_calc_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 27*3*sizeof(double),
+    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 9*sizeof(double),
 				   3*sizeof(double)));
   }
   *energy_vdw = h_energy_virial->energy_vdw;
   *energy_elec = h_energy_virial->energy_elec;
   *energy_excl = h_energy_virial->energy_excl;
-  for (int i=0;i < 27;i++) {
-    sforcex[i] = h_energy_virial->sforcex[i];
-    sforcey[i] = h_energy_virial->sforcey[i];
-    sforcez[i] = h_energy_virial->sforcez[i];
+  for (int i=0;i < 9;i++) {
+    vir[i] = h_energy_virial->vir[i];
   }
+
 }
 
 //

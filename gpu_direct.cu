@@ -72,7 +72,12 @@ void test() {
   const double ron = 7.5;
   const double e14fac = 1.5;
   const int ncoord = 23558;
-  const double ref_vpress[9] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  const double ref_virtensor[9] = {58748.2766568620, 159.656334638237, 483.080609561938,
+				   159.656334638202, 57272.9410562695, 894.635309171291,
+				   483.080609561938, 894.635309171288, 56639.3675265570};
+  const double ref_vir = 57553.5284132295;
+  const double ref_energy_vdw = 8198.14425;
+  const double ref_energy_elec = -73396.45998;
 
   Force<float> force_main("test_data/force_direct_main.txt");
   Force<float> force_total("test_data/force_direct.txt");
@@ -162,6 +167,38 @@ void test() {
     std::cout<<"Non-bonded (total) force comparison OK"<<std::endl;
     std::cout<<"(tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
+
+  // Check energy and virial
+  force_fp.clear();
+  dir.clear_energy_virial();
+  dir.calc_force(xyzq.xyzq, &nlist_ref, true, true, force_fp.xyz.stride, force_fp.xyz.data);
+  dir.calc_virial(ncoord, xyzq.xyzq, force_fp.xyz.stride, force_fp.xyz.data);
+
+  double energy_vdw;
+  double energy_elec;
+  double energy_excl;
+  double virtensor[9];
+  dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
+  double vir = (virtensor[0] + virtensor[4] + virtensor[8])/3.0;
+  std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
+  std::cout << "vir = " << vir << " virtensor=" << std::endl;
+  max_diff = 0.0;
+  for (int j=0;j < 3;j++) {
+    for (int i=0;i < 3;i++) {
+      double diff = fabs(virtensor[j*3+i] - ref_virtensor[j*3+i]);
+      max_diff = max(max_diff, diff);
+      std::cout << virtensor[j*3+i] << " (" << diff/ref_virtensor[j*3+i] << ") ";
+    }
+    std::cout << std::endl;
+  }
+
+  if (max_diff < 3.13) {
+    std::cout << "Nonbonded virial comparison OK" << std::endl;
+  } else {
+    std::cout << "Nonbonded virial comparison FAILED" << std::endl;
+  }
+  std::cout << "max_diff(vir_tensor) = " << max_diff << std::endl;
+  std::cout << "max_diff(vir) = " << fabs(vir - ref_vir) << std::endl;
 
   delete [] in14list;
   delete [] ex14list;

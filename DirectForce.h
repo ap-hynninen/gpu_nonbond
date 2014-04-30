@@ -21,7 +21,10 @@ struct DirectEnergyVirial_t {
   double energy_elec;
   double energy_excl;
 
-  // Shift forces for calculating virials
+  // Finished virial
+  double vir[9];
+
+  // Shift forces for virial calculation
   double sforcex[27];
   double sforcey[27];
   double sforcez[27];
@@ -161,13 +164,16 @@ public:
 		  const bool calc_virial,
 		  const int stride, AT *force, cudaStream_t stream=0);
 
+  void calc_virial(const int ncoord, const float4 *xyzq,
+		   const int stride, AT *force,
+		   cudaStream_t stream=0);
 
   void clear_energy_virial(cudaStream_t stream=0);
   
   void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
 			 double *energy_vdw, double *energy_elec,
 			 double *energy_excl,
-			 double *sforcex, double *sforcey, double *sforcez);
+			 double *vir);
 };
 
 #endif // DIRECTFORCE_H
