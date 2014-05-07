@@ -330,12 +330,14 @@ void start_gpu(int numnode, int mynode) {
     exit(1);
   }
 
+  /*
   if (device_count == 4) {
     int devices[4] = {2, 3, 0, 1};
     gpu_ind = devices[mynode % device_count];
   } else {
-    gpu_ind = mynode % device_count;
-  }
+  */
+  gpu_ind = mynode % device_count;
+    //}
   cudaCheck(cudaSetDevice(gpu_ind));
 
   cudaCheck(cudaThreadSynchronize());
