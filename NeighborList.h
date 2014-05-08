@@ -257,7 +257,7 @@ private:
   void get_nlist_param();
 
 public:
-  NeighborList(int nx, int ny, int nz);
+  NeighborList();
   ~NeighborList();
 
   void sort(const int *zone_patom,

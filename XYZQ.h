@@ -29,6 +29,8 @@ public:
   void set_ncoord(int ncoord, float fac=1.0f);
   void set_xyzq(int ncopy, float4 *h_xyzq, size_t offset=0, cudaStream_t stream=0);
 
+  void set_xyz(const double *xyz, const int stride, cudaStream_t stream=0);
+
   bool compare(XYZQ& xyzq_in, const double tol, double& max_diff);
 };
 

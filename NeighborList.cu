@@ -897,7 +897,7 @@ __global__ void calc_bounding_box_kernel(const int* __restrict__ cell_patom,
 // Class creator
 //
 template <int tilesize>
-NeighborList<tilesize>::NeighborList(int nx, int ny, int nz) {
+NeighborList<tilesize>::NeighborList() {
 
   n_ientry = 0;
   n_tile = 0;
@@ -981,6 +981,9 @@ NeighborList<tilesize>::NeighborList(int nx, int ny, int nz) {
 
   allocate_host<NeighborListParam_t>(&h_nlist_param, 1);
 
+  int nx = 1;
+  int ny = 1;
+  int nz = 1;
   h_nlist_param->imx_lo = 0;
   h_nlist_param->imx_hi = 0;
   h_nlist_param->imy_lo = 0;

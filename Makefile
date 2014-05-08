@@ -25,6 +25,8 @@ OBJS_BONDED = XYZQ.o Force.o cuda_utils.o VirialPressure.o BondedForce.o gpu_bon
 
 OBJS_CONST = cuda_utils.o gpu_const.o HoloConst.o #const_reduce_lists.o
 
+OBJS_DYNA = cuda_utils.o gpu_dyna.o Force.o CudaLeapfrogIntegrator.o CudaPMEForcefield.o NeighborList.o DirectForce.o BondedForce.o Grid.o Matrix3d.o XYZQ.o
+
 CUDAROOT := $(subst /bin/,,$(dir $(shell which nvcc)))
 
 ifeq ($(OS),Linux)
@@ -33,7 +35,7 @@ else
 LFLAGS = -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcufft -lcuda -lstdc++.6 -lnvToolsExt
 endif
 
-all: gpu_direct gpu_bonded gpu_recip gpu_const
+all: gpu_direct gpu_bonded gpu_recip gpu_const gpu_dyna
 
 gpu_recip : $(OBJS_RECIP)
 	$(CL) $(LFLAGS) -o gpu_recip $(OBJS_RECIP)
@@ -47,6 +49,9 @@ gpu_bonded : $(OBJS_BONDED)
 gpu_const : $(OBJS_CONST)
 	$(CL) $(LFLAGS) -o gpu_const $(OBJS_CONST)
 
+gpu_dyna : $(OBJS_DYNA)
+	$(CL) $(LFLAGS) -o gpu_dyna $(OBJS_DYNA)
+
 clean: 
 	rm -f *.o
 	rm -f *~
@@ -54,6 +59,7 @@ clean:
 	rm -f gpu_direct
 	rm -f gpu_bonded
 	rm -f gpu_const
+	rm -f gpu_dyna
 
 %.o : %.cu
 	nvcc -c -O3 -gencode arch=compute_20,code=sm_20 -gencode arch=compute_35,code=sm_35 -lineinfo -fmad=true -use_fast_math -D$(DEFS) $<

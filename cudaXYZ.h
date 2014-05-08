@@ -79,6 +79,14 @@ public:
     copy_DtoD_sync<T>((T *)xyz.data, this->data, 3*this->stride);
   }
 
+  // Sets data from list of numbers on host
+  void set_data_sync(const int n, const T *h_x, const T *h_y, const T *h_z) {
+    resize(n);
+    copy_HtoD_sync<T>(h_x, this->data, this->n);
+    copy_HtoD_sync<T>(h_y, &this->data[this->stride], this->n);
+    copy_HtoD_sync<T>(h_z, &this->data[this->stride*2], this->n);
+  }
+
   //--------------------------------------------------------------------------
 
 };

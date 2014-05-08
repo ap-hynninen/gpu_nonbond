@@ -2,6 +2,7 @@
 #include <fstream>
 #include <cassert>
 #include "cuda_utils.h"
+#include "gpu_utils.h"
 #include "XYZQ.h"
 
 //
@@ -11,10 +12,34 @@
 //
 //
 
+//
+// Copies x, y, z coordinates into xyzq -array
+//
+__global__ void set_xyz_kernel(const int ncoord, const int stride,
+			       const double* __restrict__ xyz,
+			       float4* __restrict__ xyzq) {
+  const int tid = threadIdx.x + blockIdx.x*blockDim.x;
+  if (tid < ncoord) {
+    float x = xyz[tid];
+    float y = xyz[tid + stride];
+    float z = xyz[tid + stride*2];
+    xyzq[tid].x = x;
+    xyzq[tid].y = y;
+    xyzq[tid].z = z;
+  }
+}
+
+//##########################################################################################
+//##########################################################################################
+//##########################################################################################
+
 int XYZQ::get_xyzq_len() {
   return ((ncoord-1)/align+1)*align;
 }
 
+//
+// Class creator
+//
 XYZQ::XYZQ() {
   ncoord = 0;
   xyzq_len = 0;
@@ -22,11 +47,17 @@ XYZQ::XYZQ() {
   xyzq = NULL;
 }
 
+//
+// Class creator
+//
 XYZQ::XYZQ(int ncoord, int align) : ncoord(ncoord), align(align) {
   xyzq_len = get_xyzq_len();
   allocate<float4>(&xyzq, xyzq_len);
 }
 
+//
+// Class creator
+//
 XYZQ::XYZQ(const char *filename, int align) : align(align) {
   
   std::ifstream file(filename);
@@ -89,6 +120,18 @@ void XYZQ::set_ncoord(int ncoord, float fac) {
 //
 void XYZQ::set_xyzq(int ncopy, float4 *h_xyzq, size_t offset, cudaStream_t stream) {
   copy_HtoD<float4>(&h_xyzq[offset], &xyzq[offset], ncopy, stream);
+}
+
+//
+// Copies xyz (on device) into the coordinate slots
+//
+void XYZQ::set_xyz(const double *xyz, const int stride, cudaStream_t stream) {
+  int nthread = 512;
+  int nblock = (ncoord-1)/nthread+1;
+
+  set_xyz_kernel<<< nblock, nthread, 0, stream >>>(ncoord, stride, xyz, xyzq);
+
+  cudaCheck(cudaGetLastError());
 }
 
 //
