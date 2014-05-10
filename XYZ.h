@@ -35,6 +35,11 @@ public:
     return ((sizeof(T) == sizeof(P)) && (this->n == xyz->n) && (this->stride == xyz->stride));
   }
 
+  // Swaps XYZ contents
+  void swap(const XYZ<T> &xyz) {
+    assert(this->match(xyz));
+  }
+
   // Resizes array to contain n entries with reallocation factor "fac"
   virtual void resize(int n, float fac=1.0f) = 0;
 

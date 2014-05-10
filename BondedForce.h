@@ -185,19 +185,19 @@ public:
   BondedForce();
   ~BondedForce();
 
-  void setup_coef(int nbondcoef, float2 *h_bondcoef,
-		  int nureybcoef, float2 *h_ureybcoef,
-		  int nanglecoef, float2 *h_anglecoef,
-		  int ndihecoef, float4 *h_dihecoef,
-		  int nimdihecoef, float4 *h_imdihecoef,
-		  int ncmapcoef, float2 *h_cmapcoef);
+  void setup_coef(const int nbondcoef, const float2 *h_bondcoef,
+		  const int nureybcoef, const float2 *h_ureybcoef,
+		  const int nanglecoef, const float2 *h_anglecoef,
+		  const int ndihecoef, const float4 *h_dihecoef,
+		  const int nimdihecoef, const float4 *h_imdihecoef,
+		  const int ncmapcoef, const float2 *h_cmapcoef);
 
-  void setup_list(int nbondlist, bondlist_t *h_bondlist, 
-		  int nureyblist, bondlist_t *h_ureyblist,
-		  int nanglelist, anglelist_t *h_anglelist,
-		  int ndihelist, dihelist_t *h_dihelist,
-		  int nimdihelist, dihelist_t *h_imdihelist,
-		  int ncmaplist, cmaplist_t *h_cmaplist);
+  void setup_list(const int nbondlist, const bondlist_t *h_bondlist, 
+		  const int nureyblist, const bondlist_t *h_ureyblist,
+		  const int nanglelist, const anglelist_t *h_anglelist,
+		  const int ndihelist, const dihelist_t *h_dihelist,
+		  const int nimdihelist, const dihelist_t *h_imdihelist,
+		  const int ncmaplist, const cmaplist_t *h_cmaplist);
 
   void calc_force(const float4 *xyzq,
 		  const float boxx, const float boxy, const float boxz,

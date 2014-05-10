@@ -45,7 +45,10 @@ struct NeighborListParam_t {
   int ncell;
 
   // Minimum x and y for each zone
-  float3 minxyz[8];
+  float3 min_xyz[8];
+
+  // Maximum x and y for each zone
+  float3 max_xyz[8];
 
   // Number of cells for each zone (NOTE: ncellz_max[i] is the maximum value for zone i)
   int ncellx[8];
@@ -58,6 +61,7 @@ struct NeighborListParam_t {
   // xy cell sizes
   float celldx[8];
   float celldy[8];
+  float celldz_min[8];
 
   // Inverse of xy cell sizes
   float inv_celldx[8];
@@ -66,17 +70,10 @@ struct NeighborListParam_t {
   // z cell boundaries
   float* cellbx[8];
 
-  // xy Image list. Maximum value of nimgxy is 9
-  //int nimgxy;
-  //int imgxy[9];
-
   // Interaction zones
   int zone_patom[8];
   int n_int_zone[8];
   int int_zone[8][8];
-
-  // cell start index for each zone, plus one to cap it off
-  //int startcell_zone[9];
 
   // Number of entries in ientry -table
   int n_ientry;
@@ -189,6 +186,7 @@ private:
   // Approximate upper bound for number of cells
   int ncell_max;
 
+  // Host copy of parameters
   NeighborListParam_t *h_nlist_param;
 
   // Maximum value of n_int_zone[]
@@ -217,12 +215,6 @@ private:
 
   // Maximum number of atom-atom exclusions
   int max_nexcl;
-
-  // Host memory
-  int n_int_zone[8], int_zone[8][8];
-  int ncellx[8], ncelly[8], ncellz_max[8];
-  int zone_natom[8];
-  float celldx[8], celldy[8], celldz_min[8];
 
   void get_tile_ientry_est(int *n_int_zone, int int_zone[][8],
 			   int *ncellx, int *ncelly, int *ncellz_max,
@@ -256,12 +248,29 @@ private:
   void set_nlist_param(cudaStream_t stream);
   void get_nlist_param();
 
+  void sort_setup(const int *zone_patom,
+		  const float3 *max_xyz, const float3 *min_xyz,
+		  int &ncol_tot, cudaStream_t stream);
+
+  void sort_alloc_realloc(const int ncol_tot, const int ncoord);
+
+  void sort_build_indices(const int ncoord, float4 *xyzq, cudaStream_t stream);
+
+  void sort_core(const int ncol_tot, const int ncoord,
+		 float4 *xyzq,
+		 float4 *xyzq_sorted,
+		 cudaStream_t stream);
 public:
   NeighborList();
   ~NeighborList();
 
   void sort(const int *zone_patom,
 	    const float3 *max_xyz, const float3 *min_xyz,
+	    float4 *xyzq,
+	    float4 *xyzq_sorted,
+	    cudaStream_t stream=0);
+
+  void sort(const int *zone_patom,
 	    float4 *xyzq,
 	    float4 *xyzq_sorted,
 	    cudaStream_t stream=0);

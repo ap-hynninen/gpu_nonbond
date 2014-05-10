@@ -30,13 +30,37 @@ private:
   // Coordinates in XYZQ format
   XYZQ xyzq;
 
+  // Coordinates in XYZQ format
+  XYZQ xyzq_sorted;
+
   // Neighbor list
   NeighborList<32> nlist;
 
   // Direct non-bonded force
   DirectForce<long long int, float> dir;
 
+  // -------------
   // Bonded force
+  // -------------
+  // Global bonded lists
+  int nbondlist;
+  bondlist_t* bondlist;
+
+  int nureyblist;
+  bondlist_t* ureyblist;
+
+  int nanglelist;
+  anglelist_t* anglelist;
+
+  int ndihelist;
+  dihelist_t* dihelist;
+
+  int nimdihelist;
+  dihelist_t* imdihelist;
+
+  int ncmaplist;
+  cmaplist_t* cmaplist;
+  
   BondedForce<long long int, float> bonded;
 
   // Reciprocal force
@@ -44,9 +68,33 @@ private:
 
   bool heuristic_check(const cudaXYZ<double> *coord);
 
+  void setup_bonded(const int nbondlist, const bondlist_t* h_bondlist,
+		    const int nureyblist, const bondlist_t* h_ureyblist,
+		    const int nanglelist, const anglelist_t* h_anglelist,
+		    const int ndihelist, const dihelist_t* h_dihelist,
+		    const int nimdihelist, const dihelist_t* imdihelist,
+		    const int ncmaplist, const cmaplist_t* cmaplist);
 public:
 
-  CudaPMEForcefield();
+  CudaPMEForcefield(const int nbondlist, const bondlist_t* h_bondlist,
+		    const int nureyblist, const bondlist_t* h_ureyblist,
+		    const int nanglelist, const anglelist_t* h_anglelist,
+		    const int ndihelist, const dihelist_t* h_dihelist,
+		    const int nimdihelist, const dihelist_t* imdihelist,
+		    const int ncmaplist, const cmaplist_t* cmaplist,
+		    const int nbondcoef, const float2 *h_bondcoef,
+		    const int nureybcoef, const float2 *h_ureybcoef,
+		    const int nanglecoef, const float2 *h_anglecoef,
+		    const int ndihecoef, const float4 *h_dihecoef,
+		    const int nimdihecoef, const float4 *h_imdihecoef,
+		    const int ncmapcoef, const float2 *h_cmapcoef,
+		    const double rnl, const double roff, const double ron,
+		    const double kappa, const double e14fac,
+		    const int vdw_model, const int elec_model,
+		    const int nvdwparam, const float *h_vdwparam,
+		    const int* h_vdwtype,
+		    const int nfftx, const int nffty, const int nttz,
+		    const int order);
   ~CudaPMEForcefield();
 
   void calc(const cudaXYZ<double> *coord, const bool calc_energy, const bool calc_virial,

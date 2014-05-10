@@ -1,3 +1,4 @@
+#include <cassert>
 #include "CudaPMEForcefield.h"
 #include "cuda_utils.h"
 #include "gpu_utils.h"
@@ -52,7 +53,40 @@ __global__ void heuristic_check_kernel(const int ncoord, const int stride,
 //
 // Class creator
 //
-CudaPMEForcefield::CudaPMEForcefield() {
+CudaPMEForcefield::CudaPMEForcefield(const int nbondlist, const bondlist_t* h_bondlist,
+				     const int nureyblist, const bondlist_t* h_ureyblist,
+				     const int nanglelist, const anglelist_t* h_anglelist,
+				     const int ndihelist, const dihelist_t* h_dihelist,
+				     const int nimdihelist, const dihelist_t* imdihelist,
+				     const int ncmaplist, const cmaplist_t* cmaplist,
+				     const int nbondcoef, const float2 *h_bondcoef,
+				     const int nureybcoef, const float2 *h_ureybcoef,
+				     const int nanglecoef, const float2 *h_anglecoef,
+				     const int ndihecoef, const float4 *h_dihecoef,
+				     const int nimdihecoef, const float4 *h_imdihecoef,
+				     const int ncmapcoef, const float2 *h_cmapcoef,
+				     const double rnl, const double roff, const double ron,
+				     const double kappa, const double e14fac,
+				     const int vdw_model, const int elec_model,
+				     const int nvdwparam, const float *h_vdwparam,
+				     const int *h_vdwtype,
+				     const int nfftx, const int nffty, const int nttz,
+				     const int order) {
+
+  // Bonded interactions
+  setup_bonded(nbondlist, bondlist, nureyblist, ureyblist, nanglelist, anglelist,
+	       ndihelist, dihelist, nimdihelist, imdihelist, ncmaplist, cmaplist);
+  Bonded.setup_coef(nbondcoef, h_bondcoef, nureybcoef, h_ureybcoef,
+		    nanglecoef, h_anglecoef, ndihecoef, h_dihecoef,
+		    nimdihecoef, h_imdihecoef, ncmapcoef, h_cmapcoef);
+  
+  // Direct non-bonded interactions
+  setup_direct_nonbonded(rnl, roff, ron, kappa, e14fac, vdw_model, elec_model,
+			 nvdwparam, vdwparam, vdwtype);
+
+  // Recip non-bonded interactions
+  setup_recip_nonbonded(nfftx, nffty, nfftz, order);
+
   //const FFTtype fft_type = BOX;
   //grid = Grid<int, float, float2>(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
   allocate<int>(&d_heuristic_flag, 1);
@@ -70,16 +104,95 @@ CudaPMEForcefield::~CudaPMEForcefield() {
 }
 
 //
+// Setup direct non-bonded interactions.
+//
+void CudaPMEForcefield::setup_direct_nonbonded(const double rnl, const double roff, const double ron,
+					       const double kappa, const double e14fac,
+					       const int vdw_model, const int elec_model,
+					       const int nvdwparam, const float *h_vdwparam,
+					       const int *h_vdwtype) {
+
+  dir.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, vdw_model, elec_model, true, true);
+  dir.setup_vdwparam(nvdwparam, h_vdwparam);
+
+  allocate<int>(&vdwtype, ncoord_glo);
+  copy_HtoD<anglelist_t>(h_vdwtype, vdwtype, ncoord_glo);
+}
+
+//
+// Setup bonded interactions. Copies in the global lists
+//
+void CudaPMEForcefield::setup_bonded(const int nbondlist, const bondlist_t* h_bondlist,
+				     const int nureyblist, const bondlist_t* h_ureyblist,
+				     const int nanglelist, const anglelist_t* h_anglelist,
+				     const int ndihelist, const dihelist_t* h_dihelist,
+				     const int nimdihelist, const dihelist_t* imdihelist,
+				     const int ncmaplist, const cmaplist_t* cmaplist) {  
+  assert((nureyblist == 0) || (nureyblist > 0 && nureyblist == nanglelist));
+
+  bondlist = NULL;
+  ureyblist = NULL;
+  anglelist = NULL;
+  dihelist = NULL;
+  imdihelist = NULL;
+  cmaplist = NULL;
+
+  this->nbondlist = nbondlist;
+  if (nbondlist > 0) {
+    allocate<bondlist_t>(&bondlist, nbondlist);
+    copy_HtoD<bondlist_t>(h_bondlist, bondlist, nbondlist);
+  }
+
+  this->nureyblist = nureyblist;
+  if (nureyblist > 0) {
+    allocate<bondlist_t>(&ureyblist, nureyblist);
+    copy_HtoD<bondlist_t>(h_ureyblist, ureyblist, nureyblist);
+  }
+
+  this->nanglelist = nanglelist;
+  if (nanglelist > 0) {
+    allocate<anglelist_t>(&anglelist, nanglelist);
+    copy_HtoD<anglelist_t>(h_anglelist, anglelist, nanglelist);
+  }
+
+  this->ndihelist = ndihelist;
+  if (ndihelist > 0) {
+    allocate<dihelist_t>(&dihelist, ndihelist);
+    copy_HtoD<dihelist_t>(h_dihelist, dihelist, ndihelist);
+  }
+
+  this->nimdihelist = nimdihelist;
+  if (nimdihelist > 0) {
+    allocate<dihelist_t>(&imdihelist, nimdihelist);
+    copy_HtoD<dihelist_t>(h_imdihelist, imdihelist, nimdihelist);
+  }
+
+  this->ncmaplist = ncmaplist;
+  if (ncmaplist > 0) {
+    allocate<cmaplist_t>(&cmaplist, ncmaplist);
+    copy_HtoD<cmaplist_t>(h_cmaplist, cmaplist, ncmaplist);
+  }
+
+}
+
+//
 // Calculate forces
 //
 void CudaPMEForcefield::calc(const cudaXYZ<double> *coord,
 			     const bool calc_energy, const bool calc_virial,
 			     Force<long long int> *force) {
 
+  float boxx = 1.0f;
+  float boxy = 1.0f;
+  float boxz = 1.0f;
+  int zone_patom[8] = {23558, 23558, 23558, 23558, 23558, 23558, 23558, 23558};
+
   // Check for neighborlist heuristic update
   if (heuristic_check(coord)) {
+    // Copy coordinates to xyzq -array
+    xyzq.set_xyz(coord->data, coord->stride);
     // Update neighborlist
-    nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
+    nlist.sort(zone_patom, xyzq.xyzq, xyzq_sorted.xyzq);
     nlist.build(boxx, boxy, boxz, rnl, xyzq_sorted.xyzq);
   } else {
     // Copy coordinates to xyzq -array
@@ -93,9 +206,6 @@ void CudaPMEForcefield::calc(const cudaXYZ<double> *coord,
   dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
 
   // Bonded forces
-  float boxx = 1.0f;
-  float boxy = 1.0f;
-  float boxz = 1.0f;
   bonded.calc_force(xyzq.xyzq, boxx, boxy, boxz, calc_energy, calc_virial,
 		    force->xyz.stride, force->xyz.data);
 

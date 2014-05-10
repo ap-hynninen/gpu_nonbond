@@ -26,6 +26,8 @@ int main(int argc, char *argv[]) {
   
   test();
 
+  stop_gpu();
+
 #ifdef USE_MPI
   stop_mpi();
 #endif
@@ -132,7 +134,8 @@ void test() {
 
   NeighborList<32> nlist;
   nlist.setup_top_excl(ncoord, iblo14, inb14);
-  nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
+  //nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
+  nlist.sort(zone_patom, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
   nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
   nlist.test_build(zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
 

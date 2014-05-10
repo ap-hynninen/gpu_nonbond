@@ -85,9 +85,11 @@ void CudaLeapfrogIntegrator::swap_step() {
   // Wait here until work on stream has stopped
   cudaCheck(cudaStreamSynchronize(stream));
 
-  double *tmp = prev_step.data;
-  prev_step.data = step.data;
-  step.data = tmp;
+  //step.swap(prev_step);
+
+  //double *tmp = prev_step.data;
+  //prev_step.data = step.data;
+  //step.data = tmp;
 }
 
 

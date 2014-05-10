@@ -850,14 +850,14 @@ BondedForce<AT, CT>::~BondedForce() {
 // NOTE: This only has to be once in the beginning of the simulation
 //
 template <typename AT, typename CT>
-void BondedForce<AT, CT>::setup_coef(int nbondcoef, float2 *h_bondcoef,
-				     int nureybcoef, float2 *h_ureybcoef,
-				     int nanglecoef, float2 *h_anglecoef,
-				     int ndihecoef, float4 *h_dihecoef,
-				     int nimdihecoef, float4 *h_imdihecoef,
-				     int ncmapcoef, float2 *h_cmapcoef) {
+void BondedForce<AT, CT>::setup_coef(const int nbondcoef, const float2 *h_bondcoef,
+				     const int nureybcoef, const float2 *h_ureybcoef,
+				     const int nanglecoef, const float2 *h_anglecoef,
+				     const int ndihecoef, const float4 *h_dihecoef,
+				     const int nimdihecoef, const float4 *h_imdihecoef,
+				     const int ncmapcoef, const float2 *h_cmapcoef) {
 
-  assert(nureybcoef == nanglecoef);
+  assert((nureybcoef == 0) || (nureybcoef > 0 && nureybcoef == nanglecoef));
 
   this->nbondcoef = nbondcoef;
   if (nbondcoef > 0) {
@@ -902,13 +902,14 @@ void BondedForce<AT, CT>::setup_coef(int nbondcoef, float2 *h_bondcoef,
 // NOTE: This has to be done after neighborlist update
 //
 template <typename AT, typename CT>
-void BondedForce<AT, CT>::setup_list(int nbondlist, bondlist_t *h_bondlist, 
-				     int nureyblist, bondlist_t *h_ureyblist,
-				     int nanglelist, anglelist_t *h_anglelist,
-				     int ndihelist, dihelist_t *h_dihelist,
-				     int nimdihelist, dihelist_t *h_imdihelist,
-				     int ncmaplist, cmaplist_t *h_cmaplist) {
-  assert(nureyblist == nanglelist);
+void BondedForce<AT, CT>::setup_list(const int nbondlist, const bondlist_t *h_bondlist, 
+				     const int nureyblist, const bondlist_t *h_ureyblist,
+				     const int nanglelist, const anglelist_t *h_anglelist,
+				     const int ndihelist, const dihelist_t *h_dihelist,
+				     const int nimdihelist, const dihelist_t *h_imdihelist,
+				     const int ncmaplist, const cmaplist_t *h_cmaplist) {
+
+  assert((nureyblist == 0) || (nureyblist > 0 && nureyblist == nanglelist));
 
   this->nbondlist = nbondlist;
   if (nbondlist > 0) {

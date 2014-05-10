@@ -44,6 +44,36 @@ static __device__ double atomicAdd(double* address, double val) {
   return __longlong_as_double(old);
 }
 
+//
+// Float atomicMin
+//
+static __device__ float atomicMin(float* addr, float value) {
+  float old = *addr, assumed;
+
+  if (old <= value) return old;
+  do {
+    assumed = old;
+    old = atomicCAS((unsigned int*)addr, __float_as_int(assumed), __float_as_int(value));
+  } while (old!=assumed);
+    
+  return old;
+}
+
+//
+// Float atomicMax
+//
+static __device__ float atomicMax(float* addr, float value) {
+  float old = *addr, assumed;
+
+  if (old >= value) return old;
+  do {
+    assumed = old;
+    old = atomicCAS((unsigned int*)addr, __float_as_int(assumed), __float_as_int(value));
+  } while (old!=assumed);
+    
+  return old;
+}
+
 //----------------------------------------------------------------------------------------
 
 static __forceinline__ __device__ float __internal_fmad(float a, float b, float c)
