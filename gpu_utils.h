@@ -37,13 +37,15 @@ static __device__ double atomicAdd(double* address, double val) {
   unsigned long long int* address_as_ull = (unsigned long long int*)address;
   unsigned long long int old = *address_as_ull, assumed;
   do {
-    assumed = old; old = atomicCAS(address_as_ull, assumed,
-				   __double_as_longlong(val +
-							__longlong_as_double(assumed)));
+    assumed = old;
+    old = atomicCAS(address_as_ull, assumed,
+		    __double_as_longlong(val +
+					 __longlong_as_double(assumed)));
   } while (assumed != old);
   return __longlong_as_double(old);
 }
 
+/*
 //
 // Float atomicMin
 //
@@ -53,7 +55,8 @@ static __device__ float atomicMin(float* addr, float value) {
   if (old <= value) return old;
   do {
     assumed = old;
-    old = atomicCAS((unsigned int*)addr, __float_as_int(assumed), __float_as_int(value));
+    old = atomicCAS((unsigned int*)addr, __float_as_int(assumed),
+		    __float_as_int((old <= value) ? old : value));
   } while (old!=assumed);
     
   return old;
@@ -62,16 +65,38 @@ static __device__ float atomicMin(float* addr, float value) {
 //
 // Float atomicMax
 //
-static __device__ float atomicMax(float* addr, float value) {
+static __device__ float atomicMaxold(float* addr, float value) {
   float old = *addr, assumed;
 
   if (old >= value) return old;
   do {
     assumed = old;
-    old = atomicCAS((unsigned int*)addr, __float_as_int(assumed), __float_as_int(value));
+    old = atomicCAS((unsigned int*)addr, __float_as_int(assumed),
+		    __float_as_int((assumed >= value) ? assumed : value));
   } while (old!=assumed);
     
   return old;
+}
+*/
+
+static __device__ float atomicMin(float *address, float val) {
+  int *address_as_i = (int *)address;
+  int old = *address_as_i, assumed;
+  do {
+    assumed = old;
+    old = atomicCAS(address_as_i, assumed, __float_as_int(fminf(val,__int_as_float(assumed))));
+  } while (assumed != old);
+  return __int_as_float(old);
+}
+
+static __device__ float atomicMax(float *address, float val) {
+  int *address_as_i = (int *)address;
+  int old = *address_as_i, assumed;
+  do {
+    assumed = old;
+    old = atomicCAS(address_as_i, assumed, __float_as_int(fmaxf(val,__int_as_float(assumed))));
+  } while (assumed != old);
+  return __int_as_float(old);
 }
 
 //----------------------------------------------------------------------------------------

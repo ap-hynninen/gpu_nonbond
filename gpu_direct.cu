@@ -113,8 +113,7 @@ void test() {
   load_ind<int>(1, "test_data/iblo14.txt", niblo14, iblo14);
   load_ind<int>(1, "test_data/inb14.txt", ninb14, inb14);
 
-  NeighborList<32> nlist_ref;
-  nlist_ref.load("test_data/nlist.txt");
+  NeighborList<32> nlist_ref(ncoord, "test_data/nlist.txt");
   //nlist.remove_empty_tiles();
   //nlist.split_dense_sparse(512);
   nlist_ref.analyze();
@@ -132,12 +131,20 @@ void test() {
   max_xyz[0].y = 31.80500;
   max_xyz[0].z = 31.80300;
 
-  NeighborList<32> nlist;
-  nlist.setup_top_excl(ncoord, iblo14, inb14);
+  int *h_loc2glo = new int[ncoord];
+  for (int i=0;i < ncoord;i++) h_loc2glo[i] = i;
+  int *loc2glo = NULL;
+  allocate<int>(&loc2glo, ncoord);
+  copy_HtoD<int>(h_loc2glo, loc2glo, ncoord);
+  delete [] h_loc2glo;
+
+  NeighborList<32> nlist(ncoord, iblo14, inb14);
   //nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
-  nlist.sort(zone_patom, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
-  nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
+  nlist.sort(zone_patom, xyzq_unsorted.xyzq, xyzq_sorted.xyzq, loc2glo);
+  nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq, loc2glo);
   nlist.test_build(zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
+
+  deallocate<int>(&loc2glo);
 
   //tol = 7.71e-4;
   //if (!xyzq_sorted_ref.compare(xyzq_sorted, tol, max_diff)) {
@@ -146,9 +153,9 @@ void test() {
   // ------------------- Non-bonded -----------------
 
   DirectForce<long long int, float> dir;
-  dir.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, VDW_VSH, EWALD, true, true);
-  dir.set_vdwparam("test_data/vdwparam.txt");
-  dir.set_vdwtype("test_data/vdwtype.txt");
+  dir.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, VDW_VSH, EWALD);
+  dir.set_vdwparam(1260, "test_data/vdwparam.txt");
+  dir.set_vdwtype(ncoord, "test_data/vdwtype.txt");
   dir.calc_force(xyzq.xyzq, &nlist_ref, false, false, force_fp.xyz.stride, force_fp.xyz.data);
   force_fp.convert(&force);
   tol = 7.71e-4;
@@ -159,7 +166,7 @@ void test() {
     std::cout<<"(tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
 
-  dir.set_vdwparam14("test_data/vdwparam14.txt");
+  dir.set_vdwparam14(1260, "test_data/vdwparam14.txt");
   dir.set_14_list(nin14list, nex14list, in14list, ex14list);
   dir.calc_14_force(xyzq.xyzq, false, false, force_fp.xyz.stride, force_fp.xyz.data);
   force_fp.convert(&force);

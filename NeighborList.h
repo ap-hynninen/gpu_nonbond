@@ -159,13 +159,8 @@ private:
   int atom_icol_len;
   int *atom_icol;
 
-  // Global -> local mapping index list
-  int loc2glo_ind_len;
-  int *loc2glo_ind;
-
-  // Local -> global mapping index list
-  int glo2loc_ind_len;
-  int *glo2loc_ind;
+  // Global -> local mapping
+  int *glo2loc;
 
   // Atom indices where each cell start
   int cell_patom_len;
@@ -234,7 +229,7 @@ private:
 		      const float3* min_xyz,
 		      const float* inv_dx, const float* inv_dy,
 		      float4* xyzq, float4* xyzq_sorted,
-		      int* col_patom, int* loc2glo_ind);
+		      int* col_patom, int* loc2glo);
 
   bool test_sort(const int* zone_patom,
 		 const int* ncellx, const int* ncelly,
@@ -243,7 +238,7 @@ private:
 		 const float* inv_dx, const float* inv_dy,
 		 float4* xyzq, float4* xyzq_sorted,
 		 int* col_patom, int* cell_patom,
-		 int* loc2glo_ind);
+		 int* loc2glo);
 
   void set_nlist_param(cudaStream_t stream);
   void get_nlist_param();
@@ -254,38 +249,46 @@ private:
 
   void sort_alloc_realloc(const int ncol_tot, const int ncoord);
 
-  void sort_build_indices(const int ncoord, float4 *xyzq, cudaStream_t stream);
+  void sort_build_indices(const int ncoord, float4 *xyzq, int *loc2glo, cudaStream_t stream);
 
   void sort_core(const int ncol_tot, const int ncoord,
 		 float4 *xyzq,
 		 float4 *xyzq_sorted,
+		 int *loc2glo,
 		 cudaStream_t stream);
+
+  void setup_top_excl(const int ncoord_glo, const int *iblo14, const int *inb14);
+
+  void init();
+  void load(const char *filename);
+
 public:
-  NeighborList();
+  NeighborList(const int ncoord_glo, const int *iblo14, const int *inb14);
+  NeighborList(const int ncoord_glo, const char *filename);
   ~NeighborList();
 
   void sort(const int *zone_patom,
 	    const float3 *max_xyz, const float3 *min_xyz,
 	    float4 *xyzq,
 	    float4 *xyzq_sorted,
+	    int *loc2glo,
 	    cudaStream_t stream=0);
 
   void sort(const int *zone_patom,
 	    float4 *xyzq,
 	    float4 *xyzq_sorted,
+	    int *loc2glo,
 	    cudaStream_t stream=0);
 
   void build(const float boxx, const float boxy, const float boxz,
 	     const float rcut,
-	     const float4 *xyzq,
+	     const float4 *xyzq, const int *loc2glo,
 	     cudaStream_t stream=0);
 
   void test_build(const int *zone_patom,
 		  const float boxx, const float boxy, const float boxz,
 		  const float rcut, const float4 *xyzq);
   
-  void setup_top_excl(int ncoord, int *iblo14, int *inb14);
-
   void build_excl(const float boxx, const float boxy, const float boxz,
 		  const float rcut,
 		  const int n_ijlist, const int3 *ijlist,
@@ -302,7 +305,9 @@ public:
   void split_dense_sparse(int npair_cutoff);
   void remove_empty_tiles();
   void analyze();
-  void load(const char *filename);
+
+  int *get_glo2loc() {return glo2loc;}
+
 };
 
 #endif // NEIGHBORLIST_H

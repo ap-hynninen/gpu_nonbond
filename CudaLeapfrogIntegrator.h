@@ -5,6 +5,7 @@
 #include "cudaXYZ.h"
 #include "Force.h"
 #include "CudaPMEForcefield.h"
+#include "HoloConst.h"
 
 class CudaLeapfrogIntegrator : public LeapfrogIntegrator {
 
@@ -30,8 +31,8 @@ private:
   // Force array
   Force<long long int> force;
 
-  // Force field
-  CudaForcefield *forcefield;
+  // Holonomic constraints
+  HoloConst *holoconst;
 
   cudaEvent_t copy_rms_work_done_event;
   cudaEvent_t copy_temp_ekin_done_event;
@@ -42,10 +43,15 @@ private:
   void take_step();
   void calc_step();
   void calc_force(const bool calc_energy, const bool calc_virial);
+  void do_holoconst();
+  void do_pressure();
+  void do_temperature();
+  bool const_pressure();
+  void do_print_energy();
 
 public:
 
-  CudaLeapfrogIntegrator(cudaStream_t stream=0);
+  CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_t stream=0);
   ~CudaLeapfrogIntegrator();
 
   void init(const int ncoord,

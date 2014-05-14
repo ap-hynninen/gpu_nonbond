@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <cassert>
 #include "CudaPMEForcefield.h"
 #include "cuda_utils.h"
@@ -53,45 +54,47 @@ __global__ void heuristic_check_kernel(const int ncoord, const int stride,
 //
 // Class creator
 //
-CudaPMEForcefield::CudaPMEForcefield(const int nbondlist, const bondlist_t* h_bondlist,
-				     const int nureyblist, const bondlist_t* h_ureyblist,
-				     const int nanglelist, const anglelist_t* h_anglelist,
-				     const int ndihelist, const dihelist_t* h_dihelist,
-				     const int nimdihelist, const dihelist_t* imdihelist,
-				     const int ncmaplist, const cmaplist_t* cmaplist,
+CudaPMEForcefield::CudaPMEForcefield(CudaDomdec *domdec, CudaDomdecBonded *domdec_bonded,
+				     NeighborList<32> *nlist,
 				     const int nbondcoef, const float2 *h_bondcoef,
 				     const int nureybcoef, const float2 *h_ureybcoef,
 				     const int nanglecoef, const float2 *h_anglecoef,
 				     const int ndihecoef, const float4 *h_dihecoef,
 				     const int nimdihecoef, const float4 *h_imdihecoef,
 				     const int ncmapcoef, const float2 *h_cmapcoef,
-				     const double rnl, const double roff, const double ron,
+				     const double roff, const double ron,
 				     const double kappa, const double e14fac,
 				     const int vdw_model, const int elec_model,
 				     const int nvdwparam, const float *h_vdwparam,
-				     const int *h_vdwtype,
-				     const int nfftx, const int nffty, const int nttz,
+				     const int *h_vdwtype, const float *h_q,
+				     const int nfftx, const int nffty, const int nfftz,
 				     const int order) {
 
-  // Bonded interactions
-  setup_bonded(nbondlist, bondlist, nureyblist, ureyblist, nanglelist, anglelist,
-	       ndihelist, dihelist, nimdihelist, imdihelist, ncmaplist, cmaplist);
-  Bonded.setup_coef(nbondcoef, h_bondcoef, nureybcoef, h_ureybcoef,
+  // Domain decomposition
+  this->domdec = domdec;
+  this->domdec_bonded = domdec_bonded;
+
+  // Neighborlist
+  this->nlist = nlist;
+
+  // Bonded coefficients
+  bonded.setup_coef(nbondcoef, h_bondcoef, nureybcoef, h_ureybcoef,
 		    nanglecoef, h_anglecoef, ndihecoef, h_dihecoef,
 		    nimdihecoef, h_imdihecoef, ncmapcoef, h_cmapcoef);
   
   // Direct non-bonded interactions
-  setup_direct_nonbonded(rnl, roff, ron, kappa, e14fac, vdw_model, elec_model,
-			 nvdwparam, vdwparam, vdwtype);
+  setup_direct_nonbonded(roff, ron, kappa, e14fac, vdw_model, elec_model,
+			 nvdwparam, h_vdwparam, h_vdwtype);
+
+  // Copy charges
+  allocate<float>(&q, domdec->get_ncoord_tot());
+  copy_HtoD<float>(h_q, q, domdec->get_ncoord_tot());
 
   // Recip non-bonded interactions
-  setup_recip_nonbonded(nfftx, nffty, nfftz, order);
+  setup_recip_nonbonded(kappa, nfftx, nffty, nfftz, order);
 
-  //const FFTtype fft_type = BOX;
-  //grid = Grid<int, float, float2>(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
   allocate<int>(&d_heuristic_flag, 1);
   allocate_host<int>(&h_heuristic_flag, 1);
-  grid = NULL;
 }
 
 //
@@ -100,77 +103,41 @@ CudaPMEForcefield::CudaPMEForcefield(const int nbondlist, const bondlist_t* h_bo
 CudaPMEForcefield::~CudaPMEForcefield() {
   deallocate<int>(&d_heuristic_flag);
   deallocate_host<int>(&h_heuristic_flag);
+  deallocate<float>(&q);
   if (grid != NULL) delete grid;
 }
 
 //
 // Setup direct non-bonded interactions.
 //
-void CudaPMEForcefield::setup_direct_nonbonded(const double rnl, const double roff, const double ron,
+void CudaPMEForcefield::setup_direct_nonbonded(const double roff, const double ron,
 					       const double kappa, const double e14fac,
 					       const int vdw_model, const int elec_model,
 					       const int nvdwparam, const float *h_vdwparam,
 					       const int *h_vdwtype) {
 
-  dir.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, vdw_model, elec_model, true, true);
-  dir.setup_vdwparam(nvdwparam, h_vdwparam);
+  dir.setup(domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), kappa, roff, ron,
+	    e14fac, vdw_model, elec_model);
+  dir.set_vdwparam(nvdwparam, h_vdwparam);
 
-  allocate<int>(&vdwtype, ncoord_glo);
-  copy_HtoD<anglelist_t>(h_vdwtype, vdwtype, ncoord_glo);
+  allocate<int>(&vdwtype, domdec->get_ncoord_tot());
+  copy_HtoD<int>(h_vdwtype, vdwtype, domdec->get_ncoord_tot());
 }
 
 //
-// Setup bonded interactions. Copies in the global lists
+// Setup recip non-bonded interactions.
 //
-void CudaPMEForcefield::setup_bonded(const int nbondlist, const bondlist_t* h_bondlist,
-				     const int nureyblist, const bondlist_t* h_ureyblist,
-				     const int nanglelist, const anglelist_t* h_anglelist,
-				     const int ndihelist, const dihelist_t* h_dihelist,
-				     const int nimdihelist, const dihelist_t* imdihelist,
-				     const int ncmaplist, const cmaplist_t* cmaplist) {  
-  assert((nureyblist == 0) || (nureyblist > 0 && nureyblist == nanglelist));
+void CudaPMEForcefield::setup_recip_nonbonded(const double kappa,
+					      const int nfftx, const int nffty, const int nfftz,
+					      const int order) {
 
-  bondlist = NULL;
-  ureyblist = NULL;
-  anglelist = NULL;
-  dihelist = NULL;
-  imdihelist = NULL;
-  cmaplist = NULL;
+  this->kappa = kappa;
 
-  this->nbondlist = nbondlist;
-  if (nbondlist > 0) {
-    allocate<bondlist_t>(&bondlist, nbondlist);
-    copy_HtoD<bondlist_t>(h_bondlist, bondlist, nbondlist);
-  }
-
-  this->nureyblist = nureyblist;
-  if (nureyblist > 0) {
-    allocate<bondlist_t>(&ureyblist, nureyblist);
-    copy_HtoD<bondlist_t>(h_ureyblist, ureyblist, nureyblist);
-  }
-
-  this->nanglelist = nanglelist;
-  if (nanglelist > 0) {
-    allocate<anglelist_t>(&anglelist, nanglelist);
-    copy_HtoD<anglelist_t>(h_anglelist, anglelist, nanglelist);
-  }
-
-  this->ndihelist = ndihelist;
-  if (ndihelist > 0) {
-    allocate<dihelist_t>(&dihelist, ndihelist);
-    copy_HtoD<dihelist_t>(h_dihelist, dihelist, ndihelist);
-  }
-
-  this->nimdihelist = nimdihelist;
-  if (nimdihelist > 0) {
-    allocate<dihelist_t>(&imdihelist, nimdihelist);
-    copy_HtoD<dihelist_t>(h_imdihelist, imdihelist, nimdihelist);
-  }
-
-  this->ncmaplist = ncmaplist;
-  if (ncmaplist > 0) {
-    allocate<cmaplist_t>(&cmaplist, ncmaplist);
-    copy_HtoD<cmaplist_t>(h_cmaplist, cmaplist, ncmaplist);
+  if (nfftx > 0 && nffty > 0 && nfftz > 0 && order > 0) {
+    const FFTtype fft_type = BOX;
+    grid = new Grid<int, float, float2>(nfftx, nffty, nfftz, order, fft_type, 1, 0);
+  } else {
+    grid = NULL;
   }
 
 }
@@ -178,52 +145,115 @@ void CudaPMEForcefield::setup_bonded(const int nbondlist, const bondlist_t* h_bo
 //
 // Calculate forces
 //
-void CudaPMEForcefield::calc(const cudaXYZ<double> *coord,
+void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
 			     const bool calc_energy, const bool calc_virial,
 			     Force<long long int> *force) {
 
-  float boxx = 1.0f;
-  float boxy = 1.0f;
-  float boxz = 1.0f;
-  int zone_patom[8] = {23558, 23558, 23558, 23558, 23558, 23558, 23558, 23558};
+
+  std::cout << "CudaPMEForcefield::calc" << std::endl;
 
   // Check for neighborlist heuristic update
   if (heuristic_check(coord)) {
-    // Copy coordinates to xyzq -array
-    xyzq.set_xyz(coord->data, coord->stride);
+    std::cout << "  Building neighborlist" << std::endl;
+
+    // Update homezone coordinates
+    // NOTE: Builds domdec->loc2glo
+    domdec->update_homezone(coord);
+
+    // Communicate coordinates
+    // NOTE: Builds rest of domdec->loc2glo and domdec->xyz_shift
+    domdec->comm_coord(coord, true);
+
+    // Copy coord => xyzq_copy
+    xyzq_copy.set_xyzq(coord, q, domdec->get_xyz_shift(),
+		       domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz());
+
     // Update neighborlist
-    nlist.sort(zone_patom, xyzq.xyzq, xyzq_sorted.xyzq);
-    nlist.build(boxx, boxy, boxz, rnl, xyzq_sorted.xyzq);
+    nlist->sort(domdec->get_zone_patom(), xyzq_copy.xyzq, xyzq.xyzq, domdec->get_loc2glo());
+    nlist->build(domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), domdec->get_rnl(),
+		 xyzq.xyzq, domdec->get_loc2glo());
+        
+    // Build bonded tables
+    domdec_bonded->build_tbl(domdec, domdec->get_zone_patom());
+
+    // Setup bonded interaction lists
+    bonded.setup_list(xyzq.xyzq, domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), nlist->get_glo2loc(),
+		      domdec_bonded->get_nbond_tbl(), domdec_bonded->get_bond_tbl(), domdec_bonded->get_bond(),
+		      domdec_bonded->get_nureyb_tbl(), domdec_bonded->get_ureyb_tbl(), domdec_bonded->get_ureyb(),
+		      domdec_bonded->get_nangle_tbl(), domdec_bonded->get_angle_tbl(), domdec_bonded->get_angle(),
+		      domdec_bonded->get_ndihe_tbl(), domdec_bonded->get_dihe_tbl(), domdec_bonded->get_dihe(),
+		      domdec_bonded->get_nimdihe_tbl(), domdec_bonded->get_imdihe_tbl(), domdec_bonded->get_imdihe(),
+		      domdec_bonded->get_ncmap_tbl(), domdec_bonded->get_cmap_tbl(), domdec_bonded->get_cmap());
+
+    // Update reference coordinates
+    ref_coord.set_data(coord);
+
   } else {
+    std::cout << "  Not building neighborlist" << std::endl;
+    // Communicate coordinates
+    domdec->comm_coord(coord, false);
     // Copy coordinates to xyzq -array
-    xyzq.set_xyz(coord->data, coord->stride);
+    xyzq.set_xyz(coord);
+  }
+
+  // Clear energy and virial variables
+  if (calc_energy || calc_virial) {
+    dir.clear_energy_virial();
+    bonded.clear_energy_virial();
   }
 
   // Direct non-bonded force
-  dir.calc_force(xyzq.xyzq, &nlist, calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
+  dir.calc_force(xyzq.xyzq, nlist, calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
 
   // 1-4 interactions
-  dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
+  //dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
 
   // Bonded forces
-  bonded.calc_force(xyzq.xyzq, boxx, boxy, boxz, calc_energy, calc_virial,
-		    force->xyz.stride, force->xyz.data);
+  bonded.calc_force(xyzq.xyzq, domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(),
+		    calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
 
+  /*
   // Reciprocal forces (Only reciprocal nodes calculate these)
   if (grid != NULL) {
     double recip[9];
     for (int i=0;i < 9;i++) recip[i] = 0;
-    recip[0] = 1.0/boxx;
-    recip[4] = 1.0/boxy;
-    recip[8] = 1.0/boxz;
-    double kappa = 0.32;
+    recip[0] = 1.0/domdec->get_boxx();
+    recip[4] = 1.0/domdec->get_boxy();
+    recip[8] = 1.0/domdec->get_boxz();
     grid->spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
     grid->r2c_fft();
     grid->scalar_sum(recip, kappa, calc_energy, calc_virial);
     grid->c2r_fft();
-    //grid->gather_force(xyzq.xyzq, xyzq.ncoord, recip, force->xyz.stride, force->xyz.data);
+    grid->gather_force(xyzq.xyzq, xyzq.ncoord, recip, recip_force.xyz.stride, recip_force.xyz.data);
   }
+  */
 
+  bonded.get_energy_virial(calc_energy, calc_virial,
+			   &energy_bond, &energy_ureyb,
+			   &energy_angle,
+			   &energy_dihe, &energy_imdihe,
+			   &energy_cmap,
+			   sforcex, sforcey, sforcez);
+
+  dir.get_energy_virial(calc_energy, calc_virial,
+			&energy_vdw, &energy_elec,
+			&energy_excl, vir);
+
+  // Communicate forces (After this all nodes have their correct total force)
+  domdec->comm_force(force);
+
+}
+
+//
+// Initializes coordinates.
+// NOTE: All nodes receive all coordinates here. Domdec distributes them across the nodes
+//
+void CudaPMEForcefield::init_coord(cudaXYZ<double> *coord) {
+  domdec->build_homezone(coord);
+  ref_coord.resize(coord->n);
+  ref_coord.clear();
+  xyzq.set_ncoord(coord->n);
+  xyzq_copy.set_ncoord(coord->n);
 }
 
 //
@@ -234,7 +264,7 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double> *coord) {
   assert(ref_coord.match(coord));
   assert(warpsize <= 32);
 
-  double rsq_limit_dbl = fabs(rnl - roff)/2.0;
+  double rsq_limit_dbl = fabs(domdec->get_rnl() - roff)/2.0;
   rsq_limit_dbl *= rsq_limit_dbl;
   float rsq_limit = (float)rsq_limit_dbl;
 
@@ -245,6 +275,9 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double> *coord) {
 
   int shmem_size = nthread/warpsize;
 
+  *h_heuristic_flag = 0;
+  copy_HtoD<int>(h_heuristic_flag, d_heuristic_flag, 1, 0);
+
   heuristic_check_kernel<<< nblock, nthread, shmem_size, 0 >>>
     (ncoord, stride, coord->data, ref_coord.data, rsq_limit, d_heuristic_flag);
 
@@ -253,4 +286,22 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double> *coord) {
   copy_DtoH_sync<int>(d_heuristic_flag, h_heuristic_flag, 1);
   
   return (*h_heuristic_flag != 0);
+}
+
+//
+// Print energies and virials on screen
+//
+void CudaPMEForcefield::print_energy_virial() {
+  double tol = 0.0;
+
+  if (fabs(energy_bond) >= tol || fabs(energy_angle) >= tol || fabs(energy_ureyb) >= tol ||
+      fabs(energy_dihe) >= tol || fabs(energy_imdihe) >= tol) {
+    printf("DYNA INTERN> %lf %lf %lf %lf %lf\n",
+	   energy_bond, energy_angle, energy_ureyb, energy_dihe, energy_imdihe);
+  }
+
+  if (fabs(energy_vdw) >= tol || fabs(energy_elec) >= tol || fabs(energy_excl) >= tol) {
+    printf("DYNA EXTERN> %lf %lf %lf\n",energy_vdw, energy_elec, energy_excl);
+  }
+
 }

@@ -869,177 +869,6 @@ __global__ void calc_force_kernel(const int base,
 
 }
 
-/*
-//
-// Nonbonded force kernel
-//
-template <typename AT, typename CT, int tilesize, int vdw_model, int elec_model,
-	  bool calc_energy>
-__global__ 
-void calc_force_kernel_sparse(const int n_ientry, const ientry_t* __restrict__ ientry,
-			      const int* __restrict__ tile_indj,
-			      const pairs_t<tilesize>* __restrict__ pairs,
-			      const int stride,
-			      const float* __restrict__ vdwparam, const int nvdwparam,
-			      const float4* __restrict__ xyzq, const int* __restrict__ vdwtype,
-			      AT *force) {
-
-  //
-  // Shared data, common for the entire block
-  //
-  extern __shared__ char shmem[];
-
-  volatile float *x_i = (float *)&shmem[0];                        // tilesize*blockDim.y
-  volatile float *y_i = (float *)&x_i[tilesize*blockDim.y];        // tilesize*blockDim.y
-  volatile float *z_i = (float *)&y_i[tilesize*blockDim.y];        // tilesize*blockDim.y
-  volatile float *q_i = (float *)&z_i[tilesize*blockDim.y];        // tilesize*blockDim.y
-  volatile int *vdwtype_i = (int *)&q_i[tilesize*blockDim.y];      // tilesize*blockDim.y
-  volatile AT *sh_force = (AT *)&vdwtype_i[tilesize*blockDim.y];   // blockDim.x*blockDim.y*3
-  
-  // Load ijentry
-  const unsigned int ientry_ind = threadIdx.y + blockDim.y*blockIdx.x;
-
-  int indi, ish, startj, endj;
-  if (ientry_ind < n_ientry) {
-    indi   = ientry[ientry_ind].indi;
-    ish    = ientry[ientry_ind].ish;
-    startj = ientry[ientry_ind].startj;
-    endj   = ientry[ientry_ind].endj;
-  } else {
-    indi = 0;
-    ish  = 0;
-    startj = 1;
-    endj = 0;
-  }
-
-  // Calculate shift for i-atom
-  float shz = (ish/9 - 1)*d_setup.boxz;
-  ish -= (ish/9)*9;
-  float shy = (ish/3 - 1)*d_setup.boxy;
-  ish -= (ish/3)*3;
-  float shx = (ish - 1)*d_setup.boxx;
-
-  const unsigned int sh_start = tilesize*threadIdx.y;
-
-  unsigned int load_ij;
-  if (tilesize == 16) {
-    load_ij = threadIdx.x % tilesize;
-  } else {
-    load_ij = threadIdx.x;
-  }
-
-  // Load i-atom data to shared memory (and shift coordinates)
-  float4 xyzq_tmp = xyzq[indi + load_ij];
-  x_i[sh_start + load_ij] = xyzq_tmp.x + shx;
-  y_i[sh_start + load_ij] = xyzq_tmp.y + shy;
-  z_i[sh_start + load_ij] = xyzq_tmp.z + shz;
-  q_i[sh_start + load_ij] = xyzq_tmp.w*ccelec;
-
-  vdwtype_i[sh_start + load_ij] = vdwtype[indi + load_ij];
-
-  const unsigned int shi = threadIdx.x + blockDim.x*3*threadIdx.y;
-  sh_force[shi]                = (AT)0;
-  sh_force[shi + blockDim.x]   = (AT)0;
-  sh_force[shi + blockDim.x*2] = (AT)0;
-
-  double vdwpotl;
-  double coulpotl;
-  if (calc_energy) {
-    vdwpotl = 0.0;
-    coulpotl = 0.0;
-  }
-
-  for (int jtile=startj;jtile <= endj;jtile++) {
-
-    // Load j-atom data
-    int indj = tile_indj[jtile];
-    float4 xyzq_j = xyzq[indj + load_ij];
-    int ja = vdwtype[indj + load_ij];
-
-    // This thread calculates the interaction between i and j=load_ij
-    int i = pairs[jtile].i[load_ij];
-
-    int ii;
-    ii = sh_start + i;
-	
-    float dx = x_i[ii] - xyzq_j.x;
-    float dy = y_i[ii] - xyzq_j.y;
-    float dz = z_i[ii] - xyzq_j.z;
-	
-    float r2 = dx*dx + dy*dy + dz*dz;
-
-    if (r2 < d_setup.roff2) {
-
-      float rinv = rsqrtf(r2);
-      float rinv2 = rinv*rinv;
-      float r = r2*rinv;
-      
-      float fij_elec = pair_elec_force<elec_model, calc_energy>(r2, r, rinv,
-								q_i[ii], xyzq_j.w, coulpotl);
-
-      int ia = vdwtype_i[ii];
-      int aa = (ja > ia) ? ja : ia;      // aa = max(ja,ia)
-      int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
-
-      float c6, c12;
-      float2 c6c12 = tex1Dfetch(vdwparam_texref, ivdw);
-      c6  = c6c12.x;
-      c12 = c6c12.y;
-
-      float fij_vdw = pair_vdw_force<vdw_model, calc_energy>(r2, r, rinv, rinv2, c6, c12, vdwpotl);
-      
-      float fij = (fij_vdw - fij_elec)*rinv2;
-
-      AT fxij;
-      AT fyij;
-      AT fzij;
-      calc_component_force<AT, CT>(fij, dx, dy, dz, fxij, fyij, fzij);
-
-      // Write j forces to global memory
-      write_force<AT>(-fxij, -fyij, -fzij, indj+load_ij, stride, force);
-
-      // Write i forces to shared memory
-      write_force<AT>(fxij, fyij, fzij, blockDim.x*3*threadIdx.y + i, blockDim.x, sh_force);
-
-    } // if (r2 < d_setup.roff2)
-
-  }
-
-  // Write i forces to global memory
-  write_force<AT>(sh_force[shi], sh_force[shi + blockDim.x], sh_force[shi + blockDim.x*2],
-		  indi+load_ij, stride, force);
-
-  /*
-  if (calc_energy) {
-    // Reduce energies to (pot)
-    // Reduces within thread block, uses the "xyzq_i" shared memory buffer
-    __syncthreads();          // NOTE: this makes sure we can write to xyzq_i 
-    double2 *potbuf = (double2 *)(x_i);
-    potbuf[tid].x = vdwpotl;
-    potbuf[tid].y = coulpotl;
-    // sync to make sure all threads in block are finished writing share memory
-    __syncthreads();
-    const int nthreadblock = blockDim.x*blockDim.y;
-    for (int i=1;i < nthreadblock;i *= 2) {
-      int pos = tid + i;
-      double vdwpot_val  = (pos < nthreadblock) ? potbuf[pos].x : 0.0;
-      double coulpot_val = (pos < nthreadblock) ? potbuf[pos].y : 0.0;
-      __syncthreads();
-      potbuf[tid].x += vdwpot_val;
-      potbuf[tid].y += coulpot_val;
-      __syncthreads();
-    }
-    if (tid == 0) {
-      atomicAdd((double *)&force[stride*3],   potbuf[0].x);
-      atomicAdd((double *)&force[stride*3+1], potbuf[0].y);
-    }
-
-  }
-  */
-/*
-}
-*/
-
 //########################################################################################
 
 //
@@ -1121,8 +950,7 @@ void DirectForce<AT, CT>::setup(CT boxx, CT boxy, CT boxz,
 				CT kappa,
 				CT roff, CT ron,
 				CT e14fac,
-				int vdw_model, int elec_model,
-				bool calc_vdw, bool calc_elec) {
+				int vdw_model, int elec_model) {
 
   CT ron2 = ron*ron;
   CT ron3 = ron*ron*ron;
@@ -1166,8 +994,8 @@ void DirectForce<AT, CT>::setup(CT boxx, CT boxy, CT boxz,
   this->vdw_model = vdw_model;
   set_elec_model(elec_model);
 
-  set_calc_vdw(calc_vdw);
-  set_calc_elec(calc_elec);
+  set_calc_vdw(true);
+  set_calc_elec(true);
 
   update_setup();
 }
@@ -1186,7 +1014,7 @@ void DirectForce<AT, CT>::get_box_size(CT &boxx, CT &boxy, CT &boxz) {
 // Sets box sizes
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_box_size(CT boxx, CT boxy, CT boxz) {
+void DirectForce<AT, CT>::set_box_size(const CT boxx, const CT boxy, const CT boxz) {
   h_setup->boxx = boxx;
   h_setup->boxy = boxy;
   h_setup->boxz = boxz;
@@ -1197,7 +1025,7 @@ void DirectForce<AT, CT>::set_box_size(CT boxx, CT boxy, CT boxz) {
 // Sets "calc_vdw" flag
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_calc_vdw(bool calc_vdw) {
+void DirectForce<AT, CT>::set_calc_vdw(const bool calc_vdw) {
   this->calc_vdw = calc_vdw;
 }
 
@@ -1205,7 +1033,7 @@ void DirectForce<AT, CT>::set_calc_vdw(bool calc_vdw) {
 // Sets "calc_elec" flag
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_calc_elec(bool calc_elec) {
+void DirectForce<AT, CT>::set_calc_elec(const bool calc_elec) {
   this->calc_elec = calc_elec;
 }
 
@@ -1213,7 +1041,7 @@ void DirectForce<AT, CT>::set_calc_elec(bool calc_elec) {
 // Sets VdW parameters by copying them from CPU
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::setup_vdwparam(int type, int h_nvdwparam, CT *h_vdwparam) {
+void DirectForce<AT, CT>::setup_vdwparam(const int type, const int h_nvdwparam, const CT *h_vdwparam) {
   assert(type == VDW_MAIN || type == VDW_IN14);
 
   int *nvdwparam_loc;
@@ -1287,15 +1115,14 @@ void DirectForce<AT, CT>::setup_vdwparam(int type, int h_nvdwparam, CT *h_vdwpar
 // Loads vdwparam from a file
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::load_vdwparam(const char *filename, int *nvdwparam, CT **h_vdwparam) {
+void DirectForce<AT, CT>::load_vdwparam(const char *filename, const int nvdwparam, CT **h_vdwparam) {
   std::ifstream file;
   file.exceptions(std::ifstream::failbit | std::ifstream::badbit);
   try {
     // Open file
     file.open(filename);
-    file >> *nvdwparam;
-    *h_vdwparam = new float[*nvdwparam];
-    for (int i=0;i < *nvdwparam;i++) {
+    *h_vdwparam = new float[nvdwparam];
+    for (int i=0;i < nvdwparam;i++) {
       file >> (*h_vdwparam)[i];
     }
     file.close();
@@ -1310,7 +1137,7 @@ void DirectForce<AT, CT>::load_vdwparam(const char *filename, int *nvdwparam, CT
 // Sets VdW parameters by copying them from CPU
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_vdwparam(int nvdwparam, CT *h_vdwparam) {
+void DirectForce<AT, CT>::set_vdwparam(const int nvdwparam, const CT *h_vdwparam) {
   setup_vdwparam(VDW_MAIN, nvdwparam, h_vdwparam);
 }
 
@@ -1318,10 +1145,9 @@ void DirectForce<AT, CT>::set_vdwparam(int nvdwparam, CT *h_vdwparam) {
 // Sets VdW parameters by loading them from a file
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_vdwparam(const char *filename) {  
-  int nvdwparam;
+void DirectForce<AT, CT>::set_vdwparam(const int nvdwparam, const char *filename) {  
   CT *h_vdwparam;
-  load_vdwparam(filename, &nvdwparam, &h_vdwparam);
+  load_vdwparam(filename, nvdwparam, &h_vdwparam);
   setup_vdwparam(VDW_MAIN, nvdwparam, h_vdwparam);
   delete [] h_vdwparam;
 }
@@ -1330,7 +1156,7 @@ void DirectForce<AT, CT>::set_vdwparam(const char *filename) {
 // Sets VdW parameters by copying them from CPU
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_vdwparam14(int nvdwparam, CT *h_vdwparam) {
+void DirectForce<AT, CT>::set_vdwparam14(const int nvdwparam, const CT *h_vdwparam) {
   setup_vdwparam(VDW_IN14, nvdwparam, h_vdwparam);
 }
 
@@ -1338,10 +1164,9 @@ void DirectForce<AT, CT>::set_vdwparam14(int nvdwparam, CT *h_vdwparam) {
 // Sets VdW parameters by loading them from a file
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_vdwparam14(const char *filename) {  
-  int nvdwparam;
+void DirectForce<AT, CT>::set_vdwparam14(const int nvdwparam, const char *filename) {  
   CT *h_vdwparam;
-  load_vdwparam(filename, &nvdwparam, &h_vdwparam);
+  load_vdwparam(filename, nvdwparam, &h_vdwparam);
   setup_vdwparam(VDW_IN14, nvdwparam, h_vdwparam);
   delete [] h_vdwparam;
 }
@@ -1350,7 +1175,7 @@ void DirectForce<AT, CT>::set_vdwparam14(const char *filename) {
 // Sets vdwtype array
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_vdwtype(int ncoord, int *h_vdwtype) {
+void DirectForce<AT, CT>::set_vdwtype(const int ncoord, const int *h_vdwtype) {
   reallocate<int>(&vdwtype, &vdwtype_len, ncoord, 1.5f);
   copy_HtoD<int>(h_vdwtype, vdwtype, ncoord);
 }
@@ -1359,9 +1184,8 @@ void DirectForce<AT, CT>::set_vdwtype(int ncoord, int *h_vdwtype) {
 // Sets vdwtype array by loading it from a file
 //
 template <typename AT, typename CT>
-void DirectForce<AT, CT>::set_vdwtype(const char *filename) {
+void DirectForce<AT, CT>::set_vdwtype(const int ncoord, const char *filename) {
 
-  int ncoord;
   int *h_vdwtype;
 
   std::ifstream file;
@@ -1369,8 +1193,6 @@ void DirectForce<AT, CT>::set_vdwtype(const char *filename) {
   try {
     // Open file
     file.open(filename);
-
-    file >> ncoord;
 
     h_vdwtype = new int[ncoord];
 
@@ -1842,6 +1664,8 @@ void DirectForce<AT, CT>::calc_force(const float4 *xyzq,
     exit(1);
   }
 
+  std::cerr << "Directforce (0) " << nlist->n_ientry << " " << std::endl;
+
   if (nlist->n_ientry == 0) return;
   int vdw_model_loc = calc_vdw ? vdw_model : NONE;
   int elec_model_loc = calc_elec ? elec_model : NONE;
@@ -1872,6 +1696,8 @@ void DirectForce<AT, CT>::calc_force(const float4 *xyzq,
   unsigned int max_nblock = max_nblock3.x;
   unsigned int base = 0;
 
+  std::cerr << "Directforce (1)" << std::endl;
+
   while (nblock_tot != 0) {
 
     int nblock = (nblock_tot > max_nblock) ? max_nblock : nblock_tot;
@@ -1881,6 +1707,7 @@ void DirectForce<AT, CT>::calc_force(const float4 *xyzq,
       if (elec_model_loc == EWALD) {
 	if (calc_energy) {
 	  if (calc_virial) {
+	    std::cerr << "Directforce (2)" << std::endl;
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, true, true, true>
 	      <<< nblock, nthread, shmem_size, stream >>>
 	      (base, nlist->n_ientry, nlist->ientry, nlist->tile_indj,

@@ -3,6 +3,9 @@
 #include <cuda.h>
 #include "cuda_utils.h"
 #include "CudaLeapfrogIntegrator.h"
+#include "CudaDomdec.h"
+#include "CudaDomdecBonded.h"
+#include "CudaPMEForcefield.h"
 
 void test();
 
@@ -42,6 +45,37 @@ void load_vec(const int nind, const char *filename, const int n, T *ind) {
 }
 
 //
+// Loads constraints and masses from file
+//
+void load_constr_mass(const int nconstr, const int nmass, const char *filename, const int n,
+		      double *constr, double *mass) {
+
+  std::ifstream file(filename);
+  if (file.is_open()) {
+
+    for (int i=0;i < n;i++) {
+      for (int k=0;k < nconstr;k++) {
+	if (!(file >> constr[i*nconstr+k])) {
+	  std::cerr<<"Error reading file "<<filename<<std::endl;
+	  exit(1);
+	}
+      }
+      for (int k=0;k < nmass;k++) {
+	if (!(file >> mass[i*nmass+k])) {
+	  std::cerr<<"Error reading file "<<filename<<std::endl;
+	  exit(1);
+	}
+      }
+    }
+
+  } else {
+    std::cerr<<"Error opening file "<<filename<<std::endl;
+    exit(1);
+  }
+
+}
+
+//
 // Test the code using data in test_data/ -directory
 //
 void test() {
@@ -51,8 +85,11 @@ void test() {
   const double boxy = 62.23;
   const double boxz = 62.23;
   const double kappa = 0.320;
+  const int nfftx = 64;
+  const int nffty = 64;
+  const int nfftz = 64;
   const int forder = 4;
-  const double rcut = 11.0;
+  const double rnl = 11.0;
   const double roff = 9.0;
   const double ron = 7.5;
   const double e14fac = 1.0;
@@ -117,71 +154,149 @@ void test() {
   // -------------------------------------------------
   */
 
-  const int nbondlist = 23592;
+  const int nbond = 23592;
   const int nbondcoef = 129;
 
-  const int nureyblist = 11584;
+  const int nureyb = 11584;
   const int nureybcoef = 327;
 
-  const int nanglelist = 11584;
+  const int nangle = 11584;
   const int nanglecoef = 327;
 
-  const int ndihelist = 6701;
+  const int ndihe = 6701;
   const int ndihecoef = 438;
 
-  const int nimdihelist = 418;
+  const int nimdihe = 418;
   const int nimdihecoef = 40;
 
-  const int ncmaplist = 0;
+  const int ncmap = 0;
   const int ncmapcoef = 0;
 
-  bondlist_t *bondlist = new bondlist_t[nbondlist];
+  bond_t *bond = new bond_t[nbond];
   float2 *bondcoef = new float2[nbondcoef];
-  load_vec<int>(4, "test_data/glo_bondlist.txt", nbondlist, (int *)bondlist);
+  load_vec<int>(3, "test_data/bond.txt", nbond, (int *)bond);
   load_vec<float>(2, "test_data/bondcoef.txt", nbondcoef, (float *)bondcoef);
 
-  bondlist_t *ureyblist = new bondlist_t[nureyblist];
+  bond_t *ureyb = new bond_t[nureyb];
   float2 *ureybcoef = new float2[nureybcoef];
-  load_vec<int>(4, "test_data/glo_ureyblist.txt", nureyblist, (int *)ureyblist);
+  load_vec<int>(3, "test_data/ureyb.txt", nureyb, (int *)ureyb);
   load_vec<float>(2, "test_data/ureybcoef.txt", nureybcoef, (float *)ureybcoef);
 
-  anglelist_t *anglelist = new anglelist_t[nanglelist];
+  angle_t *angle = new angle_t[nangle];
   float2 *anglecoef = new float2[nanglecoef];
-  load_vec<int>(6, "test_data/glo_anglelist.txt", nanglelist, (int *)anglelist);
+  load_vec<int>(4, "test_data/angle.txt", nangle, (int *)angle);
   load_vec<float>(2, "test_data/anglecoef.txt", nanglecoef, (float *)anglecoef);
 
-  dihelist_t *dihelist = new dihelist_t[ndihelist];
+  dihe_t *dihe = new dihe_t[ndihe];
   float4 *dihecoef = new float4[ndihecoef];
-  load_vec<int>(8, "test_data/glo_dihelist.txt", ndihelist, (int *)dihelist);
+  load_vec<int>(5, "test_data/dihe.txt", ndihe, (int *)dihe);
   load_vec<float>(4, "test_data/dihecoef.txt", ndihecoef, (float *)dihecoef);
 
-  dihelist_t *imdihelist = new dihelist_t[nimdihelist];
+  dihe_t *imdihe = new dihe_t[nimdihe];
   float4 *imdihecoef = new float4[nimdihecoef];
-  load_vec<int>(8, "test_data/glo_imdihelist.txt", nimdihelist, (int *)imdihelist);
+  load_vec<int>(5, "test_data/imdihe.txt", nimdihe, (int *)imdihe);
   load_vec<float>(4, "test_data/imdihecoef.txt", nimdihecoef, (float *)imdihecoef);
 
-  cmaplist_t *cmaplist = NULL;
+  cmap_t *cmap = NULL;
   float2 *cmapcoef = NULL;
 
   //-------------------------------------------------------------------------------------
 
-  CudaLeapfrogIntegrator leapfrog;
+  const int nvdwparam = 1260;
+  float* vdwparam = new float[nvdwparam];
+  load_vec<float>(1, "test_data/vdwparam.txt", nvdwparam, vdwparam);
+
+  int *vdwtype = new int[ncoord];
+  load_vec<int>(1, "test_data/glo_vdwtype.txt", ncoord, vdwtype);
+
+  //-------------------------------------------------------------------------------------
+
+  const int niblo14 = 23558;
+  const int ninb14 = 34709;
+  int *iblo14 = new int[niblo14];
+  int *inb14 = new int[ninb14];
+  load_vec<int>(1, "test_data/iblo14.txt", niblo14, iblo14);
+  load_vec<int>(1, "test_data/inb14.txt", ninb14, inb14);
+
+  //-------------------------------------------------------------------------------------
+
+  /*
+  const double mO = 15.9994;
+  const double mH = 1.008;
+  const double rOHsq = 0.91623184;
+  const double rHHsq = 2.29189321;
+  const int nsolvent = 7023;
+  const int npair = 458;
+  const int ntrip = 233;
+  const int nquad = 99;
+
+  // Load constraint indices
+  int *solvent_ind = (int *)malloc(nsolvent*3*sizeof(int));
+  load_vec<int>(3, "test_data/solvent_ind.txt", nsolvent, solvent_ind);
+
+  int *pair_ind = (int *)malloc(npair*2*sizeof(int));
+  load_vec<int>(2, "test_data/pair_ind.txt", npair, pair_ind);
+
+  int *trip_ind = (int *)malloc(ntrip*3*sizeof(int));
+  load_vec<int>(3, "test_data/trip_ind.txt", ntrip, trip_ind);
+
+  int *quad_ind = (int *)malloc(nquad*4*sizeof(int));
+  load_vec<int>(4, "test_data/quad_ind.txt", nquad, quad_ind);
+
+  // Load constraint distances and masses
+  double *pair_constr = (double *)malloc(npair*sizeof(double));
+  double *pair_mass = (double *)malloc(npair*2*sizeof(double));
+  load_constr_mass(1, 2, "test_data/pair_constr_mass.txt", npair, pair_constr, pair_mass);
+
+  double *trip_constr = (double *)malloc(ntrip*2*sizeof(double));
+  double *trip_mass = (double *)malloc(ntrip*5*sizeof(double));
+  load_constr_mass(2, 5, "test_data/trip_constr_mass.txt", ntrip, trip_constr, trip_mass);
+
+  double *quad_constr = (double *)malloc(nquad*3*sizeof(double));
+  double *quad_mass = (double *)malloc(nquad*7*sizeof(double));
+  load_constr_mass(3, 7, "test_data/quad_constr_mass.txt", nquad, quad_constr, quad_mass);
+
+  HoloConst holoconst;
+  holoconst.setup_solvent_parameters(mO, mH, rOHsq, rHHsq);
+  holoconst.setup_ind_mass_constr(npair, (int2 *)pair_ind, pair_constr, pair_mass,
+				  ntrip, (int3 *)trip_ind, trip_constr, trip_mass,
+				  nquad, (int4 *)quad_ind, quad_constr, quad_mass,
+				  nsolvent, (int3 *)solvent_ind);
+  */
+
+  //-------------------------------------------------------------------------------------
+
+  CudaLeapfrogIntegrator leapfrog(NULL /*&holoconst*/);
+
+  // Neighborlist
+  NeighborList<32> nlist(ncoord, iblo14, inb14);
+
+  // Setup domain decomposition
+  CudaDomdecBonded domdec_bonded(nbond, bond, nureyb, ureyb, nangle, angle,
+				 ndihe, dihe, nimdihe, imdihe, ncmap, cmap);
+  CudaDomdec domdec(ncoord, boxx, boxy, boxz, rnl, 1, 1, 1, 0);
+
+  float *q = new float[ncoord];
+  load_vec<float>(1, "test_data/q.txt", ncoord, q);
 
   // Setup PME force field
-  CudaPMEForcefield forcefield(// Bonded
-			       nbondlist, bondlist, nureyblist, ureyblist, nanglelist, anglelist,
-			       ndihelist, dihelist, nimdihelist, imdihelist, ncmaplist, cmaplist,
+  CudaPMEForcefield forcefield(// Domain decomposition
+			       &domdec, &domdec_bonded,
+			       // Neighborlist
+			       &nlist,
+			       // Bonded
 			       nbondcoef, bondcoef, nureybcoef, ureybcoef, nanglecoef, anglecoef,
 			       ndihecoef, dihecoef, nimdihecoef, imdihecoef, ncmapcoef, cmapcoef,
 			       // Direct non-bonded
-			       rnl, roff, ron, kappa, e14fac, VDW_VSH, EWALD,
-			       nvdwparam, vdwparam, vdwtype,
+			       roff, ron, kappa, e14fac, VDW_VSH, EWALD,
+			       nvdwparam, vdwparam, vdwtype, q,
 			       // Recip non-bonded
-			       nfftx, nffty, nfftz, order);
-  
-  //forcefield.setup_direct_nonbonded();
-  //forcefield.setup_recip_nonbonded();
+			       nfftx, nffty, nfftz, forder);
 
+  delete [] q;
+
+  leapfrog.set_forcefield(&forcefield);
+  
   // Coordinates
   double *x = new double[ncoord];
   double *y = new double[ncoord];
@@ -199,7 +314,7 @@ void test() {
   load_vec<double>(1, "test_data/dz.txt", ncoord, dz);
 
   leapfrog.init(ncoord, x, y, z, dx, dy, dz);
-  leapfrog.run(10);
+  leapfrog.run(1, 1);
 
   delete [] x;
   delete [] y;
@@ -211,23 +326,50 @@ void test() {
 
   //-------------------------------------------------------------------------------------
 
-  delete [] bondlist;
+  delete [] bond;
   delete [] bondcoef;
   
-  delete [] ureyblist;
+  delete [] ureyb;
   delete [] ureybcoef;
   
-  delete [] anglelist;
+  delete [] angle;
   delete [] anglecoef;
 
-  delete [] dihelist;
+  delete [] dihe;
   delete [] dihecoef;
   
-  delete [] imdihelist;
+  delete [] imdihe;
   delete [] imdihecoef;
 
-  delete [] cmaplist;
-  delete [] cmapcoef;
+  //delete [] cmap;
+  //delete [] cmapcoef;
+
+  //-------------------------------------------------------------------------------------
+
+  delete [] vdwparam;
+  delete [] vdwtype;
+
+  //-------------------------------------------------------------------------------------
+
+  delete [] iblo14;
+  delete [] inb14;
+
+  //-------------------------------------------------------------------------------------
+
+  /*
+  delete [] solvent_ind;
+
+  delete [] pair_ind;
+  delete [] trip_ind;
+  delete [] quad_ind;
+
+  delete [] pair_constr;
+  delete [] pair_mass;
+  delete [] trip_constr;
+  delete [] trip_mass;
+  delete [] quad_constr;
+  delete [] quad_mass;
+  */
 
   return;
 }

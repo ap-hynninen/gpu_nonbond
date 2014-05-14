@@ -1,6 +1,8 @@
 #ifndef BONDEDFORCE_H
 #define BONDEDFORCE_H
 
+#include "Bonded_struct.h"
+
 //
 // Calculates bonded interactions on GPU
 //
@@ -199,6 +201,17 @@ public:
 		  const int nimdihelist, const dihelist_t *h_imdihelist,
 		  const int ncmaplist, const cmaplist_t *h_cmaplist);
 
+  void setup_list(const float4 *xyzq,
+		  const float boxx, const float boxy, const float boxz,
+		  const int *glo2loc_ind,
+		  const int nbond_tbl, const int *bond_tbl, const bond_t *bond, 
+		  const int nureyb_tbl, const int *ureyb_tbl, const bond_t *ureyb,
+		  const int nangle_tbl, const int *angle_tbl, const angle_t *angle,
+		  const int ndihe_tbl, const int *dihe_tbl, const dihe_t *dihe,
+		  const int nimdihe_tbl, const int *imdihe_tbl, const dihe_t *imdihe,
+		  const int ncmap_tbl, const int *cmap_tbl, const cmap_t *cmap,
+		  cudaStream_t stream=0);
+
   void calc_force(const float4 *xyzq,
 		  const float boxx, const float boxy, const float boxz,
 		  const bool calc_energy,
@@ -206,7 +219,7 @@ public:
 		  const int stride, AT *force,
 		  const bool calc_bond=true, const bool calc_ureyb=true,
 		  const bool calc_angle=true, const bool calc_dihe=true,
-		  const bool calc_imdihe=true,
+		  const bool calc_imdihe=true, const bool calc_cmap=true,
 		  cudaStream_t stream=0);
 
 

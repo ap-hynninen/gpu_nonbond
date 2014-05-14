@@ -9,6 +9,8 @@
 #include "Bspline.h"
 #include "Matrix3d.h"
 
+const double ccelec = 332.0716;
+
 enum FFTtype {COLUMN, SLAB, BOX};
 
 struct RecipEnergyVirial_t {
@@ -68,8 +70,6 @@ private:
   //       CCELEC_charmm   = 332.0716D0   , &
   //       CCELEC_discover = 332.054D0    , &
   //       CCELEC_namd     = 332.0636D0   
-
-  static const double ccelec = 332.0716;
 
   // Order of interpolation
   int order;

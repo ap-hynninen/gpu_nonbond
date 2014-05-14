@@ -48,12 +48,12 @@ __global__ void calc_step_kernel(const int ncoord, const int stride, const int s
 //
 // Class creator
 //
-CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(cudaStream_t stream) {
+CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_t stream) {
+  this->holoconst = holoconst;
   this->stream = stream;
   cudaCheck(cudaEventCreate(&copy_rms_work_done_event));
   cudaCheck(cudaEventCreate(&copy_temp_ekin_done_event));
   mass = NULL;
-  forcefield = NULL;
 }
 
 //
@@ -63,7 +63,6 @@ CudaLeapfrogIntegrator::~CudaLeapfrogIntegrator() {
   cudaCheck(cudaEventDestroy(copy_rms_work_done_event));
   cudaCheck(cudaEventDestroy(copy_temp_ekin_done_event));
   if (mass != NULL) deallocate<float>(&mass);
-  if (forcefield != NULL) delete forcefield;
 }
 
 //
@@ -74,6 +73,13 @@ void CudaLeapfrogIntegrator::init(const int ncoord,
 				  const double *dx, const double *dy, const double *dz) {
   prev_coord.set_data_sync(ncoord, x, y, z);
   prev_step.set_data_sync(ncoord, dx, dy, dz);
+  step.resize(ncoord);
+  coord.resize(ncoord);
+  force.set_ncoord(ncoord);
+  if (forcefield != NULL) {
+    CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
+    p->init_coord(&prev_coord);
+  }
 }
 
 //
@@ -85,11 +91,8 @@ void CudaLeapfrogIntegrator::swap_step() {
   // Wait here until work on stream has stopped
   cudaCheck(cudaStreamSynchronize(stream));
 
-  //step.swap(prev_step);
+  step.swap(prev_step);
 
-  //double *tmp = prev_step.data;
-  //prev_step.data = step.data;
-  //step.data = tmp;
 }
 
 
@@ -107,7 +110,7 @@ void CudaLeapfrogIntegrator::take_step() {
   int nblock = (3*stride - 1)/nthread + 1;
 
   take_step_kernel<<< nblock, nthread, 0, stream >>>
-    (3*stride, prev_coord.data, step.data, coord.data);
+    (3*stride, prev_coord.data, prev_step.data, coord.data);
 
   cudaCheck(cudaGetLastError());
 }
@@ -117,6 +120,8 @@ void CudaLeapfrogIntegrator::take_step() {
 //
 void CudaLeapfrogIntegrator::calc_step() {
   assert(prev_coord.match(step));
+
+  return;
 
   int ncoord = step.n;
   int stride = step.stride;
@@ -140,7 +145,46 @@ void CudaLeapfrogIntegrator::calc_step() {
 void CudaLeapfrogIntegrator::calc_force(const bool calc_energy, const bool calc_virial) {
 
   if (forcefield != NULL) {
-    forcefield->calc(&coord, calc_energy, calc_virial, &force);
+    CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
+    p->calc(&coord, calc_energy, calc_virial, &force);
   }
 
+}
+
+//
+// Do holonomic constraints
+//
+void CudaLeapfrogIntegrator::do_holoconst() {
+  if (holoconst != NULL)
+    holoconst->apply(&prev_coord, &coord);
+}
+
+//
+// Do constant pressure
+//
+void CudaLeapfrogIntegrator::do_pressure() {
+}
+
+//
+// Returns true if constant pressure is ON
+//
+bool CudaLeapfrogIntegrator::const_pressure() {
+  return false;
+}
+
+//
+// Do constant temperature
+//
+void CudaLeapfrogIntegrator::do_temperature() {
+}
+
+//
+// Print energy & other info on screen
+//
+void CudaLeapfrogIntegrator::do_print_energy() {
+  std::cout << "do_print_energy()" << std::endl;
+  if (forcefield != NULL) {
+    CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
+    p->print_energy_virial();
+  }
 }

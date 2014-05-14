@@ -51,9 +51,9 @@ __device__ void calc_bond_force_device(const int pos,
 				       const float boxx, const float boxy, const float boxz,
 				       AT* __restrict__ force, double &epot) {
 
-  int ii = bondlist[pos].i - 1;
-  int jj = bondlist[pos].j - 1;
-  int ic = bondlist[pos].itype - 1;
+  int ii = bondlist[pos].i;
+  int jj = bondlist[pos].j;
+  int ic = bondlist[pos].itype;
   int ish = bondlist[pos].ishift;
 
   // Calculate shift for i-atom
@@ -182,10 +182,10 @@ __device__ void calc_angle_force_device(const int pos,
 					const float boxx, const float boxy, const float boxz,
 					AT* __restrict__ force, double &epot) {
 
-    int ii = anglelist[pos].i - 1;
-    int jj = anglelist[pos].j - 1;
-    int kk = anglelist[pos].k - 1;
-    int ic = anglelist[pos].itype - 1;
+    int ii = anglelist[pos].i;
+    int jj = anglelist[pos].j;
+    int kk = anglelist[pos].k;
+    int ic = anglelist[pos].itype;
     int ish = anglelist[pos].ishift1;
     int ksh = anglelist[pos].ishift2;
 
@@ -443,11 +443,11 @@ __device__ void calc_dihe_force_device(const int pos,
 				       const int stride,
 				       const float boxx, const float boxy, const float boxz,
 				       AT* __restrict__ force, double &epot) {
-  int ii = dihelist[pos].i - 1;
-  int jj = dihelist[pos].j - 1;
-  int kk = dihelist[pos].k - 1;
-  int ll = dihelist[pos].l - 1;
-  int ic = dihelist[pos].itype - 1;
+  int ii = dihelist[pos].i;
+  int jj = dihelist[pos].j;
+  int kk = dihelist[pos].k;
+  int ll = dihelist[pos].l;
+  int ic = dihelist[pos].itype;
   int ish = dihelist[pos].ishift1;
   int jsh = dihelist[pos].ishift2;
   int lsh = dihelist[pos].ishift3;
@@ -765,6 +765,173 @@ __global__ void calc_all_forces_kernel(
 
 }
 
+//-----------------------------------------------------------------------------------------------------------
+//
+// Setups lists
+//
+
+__forceinline__ __device__ int calc_ishift(const float4 xyzq_i, const float4 xyzq_j, const float3 half_box) {
+  float3 dxyz;
+  dxyz.x = xyzq_i.x - xyzq_j.x;
+  dxyz.y = xyzq_i.y - xyzq_j.y;
+  dxyz.z = xyzq_i.z - xyzq_j.z;
+
+  int3 is;
+  is.x = 0;
+  is.y = 0;
+  is.z = 0;
+    
+  // is = -1, 0, 1
+  if (dxyz.x >= half_box.x) {
+    is.x = -1;
+  } else if (dxyz.x < -half_box.x) {
+    is.x = 1;
+  }
+
+  if (dxyz.y >= half_box.y) {
+    is.y = -1;
+  } else if (dxyz.y < -half_box.y) {
+    is.y = 1;
+  }
+
+  if (dxyz.z >= half_box.z) {
+    is.z = -1;
+  } else if (dxyz.z < -half_box.z) {
+    is.z = 1;
+  }
+
+  // shift index = 1...26*3+1
+  return (is.x+1 + (is.y+1)*3 + (is.z+1)*9 + 1)*3 - 2;
+}
+
+__device__ void setup_bondlist_kernel(const int i,
+				      const int* __restrict__ bond_tbl, const bond_t* __restrict__ bond,
+				      bondlist_t* __restrict__ bondlist, const float4* __restrict__ xyzq,
+				      const float3 half_box, const int*__restrict__ glo2loc_ind) {
+
+  int j = bond_tbl[i];
+  bond_t bondv = bond[j];
+  bondlist_t bondlistv;
+  bondlistv.i = glo2loc_ind[bondv.i];
+  bondlistv.j = glo2loc_ind[bondv.j];
+  bondlistv.itype = bondv.itype;
+  float4 xyzq_i = xyzq[bondlistv.i];
+  float4 xyzq_j = xyzq[bondlistv.j];
+  bondlistv.ishift = calc_ishift(xyzq_i, xyzq_j, half_box);
+  bondlist[i] = bondlistv;
+}
+
+__device__ void setup_anglelist_kernel(const int i,
+				      const int* __restrict__ angle_tbl, const angle_t* __restrict__ angle,
+				      anglelist_t* __restrict__ anglelist, const float4* __restrict__ xyzq,
+				      const float3 half_box, const int*__restrict__ glo2loc_ind) {
+
+  int j = angle_tbl[i];
+  angle_t anglev = angle[j];
+  anglelist_t anglelistv;
+  anglelistv.i = glo2loc_ind[anglev.i];
+  anglelistv.j = glo2loc_ind[anglev.j];
+  anglelistv.k = glo2loc_ind[anglev.k];
+  anglelistv.itype = anglev.itype;
+  float4 xyzq_i = xyzq[anglelistv.i];
+  float4 xyzq_j = xyzq[anglelistv.j];
+  float4 xyzq_k = xyzq[anglelistv.k];
+  anglelistv.ishift1 = calc_ishift(xyzq_i, xyzq_j, half_box);
+  anglelistv.ishift2 = calc_ishift(xyzq_k, xyzq_j, half_box);
+  anglelist[i] = anglelistv;
+}
+
+__device__ void setup_dihelist_kernel(const int i,
+				      const int* __restrict__ dihe_tbl, const dihe_t* __restrict__ dihe,
+				      dihelist_t* __restrict__ dihelist, const float4* __restrict__ xyzq,
+				      const float3 half_box, const int*__restrict__ glo2loc_ind) {
+
+  int j = dihe_tbl[i];
+  dihe_t dihev = dihe[j];
+  dihelist_t dihelistv;
+  dihelistv.i = glo2loc_ind[dihev.i];
+  dihelistv.j = glo2loc_ind[dihev.j];
+  dihelistv.k = glo2loc_ind[dihev.k];
+  dihelistv.l = glo2loc_ind[dihev.l];
+  dihelistv.itype = dihev.itype;
+  float4 xyzq_i = xyzq[dihelistv.i];
+  float4 xyzq_j = xyzq[dihelistv.j];
+  float4 xyzq_k = xyzq[dihelistv.k];
+  float4 xyzq_l = xyzq[dihelistv.l];
+  dihelistv.ishift1 = calc_ishift(xyzq_i, xyzq_k, half_box);
+  dihelistv.ishift2 = calc_ishift(xyzq_j, xyzq_k, half_box);
+  dihelistv.ishift3 = calc_ishift(xyzq_l, xyzq_k, half_box);
+  dihelist[i] = dihelistv;
+}
+
+__device__ void setup_cmaplist_kernel(const int i,
+				      const int* __restrict__ cmap_tbl, const cmap_t* __restrict__ cmap,
+				      cmaplist_t* __restrict__ cmaplist, const float4* __restrict__ xyzq,
+				      const float3 half_box, const int*__restrict__ glo2loc_ind) {
+
+  int j = cmap_tbl[i];
+  cmap_t cmapv = cmap[j];
+  cmaplist_t cmaplistv;
+  cmaplistv.i1 = glo2loc_ind[cmapv.i1];
+  cmaplistv.j1 = glo2loc_ind[cmapv.j1];
+  cmaplistv.k1 = glo2loc_ind[cmapv.k1];
+  cmaplistv.l1 = glo2loc_ind[cmapv.l1];
+  cmaplistv.i2 = glo2loc_ind[cmapv.i2];
+  cmaplistv.j2 = glo2loc_ind[cmapv.j2];
+  cmaplistv.k2 = glo2loc_ind[cmapv.k2];
+  cmaplistv.l2 = glo2loc_ind[cmapv.l2];
+  cmaplistv.itype = cmapv.itype;
+  float4 xyzq_i1 = xyzq[cmaplistv.i1];
+  float4 xyzq_j1 = xyzq[cmaplistv.j1];
+  float4 xyzq_k1 = xyzq[cmaplistv.k1];
+  float4 xyzq_l1 = xyzq[cmaplistv.l1];
+  float4 xyzq_i2 = xyzq[cmaplistv.i2];
+  float4 xyzq_j2 = xyzq[cmaplistv.j2];
+  float4 xyzq_k2 = xyzq[cmaplistv.k2];
+  float4 xyzq_l2 = xyzq[cmaplistv.l2];
+  cmaplistv.ishift1 = calc_ishift(xyzq_i1, xyzq_k1, half_box);
+  cmaplistv.ishift2 = calc_ishift(xyzq_j1, xyzq_k1, half_box);
+  cmaplistv.ishift3 = calc_ishift(xyzq_l1, xyzq_k1, half_box);
+  cmaplist[i] = cmaplistv;
+}
+
+__global__ void setup_list_kernel(const int nbond_tbl, const int* __restrict__ bond_tbl,
+				  const bond_t* __restrict__ bond, bondlist_t* __restrict__ bondlist,
+				  const int nureyb_tbl, const int* __restrict__ ureyb_tbl,
+				  const bond_t* __restrict__ ureyb, bondlist_t* __restrict__ ureyblist,
+				  const int nangle_tbl, const int* __restrict__ angle_tbl,
+				  const angle_t* __restrict__ angle, anglelist_t* __restrict__ anglelist,
+				  const int ndihe_tbl, const int* __restrict__ dihe_tbl,
+				  const dihe_t* __restrict__ dihe, dihelist_t* __restrict__ dihelist,
+				  const int nimdihe_tbl, const int* __restrict__ imdihe_tbl,
+				  const dihe_t* __restrict__ imdihe, dihelist_t* __restrict__ imdihelist,
+				  const int ncmap_tbl, const int* __restrict__ cmap_tbl,
+				  const cmap_t* __restrict__ cmap, cmaplist_t* __restrict__ cmaplist,
+				  const float4* __restrict__ xyzq,
+				  const float3 half_box, const int*__restrict__ glo2loc_ind) {
+
+  int pos = threadIdx.x + blockIdx.x*blockDim.x;
+  
+  if (pos < nbond_tbl) {
+    setup_bondlist_kernel(pos, bond_tbl, bond, bondlist, xyzq, half_box, glo2loc_ind);
+  } else if (pos < nbond_tbl + nureyb_tbl) {
+    setup_bondlist_kernel(pos-nbond_tbl, ureyb_tbl, ureyb, ureyblist, xyzq, half_box, glo2loc_ind);
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl) {
+    setup_anglelist_kernel(pos-nbond_tbl-nureyb_tbl, angle_tbl, angle, anglelist, xyzq, half_box, glo2loc_ind);
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl) {
+    setup_dihelist_kernel(pos-nbond_tbl-nureyb_tbl-nangle_tbl,
+			   dihe_tbl, dihe, dihelist, xyzq, half_box, glo2loc_ind);
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl + nimdihe_tbl) {
+    setup_dihelist_kernel(pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl,
+			   imdihe_tbl, imdihe, imdihelist, xyzq, half_box, glo2loc_ind);
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl + nimdihe_tbl + ncmap_tbl) {
+    setup_cmaplist_kernel(pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl,
+			  cmap_tbl, cmap, cmaplist, xyzq, half_box, glo2loc_ind);
+  }
+
+}
+
+//-----------------------------------------------------------------------------------------------------------
 
 //#############################################################################################
 
@@ -950,6 +1117,60 @@ void BondedForce<AT, CT>::setup_list(const int nbondlist, const bondlist_t *h_bo
 }
 
 //
+// Setup lists from device memory using global bond data:
+// bond[]                  = global bond data
+// bond_tbl[0:nbond_tbl-1] = the index of bond in bond[]
+//
+template <typename AT, typename CT>
+void BondedForce<AT, CT>::setup_list(const float4 *xyzq,
+				     const float boxx, const float boxy, const float boxz,
+				     const int *glo2loc_ind,
+				     const int nbond_tbl, const int *bond_tbl, const bond_t *bond, 
+				     const int nureyb_tbl, const int *ureyb_tbl, const bond_t *ureyb,
+				     const int nangle_tbl, const int *angle_tbl, const angle_t *angle,
+				     const int ndihe_tbl, const int *dihe_tbl, const dihe_t *dihe,
+				     const int nimdihe_tbl, const int *imdihe_tbl, const dihe_t *imdihe,
+				     const int ncmap_tbl, const int *cmap_tbl, const cmap_t *cmap,
+				     cudaStream_t stream) {
+
+  this->nbondlist = nbond_tbl;
+  if (nbondlist > 0) reallocate<bondlist_t>(&bondlist, &bondlist_len, nbondlist, 1.2f);
+
+  this->nureyblist = nureyb_tbl;
+  if (nureyblist > 0) reallocate<bondlist_t>(&ureyblist, &ureyblist_len, nureyblist, 1.2f);
+
+  this->nanglelist = nangle_tbl;
+  if (nanglelist > 0) reallocate<anglelist_t>(&anglelist, &anglelist_len, nanglelist, 1.2f);
+
+  this->ndihelist = ndihe_tbl;
+  if (ndihelist > 0) reallocate<dihelist_t>(&dihelist, &dihelist_len, ndihelist, 1.2f);
+
+  this->nimdihelist = nimdihe_tbl;
+  if (nimdihelist > 0) reallocate<dihelist_t>(&imdihelist, &imdihelist_len, nimdihelist, 1.2f);
+
+  this->ncmaplist = ncmap_tbl;
+  if (ncmaplist > 0) reallocate<cmaplist_t>(&cmaplist, &cmaplist_len, ncmaplist, 1.2f);
+
+  float3 half_box;
+  half_box.x = boxx*0.5f;
+  half_box.y = boxy*0.5f;
+  half_box.z = boxz*0.5f;
+
+  int nthread = 512;
+  int nblock = (nbond_tbl + nureyb_tbl + nangle_tbl + 
+		ndihe_tbl + nimdihe_tbl + ncmap_tbl -1)/nthread + 1;
+  setup_list_kernel<<< nblock, nthread, 0, stream >>>
+    (nbond_tbl, bond_tbl, bond, bondlist,
+     nureyb_tbl, ureyb_tbl, ureyb, ureyblist,
+     nangle_tbl, angle_tbl, angle, anglelist,
+     ndihe_tbl, dihe_tbl, dihe, dihelist,
+     nimdihe_tbl, imdihe_tbl, imdihe, imdihelist,
+     ncmap_tbl, cmap_tbl, cmap, cmaplist,
+     xyzq, half_box, glo2loc_ind);
+  cudaCheck(cudaGetLastError());
+}
+
+//
 // Calculates forces
 //
 template <typename AT, typename CT>
@@ -960,8 +1181,13 @@ void BondedForce<AT, CT>::calc_force(const float4 *xyzq,
 				     const int stride, AT *force,
 				     const bool calc_bond, const bool calc_ureyb,
 				     const bool calc_angle, const bool calc_dihe,
-				     const bool calc_imdihe,
+				     const bool calc_imdihe, const bool calc_cmap,
 				     cudaStream_t stream) {
+
+  if (ncmaplist > 0) {
+    std::cerr << "BondedForce<AT, CT>::calc_force, cmap not implemented" << std::endl;
+    exit(1);
+  }
 
   int nthread, nblock, shmem_size;
 
@@ -974,89 +1200,87 @@ void BondedForce<AT, CT>::calc_force(const float4 *xyzq,
 
   if (calc_energy) {
     if (calc_virial) {
-      std::cerr << "BondedForce<AT, CT>::calc_force, calc_virial not implemented yet" << std::endl;
-    } else {
-
-      if (calc_bond) {
-	nthread = 512;
-	nblock = (nbondlist -1)/nthread + 1;
-	shmem_size = 0;
-	if (calc_energy) shmem_size += nthread*sizeof(double);
-	calc_bond_force_kernel<AT, CT, true, false >
-	  <<< nblock, nthread, shmem_size, stream >>>
-	  (nbondlist, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force);
-	cudaCheck(cudaGetLastError());
-      }
-
-      if (calc_ureyb) {
-	nthread = 512;
-	nblock = (nureyblist -1)/nthread + 1;
-	shmem_size = 0;
-	if (calc_energy) shmem_size += nthread*sizeof(double);
-	calc_ureyb_force_kernel<AT, CT, true, false >
-	  <<< nblock, nthread, shmem_size, stream >>>
-	  (nureyblist, ureyblist, ureybcoef, xyzq, stride, boxx, boxy, boxz, force);
-	cudaCheck(cudaGetLastError());
-      }
-
-      if (calc_angle) {
-	nthread = 512;
-	nblock = (nanglelist -1)/nthread + 1;
-	shmem_size = 0;
-	if (calc_energy) shmem_size += nthread*sizeof(double);
-	calc_angle_force_kernel<AT, CT, true, false >
-	  <<< nblock, nthread, shmem_size, stream >>>
-	  (nanglelist, anglelist, anglecoef, xyzq, stride, boxx, boxy, boxz, force);
-	cudaCheck(cudaGetLastError());
-      }
-
-      if (calc_dihe) {
-	nthread = 512;
-	nblock = (ndihelist -1)/nthread + 1;
-	shmem_size = 0;
-	if (calc_energy) shmem_size += nthread*sizeof(double);
-	calc_dihe_force_kernel<AT, CT, true, false >
-	  <<< nblock, nthread, shmem_size, stream >>>
-	  (ndihelist, dihelist, dihecoef, xyzq, stride, boxx, boxy, boxz, force);
-	cudaCheck(cudaGetLastError());
-      }
-
-      if (calc_imdihe) {
-	nthread = 512;
-	nblock = (nimdihelist -1)/nthread + 1;
-	shmem_size = 0;
-	if (calc_energy) shmem_size += nthread*sizeof(double);
-	calc_imdihe_force_kernel<AT, CT, true, false >
-	  <<< nblock, nthread, shmem_size, stream >>>
-	  (nimdihelist, imdihelist, imdihecoef, xyzq, stride, boxx, boxy, boxz, force);
-	cudaCheck(cudaGetLastError());
-      }
-
+      std::cerr << "BondedForce<AT, CT>::calc_force, calc_virial not implemented yet (1)" << std::endl;
     }
+
+    if (calc_bond) {
+      nthread = 512;
+      nblock = (nbondlist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_bond_force_kernel<AT, CT, true, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nbondlist, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+    }
+    
+    if (calc_ureyb) {
+      nthread = 512;
+      nblock = (nureyblist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_ureyb_force_kernel<AT, CT, true, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nureyblist, ureyblist, ureybcoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+    }
+    
+    if (calc_angle) {
+      nthread = 512;
+      nblock = (nanglelist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_angle_force_kernel<AT, CT, true, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nanglelist, anglelist, anglecoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+    }
+    
+    if (calc_dihe) {
+      nthread = 512;
+      nblock = (ndihelist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_dihe_force_kernel<AT, CT, true, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(ndihelist, dihelist, dihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+    }
+    
+    if (calc_imdihe) {
+      nthread = 512;
+      nblock = (nimdihelist -1)/nthread + 1;
+      shmem_size = 0;
+      if (calc_energy) shmem_size += nthread*sizeof(double);
+      calc_imdihe_force_kernel<AT, CT, true, false >
+	<<< nblock, nthread, shmem_size, stream >>>
+	(nimdihelist, imdihelist, imdihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      cudaCheck(cudaGetLastError());
+    }
+
   } else {
     if (calc_virial) {
-      std::cerr << "BondedForce<AT, CT>::calc_force, calc_virial not implemented yet" << std::endl;
-    } else {
-
-      int nbondlist_loc   = (calc_bond)   ? nbondlist   : 0;
-      int nureyblist_loc  = (calc_ureyb)  ? nureyblist  : 0;
-      int nanglelist_loc  = (calc_angle)  ? nanglelist  : 0;
-      int ndihelist_loc   = (calc_dihe)   ? ndihelist   : 0;
-      int nimdihelist_loc = (calc_imdihe) ? nimdihelist : 0;
-
-      nthread = 512;
-      nblock = (nbondlist_loc + nureyblist_loc + nanglelist_loc + 
-		ndihelist_loc + nimdihelist_loc -1)/nthread + 1;      
-      calc_all_forces_kernel<AT, CT, false, false>
-	<<< nblock, nthread, shmem_size, stream>>>
-	(nbondlist_loc, bondlist, bondcoef,
-	 nureyblist_loc, ureyblist, ureybcoef,
-	 nanglelist_loc, anglelist, anglecoef,
-	 ndihelist_loc, dihelist, dihecoef,
-	 nimdihelist_loc, imdihelist, imdihecoef,
-	 xyzq, stride, boxx, boxy, boxz, force);
-
+      std::cerr << "BondedForce<AT, CT>::calc_force, calc_virial not implemented yet (2)" << std::endl;
     }
+
+    int nbondlist_loc   = (calc_bond)   ? nbondlist   : 0;
+    int nureyblist_loc  = (calc_ureyb)  ? nureyblist  : 0;
+    int nanglelist_loc  = (calc_angle)  ? nanglelist  : 0;
+    int ndihelist_loc   = (calc_dihe)   ? ndihelist   : 0;
+    int nimdihelist_loc = (calc_imdihe) ? nimdihelist : 0;
+    
+    nthread = 512;
+    nblock = (nbondlist_loc + nureyblist_loc + nanglelist_loc + 
+	      ndihelist_loc + nimdihelist_loc -1)/nthread + 1;      
+    calc_all_forces_kernel<AT, CT, false, false>
+      <<< nblock, nthread, shmem_size, stream>>>
+      (nbondlist_loc, bondlist, bondcoef,
+       nureyblist_loc, ureyblist, ureybcoef,
+       nanglelist_loc, anglelist, anglecoef,
+       ndihelist_loc, dihelist, dihecoef,
+       nimdihelist_loc, imdihelist, imdihecoef,
+       xyzq, stride, boxx, boxy, boxz, force);
+    cudaCheck(cudaGetLastError());
   }
 
 }

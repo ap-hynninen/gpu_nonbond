@@ -122,8 +122,8 @@ private:
   void set_elec_model(int elec_model, CT h=0.01);
   void update_setup();
 
-  void setup_vdwparam(int type, int nvdwparam, CT *h_vdwparam);
-  void load_vdwparam(const char *filename, int *nvdwparam, CT **h_vdwparam);
+  void setup_vdwparam(const int type, const int nvdwparam, const CT *h_vdwparam);
+  void load_vdwparam(const char *filename, const int nvdwparam, CT **h_vdwparam);
 
 public:
 
@@ -134,22 +134,21 @@ public:
 	     CT kappa,
 	     CT roff, CT ron,
 	     CT e14fac,
-	     int vdw_model, int elec_model,
-	     bool calc_vdw, bool calc_elec);
+	     int vdw_model, int elec_model);
 
   void get_box_size(CT &boxx, CT &boxy, CT &boxz);
-  void set_box_size(CT boxx, CT boxy, CT boxz);
+  void set_box_size(const CT boxx, const CT boxy, const CT boxz);
 
-  void set_calc_vdw(bool calc_vdw);
-  void set_calc_elec(bool calc_elec);
+  void set_calc_vdw(const bool calc_vdw);
+  void set_calc_elec(const bool calc_elec);
 
-  void set_vdwparam(int nvdwparam, CT *h_vdwparam);
-  void set_vdwparam(const char *filename);
-  void set_vdwparam14(int nvdwparam, CT *h_vdwparam);
-  void set_vdwparam14(const char *filename);
+  void set_vdwparam(const int nvdwparam, const CT *h_vdwparam);
+  void set_vdwparam(const int nvdwparam, const char *filename);
+  void set_vdwparam14(const int nvdwparam, const CT *h_vdwparam);
+  void set_vdwparam14(const int nvdwparam, const char *filename);
 
-  void set_vdwtype(int ncoord, int *h_vdwtype);
-  void set_vdwtype(const char *filename);
+  void set_vdwtype(const int ncoord, const int *h_vdwtype);
+  void set_vdwtype(const int ncoord, const char *filename);
 
   void set_14_list(int nin14list, int nex14list,
 		   list14_t* h_in14list, list14_t* h_ex14list);

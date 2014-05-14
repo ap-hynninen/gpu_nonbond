@@ -65,6 +65,13 @@ public:
     copy_DtoD<T>((T *)xyz.data, this->data, 3*this->stride, stream);
   }
 
+  // Sets data from cudaXYZ pointer
+  template <typename P>
+  void set_data(cudaXYZ<P> *xyz, cudaStream_t stream=0) {
+    assert(this->match(xyz));
+    copy_DtoD<T>((T *)xyz->data, this->data, 3*this->stride, stream);
+  }
+
   // Sets data from hostXYZ
   template <typename P>
   void set_data_sync(hostXYZ<P> &xyz) {
@@ -77,6 +84,13 @@ public:
   void set_data_sync(cudaXYZ<P> &xyz) {
     assert(this->match(xyz));
     copy_DtoD_sync<T>((T *)xyz.data, this->data, 3*this->stride);
+  }
+
+  // Sets data from cudaXYZ
+  template <typename P>
+  void set_data_sync(cudaXYZ<P> *xyz) {
+    assert(this->match(xyz));
+    copy_DtoD_sync<T>((T *)xyz->data, this->data, 3*this->stride);
   }
 
   // Sets data from list of numbers on host
