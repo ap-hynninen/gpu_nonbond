@@ -40,9 +40,9 @@ __global__ void calc_xyz_shift(const int ncoord, const int stride, const double*
 //
 // Class creator
 //
-CudaDomdec::CudaDomdec(int ncoord_tot, double boxx, double boxy, double boxz, double rnl,
+CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,
 		       int nx, int ny, int nz, int mynode) {
-  this->ncoord_tot = ncoord_tot;
+  this->ncoord_glo = ncoord_glo;
   this->boxx = boxx;
   this->boxy = boxy;
   this->boxz = boxz;
@@ -74,8 +74,8 @@ CudaDomdec::~CudaDomdec() {
 //
 void CudaDomdec::build_homezone(cudaXYZ<double> *coord, cudaStream_t stream) {
   if (numnode == 1) {
-    zone_natom[0] = coord->n;
-    for (int i=1;i < 8;i++) zone_natom[i] = 0;
+    zone_ncoord[0] = coord->n;
+    for (int i=1;i < 8;i++) zone_ncoord[i] = 0;
 
     reallocate<int>(&loc2glo, &loc2glo_len, coord->n);
 
@@ -109,10 +109,10 @@ void CudaDomdec::update_homezone(cudaXYZ<double> *coord, cudaStream_t stream) {
 //
 void CudaDomdec::comm_coord(cudaXYZ<double> *coord, bool update, cudaStream_t stream) {
 
-  // Calculate zone_patom
-  zone_patom[0] = zone_natom[0];
+  // Calculate zone_pcoord
+  zone_pcoord[0] = zone_ncoord[0];
   for (int i=1;i < 8;i++) {
-    zone_patom[i] = zone_patom[i-1] + zone_natom[i];
+    zone_pcoord[i] = zone_pcoord[i-1] + zone_ncoord[i];
   }
 
   // Calculate xyz_shift
@@ -125,12 +125,12 @@ void CudaDomdec::comm_coord(cudaXYZ<double> *coord, bool update, cudaStream_t st
     double inv_boxz = 1.0/boxz;
 
     float fac = (numnode > 1) ? 1.2f : 1.0f;
-    reallocate<float3>(&xyz_shift, &xyz_shift_len, zone_patom[7], fac);
+    reallocate<float3>(&xyz_shift, &xyz_shift_len, zone_pcoord[7], fac);
     
     int nthread = 512;
-    int nblock = (zone_patom[7] - 1)/nthread + 1;
+    int nblock = (zone_pcoord[7] - 1)/nthread + 1;
     calc_xyz_shift<<< nblock, nthread, 0, stream >>>
-      (zone_patom[7], coord->stride, coord->data,
+      (zone_pcoord[7], coord->stride, coord->data,
        x0, y0, z0, inv_boxx, inv_boxy, inv_boxz, xyz_shift);
     cudaCheck(cudaGetLastError());
   }

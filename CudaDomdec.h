@@ -33,9 +33,9 @@ class CudaDomdec : public Decomp {
   int loc2glo_len;
   int *loc2glo;
 
-  // Number of atoms in each node
-  int zone_natom[8];
-  int zone_patom[8];
+  // Number of coordinates in each node
+  int zone_ncoord[8];
+  int zone_pcoord[8];
 
   // (x,y,z) shift
   int xyz_shift_len;
@@ -43,19 +43,28 @@ class CudaDomdec : public Decomp {
 
  public:
 
-  CudaDomdec(int ncoord_tot, double boxx, double boxy, double boxz, double rnl,
+  CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,
 	     int nx, int ny, int nz, int mynode);
   ~CudaDomdec();
 
+  // Return box size
   double get_boxx() {return boxx;}
   double get_boxy() {return boxy;}
   double get_boxz() {return boxz;}
-  int* get_zone_patom() {return zone_patom;}
+
+  // Return the cumulative coordinate number
+  int* get_zone_pcoord() {return zone_pcoord;}
+
+  // Return the total number of coordinates in all zones
+  int get_ncoord_tot() {return zone_pcoord[7];};
+
+  // Return pointer to local -> global mapping
   int* get_loc2glo() {return loc2glo;}
+
+  // Return pointer to (x, y, z) shift (=-1.0f, 0.0f, 1.0f)
   float3* get_xyz_shift() {return xyz_shift;}
 
-  void get_zone_patom(int *zone_patom_out);
-
+  // Return neighborlist cut-off
   double get_rnl() {return rnl;}
 
   void build_homezone(cudaXYZ<double> *coord, cudaStream_t stream=0);

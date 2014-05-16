@@ -83,6 +83,7 @@ struct NeighborListParam_t {
 
   // Number of cell-cell exclusions
   int nexcl;
+
 };
 
 //
@@ -198,7 +199,9 @@ private:
   int cell_excl_len;
   int *cell_excl;
 
-  // Atom-atom exclusions
+  // Atom-atom exclusions:
+  // For global atom index i, excluded atoms are in
+  // atom_excl[ atom_excl_pos[i] ... atom_excl_pos[i+1]-1 ]
   int atom_excl_pos_len;
   int *atom_excl_pos;
 
@@ -287,7 +290,7 @@ public:
 
   void test_build(const int *zone_patom,
 		  const float boxx, const float boxy, const float boxz,
-		  const float rcut, const float4 *xyzq);
+		  const float rcut, const float4 *xyzq, const int *loc2glo);
   
   void build_excl(const float boxx, const float boxy, const float boxz,
 		  const float rcut,

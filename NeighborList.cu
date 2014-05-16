@@ -1,7 +1,8 @@
+#include <stdio.h>
 #include <iostream>
 #include <fstream>
-#include <thrust/device_ptr.h>
-#include <thrust/scan.h>
+//#include <thrust/device_ptr.h>
+//#include <thrust/scan.h>
 #include "gpu_utils.h"
 #include "cuda_utils.h"
 #include "NeighborList.h"
@@ -952,6 +953,7 @@ __global__ void calc_bb_cell_bz_kernel(const int* __restrict__ cell_patom,
 
 }
 
+/*
 //
 // Builds cell-based topological exclusion lists
 // 
@@ -1128,6 +1130,7 @@ __launch_bounds__(1024)
   }
   
 }
+*/
 
 //
 //
@@ -1142,34 +1145,34 @@ __forceinline__ __device__ void flush_atomj(const int wid, const int istart,
 					    const int n_excl_atom, const int* __restrict__ excl_atom,
 					    const int jtile_start,
 					    tile_excl_t<tilesize>* __restrict__ tile_excl) {
-
   if ((min_atomj <= max_excl_atom) && (max_atomj >= min_excl_atom)) {
     int atomj = (wid < n_atomj) ? (sh_atomj[wid] >> n_jlist_max_shift) : -1;
     for (int ibase=0;ibase < n_excl_atom;ibase+=warpsize) {
       int i = ibase + wid;
-      // Load excluded atom from global memory
-      int atomi = (i < n_excl_atom) ? excl_atom[i] : -1;
-      int has_excl = __ballot((atomi >= min_atomj) && (atomi <= max_atomj));
+      // Load excluded atom from global memory and check if there are any possible exclusions
+      int excl_atomi = (i < n_excl_atom) ? (excl_atom[i] >> 5) : -1;
+      int has_excl = __ballot((excl_atomi >= min_atomj) && (excl_atomi <= max_atomj));
       // Loop through possible exclusions
       while (has_excl) {
 	// Get bit position for the exclusion
 	int bitpos = __ffs(has_excl) - 1;
 	i = ibase + bitpos;
-	atomi = excl_atom[i];
-	// Check atomi vs. sh_atomj[0...warpsize-1]
-	if (atomi == atomj) {
-	  // Thread wid found exclusion between atomi and atomj
+	excl_atomi = excl_atom[i];
+	// Check excl_atomi vs. sh_atomj[0...warpsize-1]
+	if ((excl_atomi >> 5) == atomj) {
+	  // Thread wid found exclusion between atomj and (excl_atomi & 31)
 	  // NOTE: Only a single thread per warp enters here
 	  int i_jlist = (sh_atomj[wid] & n_jlist_max_mask);
 	  int jtile = jtile_start + i_jlist;
 	  int jcell = sh_jlist[i_jlist];
 	  int jstart = cell_patom[jcell];
-	  int excl_i = atomj - jstart;
-	  int excl_m = 1 << (atomi - istart);
-	  //tile_excl[jtile].excl[excl_i] |= excl_m;
+	  int excl_ind  = atomj - jstart;
+	  int excl_shift = ( (excl_atomi & 31) - excl_ind + tilesize) % tilesize;
+	  unsigned int excl_mask = 1 << excl_shift;
+	  tile_excl[jtile].excl[excl_ind] |= excl_mask;
 	}
 	// Remove bit from has_excl
-	has_excl ^= 1 << bitpos;
+	has_excl ^= (1 << bitpos);
       }
     }
   }
@@ -1210,8 +1213,6 @@ __device__ void flush_jlist(const int wid, const int istart, const int iend,
   jtile_start = bcast_shmem(jtile_start, 0, wid, shflmem);
 #endif
 
-  //if (jtile_start > 40095) printf("jtile_start = %d, n_jlist = %d\n",jtile_start,n_jlist);
-
   int min_atomj = 1 << 30;
   int max_atomj = 0;
   int n_atomj = 0;
@@ -1240,7 +1241,6 @@ __device__ void flush_jlist(const int wid, const int istart, const int iend,
     sh_xyzj[wid].z = xyzq_j.z;
 #endif
 
-    bool any_incut = false;
     bool first = true;
     for (int j=0;j <= jend-jstart;j++) {
 #if __CUDA_ARCH__ >= 300
@@ -1259,10 +1259,12 @@ __device__ void flush_jlist(const int wid, const int istart, const int iend,
       float r2 = dx*dx + dy*dy + dz*dz;
 
       if (__any((r2 < rcut2))) {
-	any_incut = true;
 
-	// Set initial exclusion masks
 	if (first) {
+	  first = false;
+	  // ----------------------------
+	  // Set initial exclusion masks
+	  // ----------------------------
 	  int jtile = jtile_start + n_jlist_new;
 	  // NOTE: In case i,j cells are less than tilesize atoms, add exclusions
 	  int ni = (iend-istart+1);
@@ -1271,12 +1273,18 @@ __device__ void flush_jlist(const int wid, const int istart, const int iend,
 	  int dw = (wid >= ni) ? wid-ni : tilesize + wid-ni;
 	  unsigned int imask = (1 << (tilesize-ni)) - 1;
 	  mask |= (imask << up) | (imask >> dw);                // i contribution
-	  // Diagonal tile
+	  // Diagonal tile, exclude i >= j
 	  if (istart == jstart) {
-	    mask |= (0xffffffff << (tilesize-wid)) | 1;
+	    mask |= (0xffffffff >> wid);
 	  }
 	  tile_excl[jtile].excl[wid] = mask;
-	  first = false;
+	  // --------------------------
+	  // Keep in sh_jlist
+	  // --------------------------
+	  if (wid == 0) tile_indj[jtile] = jstart;
+	  // Re-store jcell so that flush_atomj can read it off
+	  sh_jlist[n_jlist_new] = jcell;
+	  n_jlist_new++;
 	}
 
 	// This j-atom is within rcut of one of the i-atoms => add to exclusion check list
@@ -1284,7 +1292,7 @@ __device__ void flush_jlist(const int wid, const int istart, const int iend,
 	int atomj = jstart + j;
 	min_atomj = min(min_atomj, atomj);
 	max_atomj = max(max_atomj, atomj);
-	sh_atomj[n_atomj++] = (atomj << n_jlist_max_shift) | n_jlist_new;
+	sh_atomj[n_atomj++] = (atomj << n_jlist_max_shift) | (n_jlist_new-1);
 	
 	// Check sh_atomj[0...warpsize-1] for exclusions with any
 	// of the i atoms in excl_atom[0...n_excl_atom-1]
@@ -1297,29 +1305,22 @@ __device__ void flush_jlist(const int wid, const int istart, const int iend,
 	  min_atomj = 1 << 30;
 	  max_atomj = 0;
 	  n_atomj = 0;
-
 	} // if (natomj == warpsize)
       } // if (__any((r2 < rcut2)))
     } // for (int j=0;j <= jend-jstart;j++)
 
     //---------------------------------------------------------------------------------------
 
-    if (any_incut) {
-      // Keep in list
-      int jtile = jtile_start + n_jlist_new;
-      if (wid == 0) tile_indj[jtile] = jstart;
-      // Re-store jcell so that flush_atomj can read it off
-      sh_jlist[n_jlist_new] = jcell;
-      n_jlist_new++;
-    }
+  } // for (int i_jlist=0;i_jlist < n_jlist;i_jlist++)
+
+  if (n_atomj > 0) {
+    flush_atomj<tilesize>(wid, istart, sh_jlist, cell_patom,
+			  min_atomj, max_atomj, n_atomj, sh_atomj,
+			  min_excl_atom, max_excl_atom, n_excl_atom, excl_atom,
+			  jtile_start, tile_excl);
   }
 
-  flush_atomj<tilesize>(wid, istart, sh_jlist, cell_patom,
-			min_atomj, max_atomj, n_atomj, sh_atomj,
-			min_excl_atom, max_excl_atom, n_excl_atom, excl_atom,
-			jtile_start, tile_excl);
-  
-  // Add to ientry list
+  // Add to ientry list in global memory
   if (wid == 0) {
     int ientry_ind = atomicAdd(&d_nlist_param.n_ientry, 1);
     int jtile_end = jtile_start + n_jlist_new - 1;
@@ -1466,7 +1467,7 @@ void build_kernel(const int max_nexcl,
   // Loop through excluded atoms:
   // Find min and max indices
   // Store atom indices to excl_atom -buffer
-  int min_excl_atom = 1 << 30;                    // (= big number)
+  int min_excl_atom = (1 << 30);                    // (= big number)
   int max_excl_atom = 0;
   int nexcl = 0;
   for (int jatom=jstart;jatom <= jend;jatom++) {
@@ -1476,7 +1477,8 @@ void build_kernel(const int max_nexcl,
       min_excl_atom = min(min_excl_atom, atom);
       max_excl_atom = max(max_excl_atom, atom);
     }
-    excl_atom[pos + nexcl++] = atom;
+    // Store excluded atom index (atom) and atom i index
+    excl_atom[pos + nexcl++] = (atom << 5) | wid;
   }
   // Reduce min_excl_atom and max_excl_atom across the warp
 #if __CUDA_ARCH__ >= 300
@@ -1669,16 +1671,17 @@ void build_kernel(const int max_nexcl,
 	  }
 
 
-	  if (n_jlist > 0) flush_jlist<tilesize>(wid, istart, iend, n_jlist, sh_jlist, ish,
-						 rcut2, imxi, imyi, imzi, xyzq, cell_patom,
-						 sh_xyzj, sh_atomj,
-						 min_excl_atom, max_excl_atom, n_excl_atom, excl_atom,
-						 tile_indj, tile_excl, ientry
+	  if (n_jlist > 0) {
+	    flush_jlist<tilesize>(wid, istart, iend, n_jlist, sh_jlist, ish,
+				  rcut2, imxi, imyi, imzi, xyzq, cell_patom,
+				  sh_xyzj, sh_atomj,
+				  min_excl_atom, max_excl_atom, n_excl_atom, excl_atom,
+				  tile_indj, tile_excl, ientry
 #if __CUDA_ARCH__ < 300
-						 ,shflmem
+				  ,shflmem
 #endif
-						 );
-
+				  );
+	  }
 
 	} else {
 	  int n_jcellx_tot = n_jcellx;
@@ -1909,6 +1912,7 @@ NeighborList<tilesize>::NeighborList(const int ncoord_glo, const int *iblo14, co
   setup_top_excl(ncoord_glo, iblo14, inb14);
 
   allocate<int>(&glo2loc, ncoord_glo);
+  set_gpu_array<int>(glo2loc, ncoord_glo, -1);
 }
 
 template <int tilesize>
@@ -1919,6 +1923,7 @@ NeighborList<tilesize>::NeighborList(const int ncoord_glo, const char *filename)
 
   load(filename);
   allocate<int>(&glo2loc, ncoord_glo);
+  set_gpu_array<int>(glo2loc, ncoord_glo, -1);
 }
 
 //
@@ -2399,6 +2404,11 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
   int ncol_tot;
   bool test = true;
 
+  if (ncoord > ncoord_glo) {
+    std::cerr << "NeighborList::sort(1), Invalid value for ncoord" << std::endl;
+    exit(1);
+  }
+
   // -------------------------- Setup -----------------------------
   sort_setup(zone_patom, max_xyz, min_xyz, ncol_tot, stream);
   // --------------------------------------------------------------
@@ -2437,6 +2447,11 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
   const int ncoord = zone_patom[7];
   int ncol_tot;
   bool test = true;
+
+  if (ncoord > ncoord_glo) {
+    std::cerr << "NeighborList::sort(1), Invalid value for ncoord" << std::endl;
+    exit(1);
+  }
 
   for (int izone=0;izone < 8;izone++) {
     h_nlist_param->min_xyz[izone].x = (float)1.0e20;
@@ -2584,11 +2599,19 @@ void NeighborList<tilesize>::sort_alloc_realloc(const int ncol_tot, const int nc
 template <int tilesize>
 void NeighborList<tilesize>::sort_build_indices(const int ncoord, float4 *xyzq, int *loc2glo,
 						cudaStream_t stream) {
+  // Value of ncoord on previous call
+  static int ncoord_prev = 0;
+
+  if (ncoord_prev > ncoord_glo) {
+    std::cerr << "NeighborList::sort_build_indices, invalid value for ncoord_prev" << std::endl;
+    exit(1);
+  }
 
   int nthread, nblock, shmem_size;
 
   // Build glo2loc
-  set_gpu_array<int>(glo2loc, ncoord_glo, -1, stream);
+  if (ncoord_prev > 0) set_gpu_array<int>(glo2loc, ncoord_prev, -1, stream);
+  ncoord_prev = ncoord;
   nthread = 512;
   nblock = (ncoord - 1)/nthread + 1;
   build_glo2loc_kernel<<< nblock, nthread, 0, stream >>>(ncoord, loc2glo, glo2loc);
@@ -2773,7 +2796,7 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
 template <int tilesize>
 void NeighborList<tilesize>::test_build(const int *zone_patom,
 					const float boxx, const float boxy, const float boxz,
-					const float rcut, const float4 *xyzq) {
+					const float rcut, const float4 *xyzq, const int* loc2glo) {
 
   cudaCheck(cudaDeviceSynchronize());
   get_nlist_param();
@@ -2782,7 +2805,15 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
   int n_tile = h_nlist_param->n_tile;
   int ncell = h_nlist_param->ncell;
 
+  int *h_atom_excl_pos = new int[atom_excl_pos_len];
+  int *h_atom_excl = new int[atom_excl_len];
+  copy_DtoH<int>(atom_excl_pos, h_atom_excl_pos, atom_excl_pos_len);
+  copy_DtoH<int>(atom_excl, h_atom_excl, atom_excl_len);
+
   int ncoord = zone_patom[7];
+
+  int *h_loc2glo = new int[ncoord];
+  copy_DtoH<int>(loc2glo, h_loc2glo, ncoord);
 
   float4* h_xyzq = new float4[ncoord];
   copy_DtoH<float4>(xyzq, h_xyzq, ncoord);
@@ -2810,7 +2841,9 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 	float xi = h_xyzq[i].x;
 	float yi = h_xyzq[i].y;
 	float zi = h_xyzq[i].z;
-	int npair_i = 0;
+	int ig = h_loc2glo[i];
+	int excl_start = h_atom_excl_pos[ig];
+	int excl_end   = h_atom_excl_pos[ig+1]-1;
 	if (izone == 0 && jzone == 0) jstart = i + 1;
 	for (int j=jstart;j < jend;j++) {
 	  float xj = h_xyzq[j].x;
@@ -2835,15 +2868,26 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 	    dz = (zi+boxz) - zj;
 	  }
 	  float r2 = dx*dx + dy*dy + dz*dz;
+
 	  if (r2 < rcut2) {
-	    npair_i++;
-	    npair_cpu++;
+	    int jg = h_loc2glo[j];
+	    bool excl_flag = false;
+	    for (int excl=excl_start;excl <= excl_end;excl++) {
+	      if (h_atom_excl[excl] == jg) {
+	      	excl_flag = true;
+		break;
+	      }
+	    }
+	    if (excl_flag == false) npair_cpu++;
 	  }
+
 	}
 	//
       }
     }
   }
+
+  std::cout << "npair_cpu=" << npair_cpu << std::endl;
 
   ientry_t* h_ientry = new ientry_t[n_ientry];
   tile_excl_t<tilesize>* h_tile_excl = new tile_excl_t<tilesize>[n_tile];
@@ -2893,12 +2937,11 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 	  if (r2 < rcut2 && !(excl & 1)) npair_gpu++;
 	}
       }
-      //for (int wid=0;wid < (num_excl<tilesize>::val);wid++) {
-      //npair_gpu += tilesize - BitCount_ref(h_tile_excl[jtile].excl[wid]);
-      //}
     }
   }
-  
+
+  std::cout << "npair_gpu=" << npair_gpu << std::endl;
+
   //
   // Go through all cell pairs
   //
@@ -2916,6 +2959,9 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 	float xi = h_xyzq[i].x;
 	float yi = h_xyzq[i].y;
 	float zi = h_xyzq[i].z;
+	int ig = h_loc2glo[i];
+	int excl_start = h_atom_excl_pos[ig];
+	int excl_end   = h_atom_excl_pos[ig+1]-1;
 	for (int j=jstart;j <= jend;j++) {
 	  if (icell == jcell && i >= j) continue;
 	  float xj = h_xyzq[j].x;
@@ -2941,9 +2987,19 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 	  }
 	  float r2 = dx*dx + dy*dy + dz*dz;
 	  if (r2 < rcut2) {
-	    npair_gpu2++;
-	    npair_tile1++;
-	    pair = true;
+	    int jg = h_loc2glo[j];
+	    bool excl_flag = false;
+	    for (int excl=excl_start;excl <= excl_end;excl++) {
+	      if (h_atom_excl[excl] == jg) {
+	      	excl_flag = true;
+		break;
+	      }
+	    }
+	    if (excl_flag == false) {
+	      npair_gpu2++;
+	      npair_tile1++;
+	      pair = true;
+	    }
 	  }
 	}
       } // for (int i=istart;i <= iend;i++)
@@ -2970,14 +3026,15 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
  	if (found_this_pair) {
 	  // Check the tile we found (ind, jtile)
 	  int istart0, jstart0;
-	  if (istart == h_ientry[ind].indi &&
-	      jstart == h_tile_indj[jtile]) {
+	  if (istart == h_ientry[ind].indi && jstart == h_tile_indj[jtile]) {
 	    istart0 = h_ientry[ind].indi;
 	    jstart0 = h_tile_indj[jtile];
 	  } else {
 	    jstart0 = h_ientry[ind].indi;
 	    istart0 = h_tile_indj[jtile];
 	  }
+
+	  int jtile0 = h_ientry[ind].startj;
 
 	  int ish     = h_ientry[ind].ish;
 	  int ish_tmp = ish;
@@ -2993,7 +3050,7 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 	    float yi = h_xyzq[i].y + shy;
 	    float zi = h_xyzq[i].z + shz;
 	    for (int j=jstart0;j < jstart0+tilesize;j++) {
-	      int bitpos = ((i-istart) - (j-jstart) + tilesize) % tilesize;
+	      int bitpos = ((i-istart0) - (j-jstart0) + tilesize) % tilesize;
 	      unsigned int excl = h_tile_excl[jtile].excl[j-jstart0] >> bitpos;
 	      float xj = h_xyzq[j].x;
 	      float yj = h_xyzq[j].y;
@@ -3002,32 +3059,33 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 	      float dy = yi - yj;
 	      float dz = zi - zj;
 	      float r2 = dx*dx + dy*dy + dz*dz;
-	      if (r2 < rcut2 && !(excl & 1)) npair_tile2++;
+	      if (r2 < rcut2 && !(excl & 1)) {
+		npair_tile2++;
+	      }
 	    }
 	  }
 
 	  if (npair_tile1 != npair_tile2) {
-	    std::cout << "tile pair ERROR: icell = " << icell << " jcell = " << jcell 
-		      << " npair_tile1 = " << npair_tile1 << " npair_tile2 = " << npair_tile2 << std::endl;
-	    std::cout << " istart0 = " << istart0 << " jstart0 = " << jstart0 << std::endl;
-	    std::cout << " istart,iend  = " << istart << " " << iend 
+	    std::cerr << "tile pair ERROR: icell = " << icell << " jcell = " << jcell 
+		      << " npair_tile1 = " << npair_tile1 << " npair_tile2 = " << npair_tile2
+		      << std::endl;
+	    std::cerr << " istart0 = " << istart0 << " jstart0 = " << jstart0 << std::endl;
+	    std::cerr << " istart,iend  = " << istart << " " << iend 
 		      << " jstart,jend  = " << jstart << " " << jend << std::endl;
-	    /*
-	    for (int j=jstart0;j < jstart0+tilesize;j++) {
-	      for (int i=istart0;i < istart0+tilesize;i++) {
-		int bitpos = ((i-istart) - (j-jstart) + tilesize) % tilesize;
-		unsigned int excl = h_tile_excl[jtile].excl[j-jstart0] >> bitpos;
-		std::cout << (excl & 1);
-	      }
-	      std::cout << std::endl;
-	    }
-	    std::cout << std::endl;
+	    //for (int j=jstart0;j < jstart0+tilesize;j++) {
+	    //  for (int i=istart0;i < istart0+tilesize;i++) {
+	    //	int bitpos = ((i-istart) - (j-jstart) + tilesize) % tilesize;
+	    //		unsigned int excl = h_tile_excl[jtile].excl[j-jstart0] >> bitpos;
+	    //	std::cout << (excl & 1);
+	    // }
+	    //  std::cout << std::endl;
+	    //}
+	    //std::cout << std::endl;
 	    exit(1);
-	    */
 	  }
 	  
 	} else {
-	  std::cout << "tile pair with istart = " << istart << " jstart = " << jstart
+	  std::cerr << "tile pair with istart = " << istart << " jstart = " << jstart
 		    << " NOT FOUND" << std::endl;
 	  exit(1);
 	}
@@ -3035,7 +3093,13 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 
       if (pair) ncell_pair++;
     } // for (int jcell=icell;jcell < ncell;jcell++)
-  }
+
+  } // for (int icell=0;icell < ncell;icell++)
+
+  delete [] h_atom_excl_pos;
+  delete [] h_atom_excl;
+
+  delete [] h_loc2glo;
 
   delete [] h_xyzq;
   delete [] h_ientry;

@@ -9,6 +9,8 @@ __global__ void heuristic_check_kernel(const int ncoord, const int stride,
 				       const double* __restrict__ ref_coord,
 				       const float rsq_limit,
 				       int* global_flag) {
+  // Required shared memory:
+  // blockDim.x/warpsize*sizeof(int)
   extern __shared__ int sh_flag[];
   const int tid = threadIdx.x + blockIdx.x*blockDim.x;
   const int stride2 = stride*2;
@@ -66,7 +68,7 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec *domdec, CudaDomdecBonded *domde
 				     const double kappa, const double e14fac,
 				     const int vdw_model, const int elec_model,
 				     const int nvdwparam, const float *h_vdwparam,
-				     const int *h_vdwtype, const float *h_q,
+				     const int *h_glo_vdwtype, const float *h_q,
 				     const int nfftx, const int nffty, const int nfftz,
 				     const int order) {
 
@@ -84,11 +86,11 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec *domdec, CudaDomdecBonded *domde
   
   // Direct non-bonded interactions
   setup_direct_nonbonded(roff, ron, kappa, e14fac, vdw_model, elec_model,
-			 nvdwparam, h_vdwparam, h_vdwtype);
+			 nvdwparam, h_vdwparam, h_glo_vdwtype);
 
   // Copy charges
-  allocate<float>(&q, domdec->get_ncoord_tot());
-  copy_HtoD<float>(h_q, q, domdec->get_ncoord_tot());
+  allocate<float>(&q, domdec->get_ncoord_glo());
+  copy_HtoD<float>(h_q, q, domdec->get_ncoord_glo());
 
   // Recip non-bonded interactions
   setup_recip_nonbonded(kappa, nfftx, nffty, nfftz, order);
@@ -114,14 +116,14 @@ void CudaPMEForcefield::setup_direct_nonbonded(const double roff, const double r
 					       const double kappa, const double e14fac,
 					       const int vdw_model, const int elec_model,
 					       const int nvdwparam, const float *h_vdwparam,
-					       const int *h_vdwtype) {
+					       const int *h_glo_vdwtype) {
 
   dir.setup(domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), kappa, roff, ron,
 	    e14fac, vdw_model, elec_model);
   dir.set_vdwparam(nvdwparam, h_vdwparam);
 
-  allocate<int>(&vdwtype, domdec->get_ncoord_tot());
-  copy_HtoD<int>(h_vdwtype, vdwtype, domdec->get_ncoord_tot());
+  allocate<int>(&glo_vdwtype, domdec->get_ncoord_glo());
+  copy_HtoD<int>(h_glo_vdwtype, glo_vdwtype, domdec->get_ncoord_glo());
 }
 
 //
@@ -169,21 +171,36 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
 		       domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz());
 
     // Update neighborlist
-    nlist->sort(domdec->get_zone_patom(), xyzq_copy.xyzq, xyzq.xyzq, domdec->get_loc2glo());
+    nlist->sort(domdec->get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec->get_loc2glo());
     nlist->build(domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), domdec->get_rnl(),
 		 xyzq.xyzq, domdec->get_loc2glo());
-        
+
+    /*
+    nlist->test_build(domdec->get_zone_pcoord(), domdec->get_boxx(), domdec->get_boxy(),
+		      domdec->get_boxz(), domdec->get_rnl(), xyzq.xyzq, domdec->get_loc2glo());
+    */
+
     // Build bonded tables
-    domdec_bonded->build_tbl(domdec, domdec->get_zone_patom());
+    domdec_bonded->build_tbl(domdec, domdec->get_zone_pcoord());
 
     // Setup bonded interaction lists
-    bonded.setup_list(xyzq.xyzq, domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), nlist->get_glo2loc(),
-		      domdec_bonded->get_nbond_tbl(), domdec_bonded->get_bond_tbl(), domdec_bonded->get_bond(),
-		      domdec_bonded->get_nureyb_tbl(), domdec_bonded->get_ureyb_tbl(), domdec_bonded->get_ureyb(),
-		      domdec_bonded->get_nangle_tbl(), domdec_bonded->get_angle_tbl(), domdec_bonded->get_angle(),
-		      domdec_bonded->get_ndihe_tbl(), domdec_bonded->get_dihe_tbl(), domdec_bonded->get_dihe(),
-		      domdec_bonded->get_nimdihe_tbl(), domdec_bonded->get_imdihe_tbl(), domdec_bonded->get_imdihe(),
-		      domdec_bonded->get_ncmap_tbl(), domdec_bonded->get_cmap_tbl(), domdec_bonded->get_cmap());
+    bonded.setup_list(xyzq.xyzq, domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(),
+		      nlist->get_glo2loc(),
+		      domdec_bonded->get_nbond_tbl(), domdec_bonded->get_bond_tbl(),
+		      domdec_bonded->get_bond(),
+		      domdec_bonded->get_nureyb_tbl(), domdec_bonded->get_ureyb_tbl(),
+		      domdec_bonded->get_ureyb(),
+		      domdec_bonded->get_nangle_tbl(), domdec_bonded->get_angle_tbl(),
+		      domdec_bonded->get_angle(),
+		      domdec_bonded->get_ndihe_tbl(), domdec_bonded->get_dihe_tbl(),
+		      domdec_bonded->get_dihe(),
+		      domdec_bonded->get_nimdihe_tbl(), domdec_bonded->get_imdihe_tbl(),
+		      domdec_bonded->get_imdihe(),
+		      domdec_bonded->get_ncmap_tbl(), domdec_bonded->get_cmap_tbl(),
+		      domdec_bonded->get_cmap());
+
+    // Set vdwtype for Direct non-bonded interactions
+    dir.set_vdwtype(domdec->get_ncoord_tot(), glo_vdwtype, domdec->get_loc2glo());
 
     // Update reference coordinates
     ref_coord.set_data(coord);
@@ -273,7 +290,7 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double> *coord) {
   int nthread = 512;
   int nblock = (ncoord - 1)/nthread + 1;
 
-  int shmem_size = nthread/warpsize;
+  int shmem_size = (nthread/warpsize)*sizeof(int);
 
   *h_heuristic_flag = 0;
   copy_HtoD<int>(h_heuristic_flag, d_heuristic_flag, 1, 0);

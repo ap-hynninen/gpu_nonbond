@@ -869,6 +869,21 @@ __global__ void calc_force_kernel(const int base,
 
 }
 
+//
+// Sets vdwtype from a global list
+//
+__global__ void set_vdwtype_kernel(const int ncoord, const int* __restrict__ glo_vdwtype,
+				   const int* __restrict__ loc2glo, int* __restrict__ vdwtype) {
+  const int i = threadIdx.x + blockIdx.x*blockDim.x;
+  if (i < ncoord) {
+    int j = loc2glo[i];
+    vdwtype[i] = glo_vdwtype[j];
+  }
+}
+
+
+//########################################################################################
+//########################################################################################
 //########################################################################################
 
 //
@@ -1172,11 +1187,30 @@ void DirectForce<AT, CT>::set_vdwparam14(const int nvdwparam, const char *filena
 }
 
 //
-// Sets vdwtype array
+// Sets vdwtype array from global list in device memory memory
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::set_vdwtype(const int ncoord, const int *glo_vdwtype,
+				      const int *loc2glo, cudaStream_t stream) {
+  // Align ncoord to warpsize
+  int ncoord_aligned = ((ncoord-1)/warpsize+1)*warpsize;
+  reallocate<int>(&vdwtype, &vdwtype_len, ncoord_aligned, 1.2f);
+
+  int nthread = 512;
+  int nblock = (ncoord - 1)/nthread + 1;
+  set_vdwtype_kernel<<< nblock, nthread, 0, stream >>>
+    (ncoord, glo_vdwtype, loc2glo, vdwtype);
+  cudaCheck(cudaGetLastError());
+}
+
+//
+// Sets vdwtype array from host memory
 //
 template <typename AT, typename CT>
 void DirectForce<AT, CT>::set_vdwtype(const int ncoord, const int *h_vdwtype) {
-  reallocate<int>(&vdwtype, &vdwtype_len, ncoord, 1.5f);
+  // Align ncoord to warpsize
+  int ncoord_aligned = ((ncoord-1)/warpsize+1)*warpsize;
+  reallocate<int>(&vdwtype, &vdwtype_len, ncoord_aligned, 1.2f);
   copy_HtoD<int>(h_vdwtype, vdwtype, ncoord);
 }
 
@@ -1664,8 +1698,6 @@ void DirectForce<AT, CT>::calc_force(const float4 *xyzq,
     exit(1);
   }
 
-  std::cerr << "Directforce (0) " << nlist->n_ientry << " " << std::endl;
-
   if (nlist->n_ientry == 0) return;
   int vdw_model_loc = calc_vdw ? vdw_model : NONE;
   int elec_model_loc = calc_elec ? elec_model : NONE;
@@ -1696,8 +1728,6 @@ void DirectForce<AT, CT>::calc_force(const float4 *xyzq,
   unsigned int max_nblock = max_nblock3.x;
   unsigned int base = 0;
 
-  std::cerr << "Directforce (1)" << std::endl;
-
   while (nblock_tot != 0) {
 
     int nblock = (nblock_tot > max_nblock) ? max_nblock : nblock_tot;
@@ -1707,7 +1737,6 @@ void DirectForce<AT, CT>::calc_force(const float4 *xyzq,
       if (elec_model_loc == EWALD) {
 	if (calc_energy) {
 	  if (calc_virial) {
-	    std::cerr << "Directforce (2)" << std::endl;
 	    calc_force_kernel <AT, CT, tilesize, VDW_VSH, EWALD, true, true, true>
 	      <<< nblock, nthread, shmem_size, stream >>>
 	      (base, nlist->n_ientry, nlist->ientry, nlist->tile_indj,

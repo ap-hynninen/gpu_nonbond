@@ -44,7 +44,7 @@ private:
   DirectForce<long long int, float> dir;
 
   // Global vdw types
-  int *vdwtype;
+  int *glo_vdwtype;
 
   // -------------
   // Bonded force
@@ -89,7 +89,7 @@ private:
 			      const double kappa, const double e14fac,
 			      const int vdw_model, const int elec_model,
 			      const int nvdwparam, const float *h_vdwparam,
-			      const int *h_vdwtype);
+			      const int *h_glo_vdwtype);
 
   void setup_recip_nonbonded(const double kappa,
 			     const int nfftx, const int nffty, const int nfftz,
@@ -109,7 +109,7 @@ public:
 		    const double kappa, const double e14fac,
 		    const int vdw_model, const int elec_model,
 		    const int nvdwparam, const float *h_vdwparam,
-		    const int* h_vdwtype, const float *h_q,
+		    const int* h_glo_vdwtype, const float *h_q,
 		    const int nfftx, const int nffty, const int nfftz,
 		    const int order);
   ~CudaPMEForcefield();

@@ -8,16 +8,16 @@ class Decomp {
 
  protected:
   
-  // Total number of coordinates in the system
-  int ncoord_tot;
+  // Total global number of coordinates in the system
+  int ncoord_glo;
 
   // Number of coordinates in this node
   int ncoord;
 
  public:
 
-  int get_ncoord_tot() {
-    return ncoord_tot;
+  int get_ncoord_glo() {
+    return ncoord_glo;
   }
 
 };

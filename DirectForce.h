@@ -149,6 +149,8 @@ public:
 
   void set_vdwtype(const int ncoord, const int *h_vdwtype);
   void set_vdwtype(const int ncoord, const char *filename);
+  void set_vdwtype(const int ncoord, const int *glo_vdwtype,
+		   const int *loc2glo, cudaStream_t stream=0);
 
   void set_14_list(int nin14list, int nex14list,
 		   list14_t* h_in14list, list14_t* h_ex14list);

@@ -265,6 +265,13 @@ void set_gpu_array(T *data, const int ndata, const int value
 }
 #endif
 
+#ifdef __cplusplus
+template <class T>
+void set_gpu_array_sync(T *data, const int ndata, const int value) {
+  set_gpu_array_T(data, ndata, value, sizeof(T));
+}
+#endif
+
 //----------------------------------------------------------------------------------------
 
 #ifdef __cplusplus

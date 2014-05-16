@@ -116,7 +116,9 @@ void test() {
   NeighborList<32> nlist_ref(ncoord, "test_data/nlist.txt");
   //nlist.remove_empty_tiles();
   //nlist.split_dense_sparse(512);
+  std::cout << "============== nlist_ref ==============" << std::endl;
   nlist_ref.analyze();
+  std::cout << "=======================================" << std::endl;
 
   int *loc2glo_ind = new int[ncoord];
   load_ind<int>(1, "test_data/loc2glo.txt", ncoord, loc2glo_ind);
@@ -142,7 +144,11 @@ void test() {
   //nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
   nlist.sort(zone_patom, xyzq_unsorted.xyzq, xyzq_sorted.xyzq, loc2glo);
   nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq, loc2glo);
-  nlist.test_build(zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq);
+  nlist.test_build(zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq, loc2glo);
+
+  std::cout << "================ nlist ================" << std::endl;
+  nlist.analyze();
+  std::cout << "=======================================" << std::endl;
 
   deallocate<int>(&loc2glo);
 
@@ -209,6 +215,18 @@ void test() {
   }
   std::cout << "max_diff(vir_tensor) = " << max_diff << std::endl;
   std::cout << "max_diff(vir) = " << fabs(vir - ref_vir) << std::endl;
+
+  //--------------- Non-bonded using GPU build neighborlist -----------
+  force_fp.clear();
+  dir.clear_energy_virial();
+  dir.calc_force(xyzq_sorted.xyzq, &nlist, true, true, force_fp.xyz.stride, force_fp.xyz.data);
+  dir.calc_virial(ncoord, xyzq_sorted.xyzq, force_fp.xyz.stride, force_fp.xyz.data);
+
+  dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
+  vir = (virtensor[0] + virtensor[4] + virtensor[8])/3.0;
+  std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
+
+  // -------------------- END -----------------
 
   delete [] in14list;
   delete [] ex14list;
