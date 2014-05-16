@@ -12,23 +12,6 @@
 // CT = calculation type
 //
 
-// Data structures for bonds, angles, dihedrals, and cmap
-struct bondlist_t {
-  int i, j, itype, ishift;
-};
-
-struct anglelist_t {
-  int i, j, k, itype, ishift1, ishift2;
-};
-
-struct dihelist_t {
-  int i, j, k, l, itype, ishift1, ishift2, ishift3;
-};
-
-struct cmaplist_t {
-  int i1, j1, k1, l1, i2, j2, k2, l2, itype, ishift1, ishift2, ishift3;
-};
-
 /*
 // Data structure for settings
 struct BondedSettings_t {

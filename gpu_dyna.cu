@@ -204,7 +204,9 @@ void test() {
 
   const int nvdwparam = 1260;
   float* vdwparam = new float[nvdwparam];
+  float* vdwparam14 = new float[nvdwparam];
   load_vec<float>(1, "test_data/vdwparam.txt", nvdwparam, vdwparam);
+  load_vec<float>(1, "test_data/vdwparam14.txt", nvdwparam, vdwparam14);
 
   int *vdwtype = new int[ncoord];
   load_vec<int>(1, "test_data/glo_vdwtype.txt", ncoord, vdwtype);
@@ -217,6 +219,15 @@ void test() {
   int *inb14 = new int[ninb14];
   load_vec<int>(1, "test_data/iblo14.txt", niblo14, iblo14);
   load_vec<int>(1, "test_data/inb14.txt", ninb14, inb14);
+
+  //-------------------------------------------------------------------------------------
+  
+  const int nin14 = 6556;
+  const int nex14 = 28153;
+  xx14_t *in14 = new xx14_t[nin14];
+  xx14_t *ex14 = new xx14_t[nex14];
+  load_vec<int>(2, "test_data/in14.txt", nin14, (int *)in14);
+  load_vec<int>(2, "test_data/ex14.txt", nex14, (int *)ex14);
 
   //-------------------------------------------------------------------------------------
 
@@ -273,7 +284,8 @@ void test() {
 
   // Setup domain decomposition
   CudaDomdecBonded domdec_bonded(nbond, bond, nureyb, ureyb, nangle, angle,
-				 ndihe, dihe, nimdihe, imdihe, ncmap, cmap);
+				 ndihe, dihe, nimdihe, imdihe, ncmap, cmap,
+				 nin14, in14, nex14, ex14);
   CudaDomdec domdec(ncoord, boxx, boxy, boxz, rnl, 1, 1, 1, 0);
 
   float *q = new float[ncoord];
@@ -289,7 +301,7 @@ void test() {
 			       ndihecoef, dihecoef, nimdihecoef, imdihecoef, ncmapcoef, cmapcoef,
 			       // Direct non-bonded
 			       roff, ron, kappa, e14fac, VDW_VSH, EWALD,
-			       nvdwparam, vdwparam, vdwtype, q,
+			       nvdwparam, vdwparam, vdwparam14, vdwtype, q,
 			       // Recip non-bonded
 			       nfftx, nffty, nfftz, forder);
 
@@ -347,12 +359,18 @@ void test() {
   //-------------------------------------------------------------------------------------
 
   delete [] vdwparam;
+  delete [] vdwparam14;
   delete [] vdwtype;
 
   //-------------------------------------------------------------------------------------
 
   delete [] iblo14;
   delete [] inb14;
+
+  //-------------------------------------------------------------------------------------
+
+  delete [] in14;
+  delete [] ex14;
 
   //-------------------------------------------------------------------------------------
 

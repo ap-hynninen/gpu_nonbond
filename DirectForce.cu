@@ -208,13 +208,13 @@ float pair_elec_force_14(const float r2, const float r, const float rinv,
 //
 template <typename AT, typename CT, int vdw_model, int elec_model, 
 	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
-__device__ void calc_in14_force_device(const int pos, const list14_t* in14list,
+__device__ void calc_in14_force_device(const int pos, const xx14list_t* in14list,
 				       const int* vdwtype, const float* vdwparam14,
 				       const float4* xyzq, const int stride, AT *force,
 				       double &vdw_pot, double &elec_pot) {
 
-  int i = in14list[pos].i - 1;
-  int j = in14list[pos].j - 1;
+  int i = in14list[pos].i;
+  int j = in14list[pos].j;
   int ish = in14list[pos].ishift;
   float3 sh_xyz = calc_box_shift(ish, d_setup.boxx, d_setup.boxy, d_setup.boxz);
   // Load atom coordinates
@@ -277,12 +277,12 @@ __device__ void calc_in14_force_device(const int pos, const list14_t* in14list,
 // 1-4 exclusion force
 //
 template <typename AT, typename CT, int elec_model, bool calc_energy, bool calc_virial>
-__device__ void calc_ex14_force_device(const int pos, const list14_t* ex14list,
+__device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list,
 				       const float4* xyzq, const int stride, AT *force,
 				       double &elec_pot) {
 
-  int i = ex14list[pos].i - 1;
-  int j = ex14list[pos].j - 1;
+  int i = ex14list[pos].i;
+  int j = ex14list[pos].j;
   int ish = ex14list[pos].ishift;
   float3 sh_xyz = calc_box_shift(ish, d_setup.boxx, d_setup.boxy, d_setup.boxz);
   // Load atom coordinates
@@ -324,7 +324,7 @@ template <typename AT, typename CT, int vdw_model, int elec_model,
 	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
 __global__ void calc_14_force_kernel(const int nin14list, const int nex14list,
 				     const int nin14block,
-				     const list14_t* in14list, const list14_t* ex14list,
+				     const xx14list_t* in14list, const xx14list_t* ex14list,
 				     const int* vdwtype, const float* vdwparam14,
 				     const float4* xyzq, const int stride, AT *force) {
   // Amount of shared memory required:
@@ -881,6 +881,36 @@ __global__ void set_vdwtype_kernel(const int ncoord, const int* __restrict__ glo
   }
 }
 
+__global__ void set_14_list_kernel(const int nin14_tbl, const int* __restrict__ in14_tbl,
+				   const xx14_t* __restrict__ in14, xx14list_t* __restrict__ in14list,
+				   const int nex14_tbl, const int* __restrict__ ex14_tbl,
+				   const xx14_t* __restrict__ ex14, xx14list_t* __restrict__ ex14list,
+				   const float4* __restrict__ xyzq,
+				   const float3 half_box, const int*__restrict__ glo2loc_ind) {
+  int pos = threadIdx.x + blockIdx.x*blockDim.x;
+  if (pos < nin14_tbl) {
+    int j = in14_tbl[pos];
+    xx14_t in14v = in14[j];
+    xx14list_t in14listv;
+    in14listv.i = glo2loc_ind[in14v.i];
+    in14listv.j = glo2loc_ind[in14v.j];
+    float4 xyzq_i = xyzq[in14listv.i];
+    float4 xyzq_j = xyzq[in14listv.j];
+    in14listv.ishift = calc_ishift(xyzq_i, xyzq_j, half_box);
+    in14list[pos] = in14listv;
+  } else if (pos < nin14_tbl + nex14_tbl) {
+    pos -= nin14_tbl;
+    int j = ex14_tbl[pos];
+    xx14_t ex14v = ex14[j];
+    xx14list_t ex14listv;
+    ex14listv.i = glo2loc_ind[ex14v.i];
+    ex14listv.j = glo2loc_ind[ex14v.j];
+    float4 xyzq_i = xyzq[ex14listv.i];
+    float4 xyzq_j = xyzq[ex14listv.j];
+    ex14listv.ishift = calc_ishift(xyzq_i, xyzq_j, half_box);
+    ex14list[pos] = ex14listv;
+  }
+}
 
 //########################################################################################
 //########################################################################################
@@ -941,8 +971,8 @@ DirectForce<AT, CT>::~DirectForce() {
     vdwparam14_texref_bound = false;
   }
   if (vdwparam14 != NULL) deallocate<CT>(&vdwparam14);
-  if (in14list != NULL) deallocate<list14_t>(&in14list);
-  if (ex14list != NULL) deallocate<list14_t>(&ex14list);
+  if (in14list != NULL) deallocate<xx14list_t>(&in14list);
+  if (ex14list != NULL) deallocate<xx14list_t>(&ex14list);
   if (vdwtype != NULL) deallocate<int>(&vdwtype);
   if (ewald_force != NULL) deallocate<CT>(&ewald_force);
   if (h_energy_virial != NULL) deallocate_host<DirectEnergyVirial_t>(&h_energy_virial);
@@ -1251,21 +1281,52 @@ void DirectForce<AT, CT>::set_vdwtype(const int ncoord, const char *filename) {
 //
 template <typename AT, typename CT>
 void DirectForce<AT, CT>::set_14_list(int nin14list, int nex14list,
-				      list14_t* h_in14list, list14_t* h_ex14list) {
+				      xx14list_t* h_in14list, xx14list_t* h_ex14list) {
 
   this->nin14list = nin14list;
   this->nex14list = nex14list;
 
   if (nin14list > 0) {
-    reallocate<list14_t>(&in14list, &in14list_len, nin14list);
-    copy_HtoD<list14_t>(h_in14list, in14list, nin14list);
+    reallocate<xx14list_t>(&in14list, &in14list_len, nin14list);
+    copy_HtoD<xx14list_t>(h_in14list, in14list, nin14list);
   }
 
   if (nex14list > 0) {
-    reallocate<list14_t>(&ex14list, &ex14list_len, nex14list);
-    copy_HtoD<list14_t>(h_ex14list, ex14list, nex14list);
+    reallocate<xx14list_t>(&ex14list, &ex14list_len, nex14list);
+    copy_HtoD<xx14list_t>(h_ex14list, ex14list, nex14list);
   }
 
+}
+
+//
+// Setup 1-4 interaction and exclusion lists from device memory using global data:
+//
+template <typename AT, typename CT>
+void DirectForce<AT, CT>::set_14_list(const float4 *xyzq,
+				      const float boxx, const float boxy, const float boxz,
+				      const int *glo2loc_ind,
+				      const int nin14_tbl, const int *in14_tbl, const xx14_t *in14,
+				      const int nex14_tbl, const int *ex14_tbl, const xx14_t *ex14,
+				      cudaStream_t stream) {
+
+  this->nin14list = nin14_tbl;
+  if (nin14list > 0) reallocate<xx14list_t>(&in14list, &in14list_len, nin14list, 1.2f);
+
+  this->nex14list = nex14_tbl;
+  if (nex14list > 0) reallocate<xx14list_t>(&ex14list, &ex14list_len, nex14list, 1.2f);
+
+  float3 half_box;
+  half_box.x = boxx*0.5f;
+  half_box.y = boxy*0.5f;
+  half_box.z = boxz*0.5f;
+
+  int nthread = 512;
+  int nblock = (nin14_tbl + nex14_tbl - 1)/nthread + 1;
+  set_14_list_kernel<<< nblock, nthread, 0, stream >>>
+    (nin14_tbl, in14_tbl, in14, in14list,
+     nex14_tbl, ex14_tbl, ex14, ex14list,
+     xyzq, half_box, glo2loc_ind);
+  cudaCheck(cudaGetLastError());
 }
 
 //

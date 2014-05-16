@@ -770,40 +770,6 @@ __global__ void calc_all_forces_kernel(
 // Setups lists
 //
 
-__forceinline__ __device__ int calc_ishift(const float4 xyzq_i, const float4 xyzq_j, const float3 half_box) {
-  float3 dxyz;
-  dxyz.x = xyzq_i.x - xyzq_j.x;
-  dxyz.y = xyzq_i.y - xyzq_j.y;
-  dxyz.z = xyzq_i.z - xyzq_j.z;
-
-  int3 is;
-  is.x = 0;
-  is.y = 0;
-  is.z = 0;
-    
-  // is = -1, 0, 1
-  if (dxyz.x >= half_box.x) {
-    is.x = -1;
-  } else if (dxyz.x < -half_box.x) {
-    is.x = 1;
-  }
-
-  if (dxyz.y >= half_box.y) {
-    is.y = -1;
-  } else if (dxyz.y < -half_box.y) {
-    is.y = 1;
-  }
-
-  if (dxyz.z >= half_box.z) {
-    is.z = -1;
-  } else if (dxyz.z < -half_box.z) {
-    is.z = 1;
-  }
-
-  // shift index = 1...26*3+1
-  return (is.x+1 + (is.y+1)*3 + (is.z+1)*9 + 1)*3 - 2;
-}
-
 __device__ void setup_bondlist_kernel(const int i,
 				      const int* __restrict__ bond_tbl, const bond_t* __restrict__ bond,
 				      bondlist_t* __restrict__ bondlist, const float4* __restrict__ xyzq,

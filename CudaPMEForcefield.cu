@@ -68,6 +68,7 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec *domdec, CudaDomdecBonded *domde
 				     const double kappa, const double e14fac,
 				     const int vdw_model, const int elec_model,
 				     const int nvdwparam, const float *h_vdwparam,
+				     const float *h_vdwparam14,
 				     const int *h_glo_vdwtype, const float *h_q,
 				     const int nfftx, const int nffty, const int nfftz,
 				     const int order) {
@@ -86,7 +87,7 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec *domdec, CudaDomdecBonded *domde
   
   // Direct non-bonded interactions
   setup_direct_nonbonded(roff, ron, kappa, e14fac, vdw_model, elec_model,
-			 nvdwparam, h_vdwparam, h_glo_vdwtype);
+			 nvdwparam, h_vdwparam, h_vdwparam14, h_glo_vdwtype);
 
   // Copy charges
   allocate<float>(&q, domdec->get_ncoord_glo());
@@ -116,11 +117,13 @@ void CudaPMEForcefield::setup_direct_nonbonded(const double roff, const double r
 					       const double kappa, const double e14fac,
 					       const int vdw_model, const int elec_model,
 					       const int nvdwparam, const float *h_vdwparam,
-					       const int *h_glo_vdwtype) {
+					       const float *h_vdwparam14, const int *h_glo_vdwtype) {
 
   dir.setup(domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), kappa, roff, ron,
 	    e14fac, vdw_model, elec_model);
+
   dir.set_vdwparam(nvdwparam, h_vdwparam);
+  dir.set_vdwparam14(nvdwparam, h_vdwparam14);
 
   allocate<int>(&glo_vdwtype, domdec->get_ncoord_glo());
   copy_HtoD<int>(h_glo_vdwtype, glo_vdwtype, domdec->get_ncoord_glo());
@@ -202,6 +205,14 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
     // Set vdwtype for Direct non-bonded interactions
     dir.set_vdwtype(domdec->get_ncoord_tot(), glo_vdwtype, domdec->get_loc2glo());
 
+    // Setup 1-4 interaction lists
+    dir.set_14_list(xyzq.xyzq, domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(),
+		    nlist->get_glo2loc(),
+		    domdec_bonded->get_nin14_tbl(), domdec_bonded->get_in14_tbl(),
+		    domdec_bonded->get_in14(),
+		    domdec_bonded->get_nex14_tbl(), domdec_bonded->get_ex14_tbl(),
+		    domdec_bonded->get_ex14());
+
     // Update reference coordinates
     ref_coord.set_data(coord);
 
@@ -223,7 +234,7 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
   dir.calc_force(xyzq.xyzq, nlist, calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
 
   // 1-4 interactions
-  //dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
+  dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
 
   // Bonded forces
   bonded.calc_force(xyzq.xyzq, domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(),

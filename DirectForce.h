@@ -1,6 +1,7 @@
 #ifndef DIRECTFORCE_H
 #define DIRECTFORCE_H
 #include <cuda.h>
+#include "Bonded_struct.h"
 
 //
 // Calculates direct non-bonded interactions on GPU
@@ -10,10 +11,6 @@
 // AT = accumulation type
 // CT = calculation type
 //
-
-struct list14_t {
-  int i, j, ishift;
-};
 
 struct DirectEnergyVirial_t {
   // Energies
@@ -93,11 +90,11 @@ private:
   // 1-4 interaction and exclusion lists
   int nin14list;
   int in14list_len;
-  list14_t* in14list;
+  xx14list_t* in14list;
 
   int nex14list;
   int ex14list_len;
-  list14_t* ex14list;
+  xx14list_t* ex14list;
 
   // VdW types
   int vdwtype_len;
@@ -153,7 +150,14 @@ public:
 		   const int *loc2glo, cudaStream_t stream=0);
 
   void set_14_list(int nin14list, int nex14list,
-		   list14_t* h_in14list, list14_t* h_ex14list);
+		   xx14list_t* h_in14list, xx14list_t* h_ex14list);
+
+  void set_14_list(const float4 *xyzq,
+		   const float boxx, const float boxy, const float boxz,
+		   const int *glo2loc_ind,
+		   const int nin14_tbl, const int *in14_tbl, const xx14_t *in14,
+		   const int nex14_tbl, const int *ex14_tbl, const xx14_t *ex14,
+		   cudaStream_t stream=0);
 
   void calc_14_force(const float4 *xyzq,
 		     const bool calc_energy, const bool calc_virial,

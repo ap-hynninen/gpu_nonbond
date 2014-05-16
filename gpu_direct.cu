@@ -88,8 +88,8 @@ void test() {
 
   const int nin14list = 6556;
   const int nex14list = 28153;
-  list14_t *in14list = new list14_t[nin14list];
-  list14_t *ex14list = new list14_t[nex14list];
+  xx14list_t *in14list = new xx14list_t[nin14list];
+  xx14list_t *ex14list = new xx14list_t[nex14list];
   load_ind<int>(3, "test_data/in14list.txt", nin14list, (int *)in14list);
   load_ind<int>(3, "test_data/ex14list.txt", nex14list, (int *)ex14list);
 

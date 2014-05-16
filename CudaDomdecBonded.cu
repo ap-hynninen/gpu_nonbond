@@ -9,7 +9,9 @@ __global__ void build_tbl_kernel(const int nbond_tbl, int* __restrict__ bond_tbl
 				 const int nangle_tbl, int* __restrict__ angle_tbl,
 				 const int ndihe_tbl, int* __restrict__ dihe_tbl,
 				 const int nimdihe_tbl, int* __restrict__ imdihe_tbl,
-				 const int ncmap_tbl, int* __restrict__ cmap_tbl) {
+				 const int ncmap_tbl, int* __restrict__ cmap_tbl,
+				 const int nin14_tbl, int* __restrict__ in14_tbl,
+				 const int nex14_tbl, int* __restrict__ ex14_tbl) {
   const int pos = threadIdx.x + blockIdx.x*blockDim.x;
   if (pos < nbond_tbl) {
     bond_tbl[pos] = pos;
@@ -20,10 +22,19 @@ __global__ void build_tbl_kernel(const int nbond_tbl, int* __restrict__ bond_tbl
   } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl) {
     dihe_tbl[pos-nbond_tbl-nureyb_tbl-nangle_tbl] = pos-nbond_tbl-nureyb_tbl-nangle_tbl;
   } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl + nimdihe_tbl) {
-    imdihe_tbl[pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl] = pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl;
+    imdihe_tbl[pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl] = 
+      pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl;
   } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl + nimdihe_tbl + ncmap_tbl) {
     cmap_tbl[pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl] = 
       pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl;
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl + nimdihe_tbl + ncmap_tbl
+	     + nin14_tbl) {
+    in14_tbl[pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl-ncmap_tbl] = 
+      pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl-ncmap_tbl;
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl + nimdihe_tbl + ncmap_tbl
+	     + nin14_tbl + nex14_tbl) {
+    ex14_tbl[pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl-ncmap_tbl-nin14_tbl] = 
+      pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl-ncmap_tbl-nin14_tbl;
   }
 }
 
@@ -39,7 +50,9 @@ CudaDomdecBonded::CudaDomdecBonded(const int nbond, const bond_t* h_bond,
 				   const int nangle, const angle_t* h_angle,
 				   const int ndihe, const dihe_t* h_dihe,
 				   const int nimdihe, const dihe_t* h_imdihe,
-				   const int ncmap, const cmap_t* h_cmap) {  
+				   const int ncmap, const cmap_t* h_cmap,
+				   const int nin14, const xx14_t* h_in14,
+				   const int nex14, const xx14_t* h_ex14) {
   assert((nureyb == 0) || (nureyb > 0 && nureyb == nangle));
 
   bond = NULL;
@@ -48,6 +61,8 @@ CudaDomdecBonded::CudaDomdecBonded(const int nbond, const bond_t* h_bond,
   dihe = NULL;
   imdihe = NULL;
   cmap = NULL;
+  in14 = NULL;
+  ex14 = NULL;
 
   this->nbond = nbond;
   if (nbond > 0) {
@@ -85,6 +100,18 @@ CudaDomdecBonded::CudaDomdecBonded(const int nbond, const bond_t* h_bond,
     copy_HtoD<cmap_t>(h_cmap, cmap, ncmap);
   }
 
+  this->nin14 = nin14;
+  if (nin14 > 0) {
+    allocate<xx14_t>(&in14, nin14);
+    copy_HtoD<xx14_t>(h_in14, in14, nin14);
+  }
+
+  this->nex14 = nex14;
+  if (nex14 > 0) {
+    allocate<xx14_t>(&ex14, nex14);
+    copy_HtoD<xx14_t>(h_ex14, ex14, nex14);
+  }
+
   nbond_tbl = 0;
   bond_tbl_len = 0;
   bond_tbl = NULL;
@@ -108,6 +135,14 @@ CudaDomdecBonded::CudaDomdecBonded(const int nbond, const bond_t* h_bond,
   ncmap_tbl = 0;
   cmap_tbl_len = 0;
   cmap_tbl = NULL;
+
+  nin14_tbl = 0;
+  in14_tbl_len = 0;
+  in14_tbl = NULL;
+
+  nex14_tbl = 0;
+  ex14_tbl_len = 0;
+  ex14_tbl = NULL;
 }
 
 //
@@ -120,6 +155,8 @@ CudaDomdecBonded::~CudaDomdecBonded() {
   if (dihe != NULL) deallocate<dihe_t>(&dihe);
   if (imdihe != NULL) deallocate<dihe_t>(&imdihe);
   if (cmap != NULL) deallocate<cmap_t>(&cmap);
+  if (in14 != NULL) deallocate<xx14_t>(&in14);
+  if (ex14 != NULL) deallocate<xx14_t>(&ex14);
 
   if (bond_tbl != NULL) deallocate<int>(&bond_tbl);
   if (ureyb_tbl != NULL) deallocate<int>(&ureyb_tbl);
@@ -127,6 +164,8 @@ CudaDomdecBonded::~CudaDomdecBonded() {
   if (dihe_tbl != NULL) deallocate<int>(&dihe_tbl);
   if (imdihe_tbl != NULL) deallocate<int>(&imdihe_tbl);
   if (cmap_tbl != NULL) deallocate<int>(&cmap_tbl);
+  if (in14_tbl != NULL) deallocate<int>(&in14_tbl);
+  if (ex14_tbl != NULL) deallocate<int>(&ex14_tbl);
 }
 
 //
@@ -142,24 +181,31 @@ void CudaDomdecBonded::build_tbl(const CudaDomdec *domdec, const int *zone_patom
     ndihe_tbl = ndihe;
     nimdihe_tbl = nimdihe;
     ncmap_tbl = ncmap;
+    nin14_tbl = nin14;
+    nex14_tbl = nex14;
 
-    if (nbond_tbl > 0) reallocate<int>(&bond_tbl, &bond_tbl_len, nbond_tbl, 1.2f);
-    if (nureyb_tbl > 0) reallocate<int>(&ureyb_tbl, &ureyb_tbl_len, nureyb_tbl, 1.2f);
-    if (nangle_tbl > 0) reallocate<int>(&angle_tbl, &angle_tbl_len, nangle_tbl, 1.2f);
-    if (ndihe_tbl > 0) reallocate<int>(&dihe_tbl, &dihe_tbl_len, ndihe_tbl, 1.2f);
-    if (nimdihe_tbl > 0) reallocate<int>(&imdihe_tbl, &imdihe_tbl_len, nimdihe_tbl, 1.2f);
-    if (ncmap_tbl > 0) reallocate<int>(&cmap_tbl, &cmap_tbl_len, ncmap_tbl, 1.2f);
+    if (nbond_tbl > 0) reallocate<int>(&bond_tbl, &bond_tbl_len, nbond_tbl);
+    if (nureyb_tbl > 0) reallocate<int>(&ureyb_tbl, &ureyb_tbl_len, nureyb_tbl);
+    if (nangle_tbl > 0) reallocate<int>(&angle_tbl, &angle_tbl_len, nangle_tbl);
+    if (ndihe_tbl > 0) reallocate<int>(&dihe_tbl, &dihe_tbl_len, ndihe_tbl);
+    if (nimdihe_tbl > 0) reallocate<int>(&imdihe_tbl, &imdihe_tbl_len, nimdihe_tbl);
+    if (ncmap_tbl > 0) reallocate<int>(&cmap_tbl, &cmap_tbl_len, ncmap_tbl);
+    if (nin14_tbl > 0) reallocate<int>(&in14_tbl, &in14_tbl_len, nin14_tbl);
+    if (nex14_tbl > 0) reallocate<int>(&ex14_tbl, &ex14_tbl_len, nex14_tbl);
 
     int nthread = 512;
     int nblock = (nbond_tbl + nureyb_tbl + nangle_tbl + 
-		  ndihe_tbl + nimdihe_tbl + ncmap_tbl -1)/nthread + 1;
+		  ndihe_tbl + nimdihe_tbl + ncmap_tbl +
+		  nin14_tbl + nex14_tbl - 1)/nthread + 1;
     build_tbl_kernel<<< nblock, nthread, 0, stream >>>
       (nbond_tbl, bond_tbl,
        nureyb_tbl, ureyb_tbl,
        nangle_tbl, angle_tbl,
        ndihe_tbl, dihe_tbl,
        nimdihe_tbl, imdihe_tbl,
-       ncmap_tbl, cmap_tbl);
+       ncmap_tbl, cmap_tbl,
+       nin14_tbl, in14_tbl,
+       nex14_tbl, ex14_tbl);
     cudaCheck(cudaGetLastError());
 
   } else {
