@@ -3162,9 +3162,6 @@ void NeighborList<tilesize>::setup_top_excl(const int ncoord_glo, const int *ibl
   }
   h_atom_excl_pos[ncoord_glo] = nexcl_tot;
 
-  std::cout << "NeighborList<tilesize>::setup_top_excl, max_nexcl = " << max_nexcl 
-	    << " nexcl_tot = " << nexcl_tot << std::endl;
-
   int *h_atom_excl = new int[nexcl_tot];
 
   for (int i=0;i < ncoord_glo;i++) nexcl[i] = 0;
