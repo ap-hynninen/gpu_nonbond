@@ -98,6 +98,9 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec *domdec, CudaDomdecBonded *domde
 
   allocate<int>(&d_heuristic_flag, 1);
   allocate_host<int>(&h_heuristic_flag, 1);
+
+  h_loc2glo_len = 0;
+  h_loc2glo = NULL;
 }
 
 //
@@ -108,6 +111,7 @@ CudaPMEForcefield::~CudaPMEForcefield() {
   deallocate_host<int>(&h_heuristic_flag);
   deallocate<float>(&q);
   if (grid != NULL) delete grid;
+  if (h_loc2glo != NULL) delete [] h_loc2glo;
 }
 
 //
@@ -150,7 +154,7 @@ void CudaPMEForcefield::setup_recip_nonbonded(const double kappa,
 //
 // Calculate forces
 //
-void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
+void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
 			     const bool calc_energy, const bool calc_virial,
 			     Force<long long int> *force) {
 
@@ -161,9 +165,9 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
   if (heuristic_check(coord)) {
     std::cout << "  Building neighborlist" << std::endl;
 
-    // Update homezone coordinates
+    // Update homezone coordinates (coord) and step vector (prev_step)
     // NOTE: Builds domdec->loc2glo
-    domdec->update_homezone(coord);
+    domdec->update_homezone(coord, prev_step);
 
     // Communicate coordinates
     // NOTE: Builds rest of domdec->loc2glo and domdec->xyz_shift
@@ -173,8 +177,11 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
     xyzq_copy.set_xyzq(coord, q, domdec->get_xyz_shift(),
 		       domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz());
 
-    // Update neighborlist
+    // Sort coordinates
+    // NOTE: Builds domdec->loc2glo and nlist->glo2loc
     nlist->sort(domdec->get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec->get_loc2glo());
+
+    // Update neighborlist
     nlist->build(domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), domdec->get_rnl(),
 		 xyzq.xyzq, domdec->get_loc2glo());
 
@@ -213,8 +220,13 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
 		    domdec_bonded->get_nex14_tbl(), domdec_bonded->get_ex14_tbl(),
 		    domdec_bonded->get_ex14());
 
-    // Update reference coordinates
-    ref_coord.set_data(coord);
+    // Re-order step vector:
+    domdec->reorder_coord(prev_step, &ref_coord);
+    prev_step->set_data(ref_coord);
+
+    // Re-order coordinates using loc2glo: coord -> ref_coord
+    domdec->reorder_coord(coord, &ref_coord);
+    coord->set_data(ref_coord);
 
   } else {
     std::cout << "  Not building neighborlist" << std::endl;
@@ -228,6 +240,7 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
   if (calc_energy || calc_virial) {
     dir.clear_energy_virial();
     bonded.clear_energy_virial();
+    if (grid != NULL) grid->clear_energy_virial();
   }
 
   // Direct non-bonded force
@@ -240,7 +253,6 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
   bonded.calc_force(xyzq.xyzq, domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(),
 		    calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
 
-  /*
   // Reciprocal forces (Only reciprocal nodes calculate these)
   if (grid != NULL) {
     double recip[9];
@@ -252,9 +264,15 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
     grid->r2c_fft();
     grid->scalar_sum(recip, kappa, calc_energy, calc_virial);
     grid->c2r_fft();
-    grid->gather_force(xyzq.xyzq, xyzq.ncoord, recip, recip_force.xyz.stride, recip_force.xyz.data);
+    if (domdec->get_numnode() == 1) {
+      grid->gather_force(xyzq.xyzq, xyzq.ncoord, recip, force->xyz.stride, force->xyz.data);
+    } else {
+      //grid->gather_force(xyzq.xyzq, xyzq.ncoord, recip, recip_force.xyz.stride, recip_force.xyz.data);
+    }
+    if (calc_energy) grid->calc_self_energy(xyzq.xyzq, xyzq.ncoord);
   }
-  */
+
+  force->convert<double>();
 
   bonded.get_energy_virial(calc_energy, calc_virial,
 			   &energy_bond, &energy_ureyb,
@@ -267,9 +285,10 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord,
 			&energy_vdw, &energy_elec,
 			&energy_excl, vir);
 
+  grid->get_energy_virial(kappa, calc_energy, calc_virial, &energy_ewksum, &energy_ewself, vir);
+
   // Communicate forces (After this all nodes have their correct total force)
   domdec->comm_force(force);
-
 }
 
 //
@@ -319,8 +338,16 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double> *coord) {
 //
 // Print energies and virials on screen
 //
-void CudaPMEForcefield::print_energy_virial() {
+void CudaPMEForcefield::print_energy_virial(int step) {
   double tol = 0.0;
+
+  double energy_kin = 0.0;
+  double energy = energy_bond + energy_angle + energy_ureyb + energy_dihe + energy_imdihe +
+    energy_vdw + energy_elec + energy_ewksum + energy_ewself + energy_excl;
+  double energy_tot = energy + energy_kin;
+  double temp = 0.0;
+
+  printf("DYNA>     %d %lf %lf %lf %lf\n",step, energy_tot, energy_kin, energy, temp);
 
   if (fabs(energy_bond) >= tol || fabs(energy_angle) >= tol || fabs(energy_ureyb) >= tol ||
       fabs(energy_dihe) >= tol || fabs(energy_imdihe) >= tol) {
@@ -328,8 +355,55 @@ void CudaPMEForcefield::print_energy_virial() {
 	   energy_bond, energy_angle, energy_ureyb, energy_dihe, energy_imdihe);
   }
 
-  if (fabs(energy_vdw) >= tol || fabs(energy_elec) >= tol || fabs(energy_excl) >= tol) {
-    printf("DYNA EXTERN> %lf %lf %lf\n",energy_vdw, energy_elec, energy_excl);
+  if (fabs(energy_vdw) >= tol || fabs(energy_elec) >= tol) {
+    printf("DYNA EXTERN> %lf %lf\n",energy_vdw, energy_elec);
+  }
+
+  if (fabs(energy_ewksum) >= tol || fabs(energy_ewself) >= tol || fabs(energy_excl) >= tol) {
+    printf("DYNA EWALD> %lf %lf %lf\n",energy_ewksum, energy_ewself, energy_excl);
+  }
+
+}
+
+//
+// Copies restart data into host buffers
+//
+void CudaPMEForcefield::get_restart_data(hostXYZ<double> *h_coord, hostXYZ<double> *h_step,
+					 hostXYZ<double> *h_force,
+					 double *x, double *y, double *z, double *dx, double *dy, double *dz,
+					 double *fx, double *fy, double *fz) {
+
+  int ncoord = domdec->get_ncoord();
+
+  if (h_loc2glo != NULL && h_loc2glo_len < ncoord) {
+    delete [] h_loc2glo;
+    h_loc2glo = NULL;
+    h_loc2glo_len = 0;
+  }
+  if (h_loc2glo == NULL) {
+    h_loc2glo_len = min(domdec->get_ncoord_glo(), (int)(ncoord*1.2));
+    h_loc2glo = new int[h_loc2glo_len];
+  }
+  copy_DtoH_sync<int>(domdec->get_loc2glo(), h_loc2glo, ncoord);
+
+  int coord_stride  = h_coord->stride;
+  int coord_stride2 = h_coord->stride*2;
+  int step_stride  = h_step->stride;
+  int step_stride2 = h_step->stride*2;
+  int force_stride  = h_force->stride;
+  int force_stride2 = h_force->stride*2;
+
+  for (int i=0;i < ncoord;i++) {
+    int j = h_loc2glo[i];
+    x[i] = h_coord->data[j];
+    y[i] = h_coord->data[j + coord_stride];
+    z[i] = h_coord->data[j + coord_stride2];
+    dx[i] = h_step->data[j];
+    dy[i] = h_step->data[j + step_stride];
+    dz[i] = h_step->data[j + step_stride2];
+    fx[i] = h_force->data[j];
+    fy[i] = h_force->data[j + force_stride];
+    fz[i] = h_force->data[j + force_stride2];
   }
 
 }

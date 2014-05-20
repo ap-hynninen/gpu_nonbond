@@ -65,6 +65,10 @@ private:
   CudaDomdec *domdec;
   CudaDomdecBonded *domdec_bonded;
 
+  // Host version of loc2glo
+  int h_loc2glo_len;
+  int *h_loc2glo;
+
   // ---------------------
   // Energies and virials
   // ---------------------
@@ -81,6 +85,8 @@ private:
   double energy_vdw;
   double energy_elec;
   double energy_excl;
+  double energy_ewksum;
+  double energy_ewself;
   double vir[9];
 
   bool heuristic_check(const cudaXYZ<double> *coord);
@@ -115,12 +121,16 @@ public:
 		    const int order);
   ~CudaPMEForcefield();
 
-  void calc(cudaXYZ<double> *coord, const bool calc_energy, const bool calc_virial,
+  void calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step, const bool calc_energy, const bool calc_virial,
 	    Force<long long int> *force);
 
   void init_coord(cudaXYZ<double> *coord);
 
-  void print_energy_virial();
+  void get_restart_data(hostXYZ<double> *h_coord, hostXYZ<double> *h_step, hostXYZ<double> *h_force,
+			double *x, double *y, double *z, double *dx, double *dy, double *dz,
+			double *fx, double *fy, double *fz);
+  
+  void print_energy_virial(int step);
 };
 
 #endif // CUDAPMEFORCEFIELD_H

@@ -15,7 +15,7 @@ __global__ void take_step_kernel(const int stride3,
   const int tid = threadIdx.x + blockIdx.x*blockDim.x;
 
   if (tid < stride3) {
-    coord[tid] = prev_coord[tid] + step[tid];
+    coord[tid] = prev_coord[tid] + 0*step[tid];
   }
 
 }
@@ -76,6 +76,13 @@ void CudaLeapfrogIntegrator::init(const int ncoord,
   step.resize(ncoord);
   coord.resize(ncoord);
   force.set_ncoord(ncoord);
+
+  // Host versions of coordinate, step, and force arrays
+  // NOTE: These are used for copying coordinates
+  h_coord.resize(ncoord);
+  h_step.resize(ncoord);
+  h_force.resize(ncoord);
+
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
     p->init_coord(&prev_coord);
@@ -146,7 +153,7 @@ void CudaLeapfrogIntegrator::calc_force(const bool calc_energy, const bool calc_
 
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    p->calc(&coord, calc_energy, calc_virial, &force);
+    p->calc(&coord, &prev_step, calc_energy, calc_virial, &force);
   }
 
 }
@@ -181,10 +188,27 @@ void CudaLeapfrogIntegrator::do_temperature() {
 //
 // Print energy & other info on screen
 //
-void CudaLeapfrogIntegrator::do_print_energy() {
-  std::cout << "do_print_energy()" << std::endl;
+void CudaLeapfrogIntegrator::do_print_energy(int step) {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    p->print_energy_virial();
+    p->print_energy_virial(step);
   }
 }
+
+//
+// Get coordinates to host memory
+//
+void CudaLeapfrogIntegrator::get_restart_data(double *x, double *y, double *z,
+					      double *dx, double *dy, double *dz,
+					      double *fx, double *fy, double *fz) {
+
+  if (forcefield != NULL) {
+    h_coord.set_data_sync(coord);
+    h_step.set_data_sync(step);
+    h_force.set_data_sync(force.xyz);
+    CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
+    p->get_restart_data(&h_coord, &h_step, &h_force, x, y, z, dx, dy, dz, fx, fy, fz);
+  }
+  
+}
+

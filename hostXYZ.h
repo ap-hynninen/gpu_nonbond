@@ -94,6 +94,13 @@ public:
     copy_DtoH_sync<T>((T *)xyz.data, this->data, 3*this->stride);
   }
 
+  // Sets data from list of numbers on device
+  void set_data_sync(const T *d_x, const T *d_y, const T *d_z) {
+    copy_DtoH_sync<T>(d_x, this->data,                  this->n);
+    copy_DtoH_sync<T>(d_y, &this->data[this->stride],   this->n);
+    copy_DtoH_sync<T>(d_z, &this->data[this->stride*2], this->n);
+  }
+
 };
 
 

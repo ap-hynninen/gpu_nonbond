@@ -9,6 +9,8 @@
 #include "MultiNodeMatrix3d.h"
 #include "Grid.h"
 
+static const double pi = 3.14159265358979323846;
+
 //
 // Grid class
 //
@@ -1200,7 +1202,7 @@ __forceinline__ __device__ void write_force <long long int> (const float fx,
 // blockDim.x            = Number of atoms each block loads
 // blockDim.x*blockDim.y = Total number of threads per block
 //
-template <typename AT, typename CT>
+template <typename CT>
 __global__ void gather_force_4_ortho_kernel(const int ncoord,
 					    const int nfftx, const int nffty, const int nfftz,
 					    const int xsize, const int ysize, const int zsize,
@@ -1415,14 +1417,14 @@ __global__ void gather_force_4_ortho_kernel(const int ncoord,
 // blockDim.x            = Number of atoms each block loads
 // blockDim.x*blockDim.y = Total number of threads per block
 //
-template <typename AT, typename CT>
+template <typename CT, typename FT>
 __global__ void gather_force_4_ortho_kernel(const float4 *xyzq, const int ncoord,
 					    const int nfftx, const int nffty, const int nfftz,
 					    const int xsize, const int ysize, const int zsize,
 					    const float recip1, const float recip2, const float recip3,
 					    const float ccelec,
 					    const int stride,
-					    CT *force) {
+					    FT *force) {
 
   const int tid = threadIdx.x + threadIdx.y*blockDim.x; // 0...63
 
@@ -1679,9 +1681,19 @@ __global__ void gather_force_4_ortho_kernel(const float4 *xyzq, const int ncoord
     float fx = q*recip1*f1*nfftx;
     float fy = q*recip2*f2*nffty;
     float fz = q*recip3*f3*nfftz;
-    force[pos]         = fx;
-    force[pos+stride]  = fy;
-    force[pos+stride2] = fz;
+    if (sizeof(FT) == sizeof(long long int)) {
+      fx *= FORCE_SCALE;
+      fy *= FORCE_SCALE;
+      fz *= FORCE_SCALE;
+      long long int fx_lli = lliroundf(fx);
+      long long int fy_lli = lliroundf(fy);
+      long long int fz_lli = lliroundf(fz);
+      write_force<FT>(fx_lli, fy_lli, fz_lli, pos, stride, force);
+    } else {
+      force[pos]         = fx;
+      force[pos+stride]  = fy;
+      force[pos+stride2] = fz;
+    }
   }
 
 }
@@ -1691,14 +1703,14 @@ __global__ void gather_force_4_ortho_kernel(const float4 *xyzq, const int ncoord
 // blockDim.x            = Number of atoms each block loads
 // blockDim.x*blockDim.y = Total number of threads per block
 //
-template <typename AT, typename CT>
+template <typename CT, typename FT>
 __global__ void gather_force_6_ortho_kernel(const float4 *xyzq, const int ncoord,
 					    const int nfftx, const int nffty, const int nfftz,
 					    const int xsize, const int ysize, const int zsize,
 					    const float recip1, const float recip2, const float recip3,
 					    const float ccelec,
 					    const int stride,
-					    CT *force) {
+					    FT *force) {
 
   const int tid = threadIdx.x + threadIdx.y*blockDim.x; // 0...63
 
@@ -2008,6 +2020,36 @@ __global__ void gather_force_6_ortho_kernel(const float4 *xyzq, const int ncoord
   }
 
 }
+
+//
+// Calculates self energy
+//
+__global__ void calc_self_energy_kernel(const int ncoord, const float4* xyzq) {
+  // Shared memory
+  // Required space: blockDim.x*sizeof(double)
+  extern __shared__ double sh_q2[];
+
+  int i = threadIdx.x + blockIdx.x*blockDim.x;
+  float q = 0.0f;
+  if (i < ncoord) q = xyzq[i].w;
+  sh_q2[threadIdx.x] = q*q;
+  __syncthreads();
+  for(int d=1;d < blockDim.x;d *= 2) {
+    int t = threadIdx.x + d;
+    double q2_val = (t < blockDim.x) ? sh_q2[t] : 0.0;
+    __syncthreads();
+    sh_q2[threadIdx.x] += q2_val;
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    atomicAdd(&d_energy_virial.energy_self, sh_q2[0]);
+  }
+
+}
+
+//#####################################################################################
+//#####################################################################################
+//#####################################################################################
 
 template<typename T>
 void bind_grid_texture(const T *data, const int data_len) {
@@ -2482,8 +2524,6 @@ template <typename AT, typename CT, typename CT2>
 void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
 				   const bool calc_energy, const bool calc_virial) {
 
-  const double pi = 3.14159265358979323846;
-
   bool calc_energy_virial = (calc_energy || calc_virial);
 
   // Best performance:
@@ -2580,6 +2620,7 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
 	 recip1, recip2, recip3,
 	 prefac1, prefac2, prefac3,
 	 fac, piv_inv, global_base, datap);
+      cudaCheck(cudaGetLastError());
     } else {
       scalar_sum_ortho_kernel<CT, CT2, false>
 	<<< nblock, nthread, shmem_size, stream >>>
@@ -2589,14 +2630,25 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
 	 recip1, recip2, recip3,
 	 prefac1, prefac2, prefac3,
 	 fac, piv_inv, global_base, datap);
+      cudaCheck(cudaGetLastError());
     }
   } else {
     std::cerr<<"Grid::scalar_sum: only orthorombic boxes are currently supported"<<std::endl;
     exit(1);
   }
 
-  cudaCheck(cudaGetLastError());
+}
 
+//
+// Calculates self energy
+//
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::calc_self_energy(const float4 *xyzq, const int ncoord) {
+  int nthread = 256;
+  int nblock = (ncoord-1)/nthread+1;
+  int shmem_size = nthread*sizeof(double);
+  calc_self_energy_kernel<<< nblock, nthread, shmem_size, stream >>>(ncoord, xyzq);
+  cudaCheck(cudaGetLastError());
 }
 
 //
@@ -2628,7 +2680,7 @@ void Grid<AT, CT, CT2>::gather_force(const int ncoord, const double* recip,
   if (ortho) {
     switch(order) {
     case 4:
-      gather_force_4_ortho_kernel<AT, CT> 
+      gather_force_4_ortho_kernel<CT> 
 	<<< nblock, nthread, shmem_size, stream >>>
 	(ncoord,
 	 nfftx, nffty, nfftz,
@@ -2666,8 +2718,9 @@ void Grid<AT, CT, CT2>::gather_force(const int ncoord, const double* recip,
 // Gathers forces from the grid
 //
 template <typename AT, typename CT, typename CT2>
+template <typename FT>
 void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const double* recip,
-				     const int stride, CT* force) {
+				     const int stride, FT* force) {
 
   dim3 nthread(32, 2, 1);
   dim3 nblock((ncoord - 1)/nthread.x + 1, 1, 1);
@@ -2692,7 +2745,7 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
   if (ortho) {
     switch(order) {
     case 4:
-      gather_force_4_ortho_kernel<AT, CT> 
+      gather_force_4_ortho_kernel<CT, FT> 
 	<<< nblock, nthread, 0, stream >>>
 	(xyzq, ncoord,
 	 nfftx, nffty, nfftz,
@@ -2703,7 +2756,7 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
       break;
 
     case 6:
-      gather_force_6_ortho_kernel<AT, CT> 
+      gather_force_6_ortho_kernel<CT, FT> 
 	<<< nblock, nthread, 0, stream >>>
 	(xyzq, ncoord,
 	 nfftx, nffty, nfftz,
@@ -2737,6 +2790,7 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
 template <typename AT, typename CT, typename CT2>
 void Grid<AT, CT, CT2>::clear_energy_virial() {
   h_energy_virial->energy = 0.0;
+  h_energy_virial->energy_self = 0.0;
   for (int i=0;i < 6;i++) {
     h_energy_virial->virial[i] = 0.0;
   }
@@ -2747,8 +2801,9 @@ void Grid<AT, CT, CT2>::clear_energy_virial() {
 // Returns energy and virial of the reciprocal
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
-					  double *energy, double *virial) {
+void Grid<AT, CT, CT2>::get_energy_virial(const double kappa,
+					  const bool prev_calc_energy, const bool prev_calc_virial,
+					  double *energy, double *energy_self, double *virial) {
 
   bool prev_calc_energy_virial = (prev_calc_energy || prev_calc_virial);
 
@@ -2759,6 +2814,8 @@ void Grid<AT, CT, CT2>::get_energy_virial(bool prev_calc_energy, bool prev_calc_
   double cfact = 0.5*ccelec;
 
   *energy = h_energy_virial->energy*cfact;
+  *energy_self = -h_energy_virial->energy_self*kappa*ccelec/sqrt(pi);
+
   // add in pressure contributions
   virial[0] -= h_energy_virial->virial[0]*cfact;
   virial[1] -= h_energy_virial->virial[1]*cfact;
@@ -3055,3 +3112,9 @@ void Grid<AT, CT, CT2>::calc_prefac() {
 //
 template class Grid<long long int, float, float2>;
 template class Grid<int, float, float2>;
+template void Grid<int, float, float2>::gather_force<float>(const float4 *xyzq, const int ncoord,
+							    const double* recip,
+							    const int stride, float* force);
+template void Grid<int, float, float2>::gather_force<long long int>(const float4 *xyzq, const int ncoord,
+								    const double* recip,
+								    const int stride, long long int* force);

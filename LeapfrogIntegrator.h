@@ -21,7 +21,10 @@ private:
   virtual void do_pressure()=0;
   virtual void do_temperature()=0;
   virtual bool const_pressure()=0;
-  virtual void do_print_energy()=0;
+  virtual void do_print_energy(int step)=0;
+  virtual void get_restart_data(double *x, double *y, double *z,
+				double *dx, double *dy, double *dz,
+				double *fx, double *fy, double *fz)=0;
 
 protected:
 
@@ -31,6 +34,20 @@ protected:
   // Forcefield
   Forcefield *forcefield;
 
+  // Host buffers for saving integrator status
+  // NOTE: Must be size of the global array length
+  double *x;
+  double *y;
+  double *z;
+
+  double *dx;
+  double *dy;
+  double *dz;
+
+  double *fx;
+  double *fy;
+  double *fz;
+
 public:
 
   //
@@ -38,6 +55,15 @@ public:
   //
   LeapfrogIntegrator() {
     forcefield = NULL;
+    x = NULL;
+    y = NULL;
+    z = NULL;
+    dx = NULL;
+    dy = NULL;
+    dz = NULL;
+    fx = NULL;
+    fy = NULL;
+    fz = NULL;
   }
 
   //
@@ -61,6 +87,33 @@ public:
   }
 
   //
+  // Set host coordinate buffers
+  //
+  void set_coord_buffers(double *x_in, double *y_in, double *z_in) {
+    x = x_in;
+    y = y_in;
+    z = z_in;
+  }
+
+  //
+  // Set host step buffers
+  //
+  void set_step_buffers(double *x_in, double *y_in, double *z_in) {
+    dx = x_in;
+    dy = y_in;
+    dz = z_in;
+  }
+
+  //
+  // Set host force buffers
+  //
+  void set_force_buffers(double *x_in, double *y_in, double *z_in) {
+    fx = x_in;
+    fy = y_in;
+    fz = z_in;
+  }
+
+  //
   // Initialize
   //
   virtual void init(const int ncoord,
@@ -70,7 +123,7 @@ public:
   //
   // Runs dynamics for nstep steps
   //
-  void run(const int nstep, const int print_freq) {
+  void run(const int nstep, const int print_freq, const int restart_freq) {
 
     for (int istep=0;istep < nstep;istep++) {
 
@@ -105,9 +158,13 @@ public:
 
       // Print energies & other values on screen
       if (print_energy) {
-	do_print_energy();
+	do_print_energy(istep);
       }
-      
+
+      if ((istep % restart_freq) == 0) {
+	get_restart_data(x, y, z, dx, dy, dz, fx, fy, fz);
+      }
+
       // Swap: dx <=> dx_prev
       swap_step();
       

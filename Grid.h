@@ -16,6 +16,7 @@ enum FFTtype {COLUMN, SLAB, BOX};
 struct RecipEnergyVirial_t {
   // Energy
   double energy;
+  double energy_self;
 
   // Virials
   double virial[6];
@@ -151,14 +152,19 @@ private:
   void scalar_sum(const double* recip, const double kappa,
 		  const bool calc_energy, const bool calc_virial);
 
+  void calc_self_energy(const float4 *xyzq, const int ncoord);
+
   void gather_force(const int ncoord, const double* recip, const Bspline<CT> &bspline,
 		    const int stride, CT* force);
-  void gather_force(const float4 *xyzq, const int ncoord, const double* recip,
-		    const int stride, CT* force);
+  
+  template <typename FT>
+    void gather_force(const float4 *xyzq, const int ncoord, const double* recip,
+		      const int stride, FT* force);
 
   void clear_energy_virial();
-  void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
-			 double *energy, double *virial);
+  void get_energy_virial(const double kappa,
+			 const bool prev_calc_energy, const bool prev_calc_virial,
+			 double *energy, double *energy_self, double *virial);
 
   void x_fft_r2c(CT2 *data);
   void x_fft_c2r(CT2 *data);

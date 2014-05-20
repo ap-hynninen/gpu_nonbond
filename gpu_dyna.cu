@@ -76,6 +76,21 @@ void load_constr_mass(const int nconstr, const int nmass, const char *filename, 
 }
 
 //
+// Writes (x, y, z) into a file
+//
+void write_xyz(const int n, const double *x, const double *y, const double *z, const char *filename) {
+  std::ofstream file(filename);
+  if (file.is_open()) {
+    for (int i=0;i < n;i++) {
+      file << x[i] << " " << y[i] << " " << z[i] << std::endl;
+    }
+  } else {
+    std::cout << "write_xyz: Error opening file " << filename << std::endl;
+    exit(1);
+  }
+}
+
+//
 // Test the code using data in test_data/ -directory
 //
 void test() {
@@ -325,8 +340,19 @@ void test() {
   load_vec<double>(1, "test_data/dy.txt", ncoord, dy);
   load_vec<double>(1, "test_data/dz.txt", ncoord, dz);
 
+  double *fx = new double[ncoord];
+  double *fy = new double[ncoord];
+  double *fz = new double[ncoord];
+
   leapfrog.init(ncoord, x, y, z, dx, dy, dz);
-  leapfrog.run(1, 1);
+  leapfrog.set_coord_buffers(x, y, z);
+  leapfrog.set_step_buffers(dx, dy, dz);
+  leapfrog.set_force_buffers(fx, fy, fz);
+  leapfrog.run(1, 1, 1);
+
+  write_xyz(ncoord, x, y, z, "coord.txt");
+  write_xyz(ncoord, dx, dy, dz, "step.txt");
+  write_xyz(ncoord, fx, fy, fz, "force.txt");
 
   delete [] x;
   delete [] y;
@@ -335,6 +361,10 @@ void test() {
   delete [] dx;
   delete [] dy;
   delete [] dz;
+
+  delete [] fx;
+  delete [] fy;
+  delete [] fz;
 
   //-------------------------------------------------------------------------------------
 

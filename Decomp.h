@@ -14,11 +14,22 @@ class Decomp {
   // Number of coordinates in this node
   int ncoord;
 
+  // Total number of nodes
+  int numnode;
+
+  // This node index (=0...numnode-1)
+  int mynode;
+
  public:
 
-  int get_ncoord_glo() {
-    return ncoord_glo;
-  }
+  // Return the global total number of coordinates
+  int get_ncoord_glo() {return ncoord_glo;}
+
+  // Return the number of coordinates in this node
+  int get_ncoord() {return ncoord;}
+
+  // Return number of nodes
+  int get_numnode() {return numnode;}
 
 };
 

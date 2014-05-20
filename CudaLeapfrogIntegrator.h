@@ -31,6 +31,11 @@ private:
   // Force array
   Force<long long int> force;
 
+  // Host memory versions of coordinates, step, and force arrays
+  hostXYZ<double> h_coord;
+  hostXYZ<double> h_step;
+  hostXYZ<double> h_force;
+
   // Holonomic constraints
   HoloConst *holoconst;
 
@@ -47,7 +52,10 @@ private:
   void do_pressure();
   void do_temperature();
   bool const_pressure();
-  void do_print_energy();
+  void do_print_energy(int step);
+  void get_restart_data(double *x, double *y, double *z,
+			double *dx, double *dy, double *dz,
+			double *fx, double *fy, double *fz);
 
 public:
 

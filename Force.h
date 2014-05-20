@@ -40,6 +40,8 @@ public:
   void set_ncoord(int ncoord, float fac=1.0f);
   int get_stride();
 
+  void get_data_sync(T *fx, T *fy, T *fz);
+
   template <typename T2> void convert(Force<T2>* force, cudaStream_t stream=0);
   template <typename T2> void convert(cudaStream_t stream=0);
   template <typename T2, typename T3> void convert_to(Force<T3> *force, cudaStream_t stream=0);

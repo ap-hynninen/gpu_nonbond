@@ -22,16 +22,14 @@ class CudaDomdec : public Decomp {
   // Number of sub-boxes in each coordinate direction
   int nx, ny, nz;
 
-  // Total number of nodes (=nx*ny*nz)
-  int numnode;
-
-  // This node index (=0...numnode-1)
-  int mynode;
-
   // Local -> global mapping
   // NOTE: also serves as a list of atom on this node
   int loc2glo_len;
   int *loc2glo;
+
+  // Packed -> global mapping
+  //int pack2glo_len;
+  //int *pack2glo;
 
   // Number of coordinates in each node
   int zone_ncoord[8];
@@ -68,11 +66,12 @@ class CudaDomdec : public Decomp {
   double get_rnl() {return rnl;}
 
   void build_homezone(cudaXYZ<double> *coord, cudaStream_t stream=0);
-  void update_homezone(cudaXYZ<double> *coord, cudaStream_t stream=0);
+  void update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, cudaStream_t stream=0);
 
   void comm_coord(cudaXYZ<double> *coord, bool update, cudaStream_t stream=0);
   void comm_force(Force<long long int> *force, cudaStream_t stream=0);
 
+  void reorder_coord(cudaXYZ<double> *coord, cudaXYZ<double> *ref_coord, cudaStream_t stream=0);
 };
 
 #endif // CUDADOMDEC_H

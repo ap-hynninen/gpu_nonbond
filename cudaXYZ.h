@@ -103,6 +103,13 @@ public:
 
   //--------------------------------------------------------------------------
 
+  // Copies data to host buffers (x, y, z)
+  void get_data_sync(double *h_x, double *h_y, double *h_z) {
+    copy_DtoH_sync<T>(this->data,                  h_x, this->n);
+    copy_DtoH_sync<T>(&this->data[this->stride],   h_y, this->n);
+    copy_DtoH_sync<T>(&this->data[this->stride*2], h_z, this->n);
+  }
+
 };
 
 #endif // CUDAXYZ_H

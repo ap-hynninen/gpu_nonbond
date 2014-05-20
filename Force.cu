@@ -137,6 +137,14 @@ int Force<T>::get_stride() {
 }
 
 //
+// Copies data to host
+//
+template <typename T>
+void Force<T>::get_data_sync(T *fx, T *fy, T *fz) {
+  
+}
+
+//
 // Converts one type of force array to another. Result is in "force"
 //
 template <typename T>
