@@ -2285,19 +2285,29 @@ void DirectForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_cal
 					    double *energy_vdw, double *energy_elec,
 					    double *energy_excl,
 					    double *vir) {
-  if (prev_calc_energy && prev_calc_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, (3+9)*sizeof(double) ));
-  } else if (prev_calc_energy) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 3*sizeof(double)));
-  } else if (prev_calc_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 9*sizeof(double),
-				   3*sizeof(double)));
+
+  if (prev_calc_energy || prev_calc_virial) {
+    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(DirectEnergyVirial_t),
+				   0, cudaMemcpyDeviceToHost));
   }
-  *energy_vdw = h_energy_virial->energy_vdw;
-  *energy_elec = h_energy_virial->energy_elec;
-  *energy_excl = h_energy_virial->energy_excl;
+
+  if (prev_calc_virial) {
+    for (int i=0;i < 9;i++) {
+      h_energy_virial_prev.vir[i] = h_energy_virial->vir[i];
+    }
+  }
+
+  if (prev_calc_energy) {
+    h_energy_virial_prev.energy_vdw  = h_energy_virial->energy_vdw;
+    h_energy_virial_prev.energy_elec = h_energy_virial->energy_elec;
+    h_energy_virial_prev.energy_excl = h_energy_virial->energy_excl;
+  }
+
+  *energy_vdw = h_energy_virial_prev.energy_vdw;
+  *energy_elec = h_energy_virial_prev.energy_elec;
+  *energy_excl = h_energy_virial_prev.energy_excl;
   for (int i=0;i < 9;i++) {
-    vir[i] = h_energy_virial->vir[i];
+    vir[i] = h_energy_virial_prev.vir[i];
   }
 
 }

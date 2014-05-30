@@ -115,6 +115,9 @@ private:
   DirectSettings_t *h_setup;
   DirectEnergyVirial_t *h_energy_virial;
 
+  // We save previous calculated values of energies / virial here
+  DirectEnergyVirial_t h_energy_virial_prev;
+
   void setup_ewald_force(CT h);
   void set_elec_model(int elec_model, CT h=0.01);
   void update_setup();
