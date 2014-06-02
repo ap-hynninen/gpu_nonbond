@@ -37,8 +37,10 @@ else
 LFLAGS = -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcufft -lcuda -lstdc++.6 -lnvToolsExt
 endif
 
-#CUDAARCH = -gencode arch=compute_20,code=sm_20 -gencode arch=compute_35,code=sm_35
-CUDAARCH = -arch=compute_30
+GENCODE_SM20  := -gencode arch=compute_20,code=sm_20
+GENCODE_SM30  := -gencode arch=compute_30,code=sm_30
+GENCODE_SM35  := -gencode arch=compute_35,code=sm_35
+GENCODE_FLAGS := $(GENCODE_SM20) $(GENCODE_SM30) $(GENCODE_SM35)
 
 all: gpu_direct gpu_bonded gpu_recip gpu_const gpu_dyna
 
@@ -70,7 +72,7 @@ depend:
 	makedepend $(SRC)
 
 %.o : %.cu
-	nvcc -c -O3 $(CUDAARCH) -lineinfo -fmad=true -use_fast_math -D$(DEFS) $<
+	nvcc -c -O3 $(GENCODE_FLAGS) -lineinfo -fmad=true -use_fast_math -D$(DEFS) $<
 
 %.o : %.cpp
 	$(CC) -c -O3 -std=c++11 -D$(DEFS) $<
