@@ -1,5 +1,3 @@
-#ifdef USE_MPI
-
 #include <mpi.h>
 #include <iostream>
 #include "mpi_utils.h"
@@ -17,5 +15,3 @@ void start_mpi(int argc, char *argv[], int &numnode, int &mynode) {
 void stop_mpi() {
   MPICheck(MPI_Finalize());
 }
-
-#endif // USE_MPI

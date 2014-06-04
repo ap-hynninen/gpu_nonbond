@@ -25,6 +25,10 @@ struct DirectEnergyVirial_t {
   double sforcex[27];
   double sforcey[27];
   double sforcez[27];
+
+#ifdef USE_NEW_KERNEL
+  int ientry_ind;
+#endif
 };
 
 struct DirectSettings_t {

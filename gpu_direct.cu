@@ -2,9 +2,6 @@
 #include <fstream>
 #include <cuda.h>
 #include "cuda_utils.h"
-#ifdef USE_MPI
-#include "mpi_utils.h"
-#endif
 #include "XYZQ.h"
 #include "Force.h"
 #include "NeighborList.h"
@@ -18,19 +15,11 @@ int mynode = 0;
 
 int main(int argc, char *argv[]) {
 
-#ifdef USE_MPI
-  start_mpi(argc, argv, numnode, mynode);
-#endif
-
   start_gpu(numnode, mynode);
   
   test();
 
   stop_gpu();
-
-#ifdef USE_MPI
-  stop_mpi();
-#endif
 
   return 0;
 }

@@ -6,6 +6,7 @@
 #include "gpu_utils.h"
 #include "cuda_utils.h"
 #include "NeighborList.h"
+#define USE_NEW_KERNEL
 #include "DirectForce.h"
 
 static __constant__ const float ccelec = 332.0716;
@@ -569,6 +570,321 @@ __global__ void calc_virial_kernel(const int ncoord, const float4* __restrict__ 
 
 }
 
+#ifdef USE_NEW_KERNEL
+
+//
+// Nonbonded force kernel
+//
+template <typename AT, typename CT, int tilesize, int vdw_model, int elec_model,
+	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
+__global__ void calc_force_kernel(const int base,
+				  const int n_ientry, const ientry_t* __restrict__ ientry,
+				  const int* __restrict__ tile_indj,
+				  const tile_excl_t<tilesize>* __restrict__ tile_excl,
+				  const int stride,
+				  const float* __restrict__ vdwparam, const int nvdwparam,
+				  const float4* __restrict__ xyzq, const int* __restrict__ vdwtype,
+				  AT* __restrict__ force) {
+
+  // Pre-computed constants
+  const int num_excl = ((tilesize*tilesize-1)/32 + 1);
+  const int num_thread_per_excl = (32/num_excl);
+
+  //
+  // Shared data, common for the entire block
+  //
+  extern __shared__ char shmem[];
+  
+  // Warp index (0...warpsize-1)
+  const int wid = threadIdx.x % warpsize;
+
+  // Load index (0...15 or 0...31)
+  const int lid = (tilesize == 16) ? (wid % tilesize) : wid;
+
+  int shmem_pos = 0;
+  //
+  // Shared memory requirements:
+  // sh_xi, sh_yi, sh_zi, sh_qi: (blockDim.x/warpsize)*tilesize*sizeof(float)
+  // sh_vdwtypei               : (blockDim.x/warpsize)*tilesize*sizeof(int)
+  // sh_ientry_ind             : (blockDim.x/warpsize)*sizeof(int)
+  // sh_fix, sh_fiy, sh_fiz    : (blockDim.x/warpsize)*warpsize*sizeof(AT)
+  // sh_vdwparam               : nvdwparam*sizeof(float)
+  //
+  // (x_i, y_i, z_i, q_i, vdwtype_i) are private to each warp
+  // (fix, fiy, fiz) are private for each warp
+  // vdwparam_sh is for the entire thread block
+#if __CUDA_ARCH__ < 300
+  float *sh_xi = (float *)&shmem[shmem_pos + (threadIdx.x/warpsize)*tilesize*sizeof(float)];
+  shmem_pos += (blockDim.x/warpsize)*tilesize*sizeof(float);
+  float *sh_yi = (float *)&shmem[shmem_pos + (threadIdx.x/warpsize)*tilesize*sizeof(float)];
+  shmem_pos += (blockDim.x/warpsize)*tilesize*sizeof(float);
+  float *sh_zi = (float *)&shmem[shmem_pos + (threadIdx.x/warpsize)*tilesize*sizeof(float)];
+  shmem_pos += (blockDim.x/warpsize)*tilesize*sizeof(float);
+  float *sh_qi = (float *)&shmem[shmem_pos + (threadIdx.x/warpsize)*tilesize*sizeof(float)];
+  shmem_pos += (blockDim.x/warpsize)*tilesize*sizeof(float);
+  int *sh_vdwtypei = (int *)&shmem[shmem_pos + (threadIdx.x/warpsize)*tilesize*sizeof(int)];
+  shmem_pos += (blockDim.x/warpsize)*tilesize*sizeof(int);
+  volatile int *sh_ientry_ind = (int *)&shmem[shmem_pos + (threadIdx.x/warpsize)*sizeof(int)];
+  shmem_pos += (blockDim.x/warpsize)*sizeof(int);
+#endif
+
+  volatile AT *sh_fix = (AT *)&shmem[shmem_pos + (threadIdx.x/warpsize)*warpsize*sizeof(AT)];
+  shmem_pos += (blockDim.x/warpsize)*warpsize*sizeof(AT);
+  volatile AT *sh_fiy = (AT *)&shmem[shmem_pos + (threadIdx.x/warpsize)*warpsize*sizeof(AT)];
+  shmem_pos += (blockDim.x/warpsize)*warpsize*sizeof(AT);
+  volatile AT *sh_fiz = (AT *)&shmem[shmem_pos + (threadIdx.x/warpsize)*warpsize*sizeof(AT)];
+  shmem_pos += (blockDim.x/warpsize)*warpsize*sizeof(AT);
+
+  float *sh_vdwparam;
+  if (!tex_vdwparam) {
+    sh_vdwparam = (float *)&shmem[shmem_pos];
+    shmem_pos += nvdwparam*sizeof(float);
+  }
+
+  if (!tex_vdwparam) {
+    // Copy vdwparam to shared memory
+    for (int i=threadIdx.x;i < nvdwparam;i+=blockDim.x)
+      sh_vdwparam[i] = vdwparam[i];
+    __syncthreads();
+  }
+
+  double vdwpotl;
+  double coulpotl;
+  if (calc_energy) {
+    vdwpotl = 0.0;
+    coulpotl = 0.0;
+  }
+
+  // Get next ientry_ind
+  int ientry_ind;
+  if (wid == 0) ientry_ind = atomicAdd(&d_energy_virial.ientry_ind, 1);
+#if __CUDA_ARCH__ >= 300
+  ientry_ind = __shfl(ientry_ind, 0);
+#else
+  if (wid == 0) sh_ientry_ind[0] = ientry_ind;
+  ientry_ind = sh_ientry_ind[0];
+#endif
+
+  while (ientry_ind < n_ientry) {
+
+    int indi, ish, startj, endj;
+    indi   = ientry[ientry_ind].indi;
+    ish    = ientry[ientry_ind].ish;
+    startj = ientry[ientry_ind].startj;
+    endj   = ientry[ientry_ind].endj;
+
+    // Calculate shift for i-atom
+    // ish = 0...26
+    int ish_tmp = ish;
+    float shz = (ish_tmp/9 - 1)*d_setup.boxz;
+    ish_tmp -= (ish_tmp/9)*9;
+    float shy = (ish_tmp/3 - 1)*d_setup.boxy;
+    ish_tmp -= (ish_tmp/3)*3;
+    float shx = (ish_tmp - 1)*d_setup.boxx;
+
+    // Load i-atom data to shared memory (and shift coordinates)
+    float4 xyzq_tmp = xyzq[indi + lid];
+#if __CUDA_ARCH__ >= 300
+    float xi = xyzq_tmp.x + shx;
+    float yi = xyzq_tmp.y + shy;
+    float zi = xyzq_tmp.z + shz;
+    float qi = xyzq_tmp.w*ccelec;
+    int vdwtypei = vdwtype[indi + lid];
+#else
+    sh_xi[lid] = xyzq_tmp.x + shx;
+    sh_yi[lid] = xyzq_tmp.y + shy;
+    sh_zi[lid] = xyzq_tmp.z + shz;
+    sh_qi[lid] = xyzq_tmp.w*ccelec;
+    sh_vdwtypei[lid] = vdwtype[indi + lid];
+#endif
+    
+    sh_fix[wid] = (AT)0;
+    sh_fiy[wid] = (AT)0;
+    sh_fiz[wid] = (AT)0;
+
+    for (int jtile=startj;jtile <= endj;jtile++) {
+
+      // Load j-atom starting index and exclusion mask
+      unsigned int excl;
+      if (tilesize == 16) {
+	// For 16x16 tile, the exclusion mask per is 8 bits per thread:
+	// NUM_THREAD_PER_EXCL = 4
+	excl = tile_excl[jtile].excl[wid/num_thread_per_excl] >> 
+	  ((wid % num_thread_per_excl)*num_excl);
+      } else {
+	excl = tile_excl[jtile].excl[wid];
+      }
+      int indj = tile_indj[jtile];
+      
+      // Skip empty tile
+      if (__all(~excl == 0)) continue;
+
+      float4 xyzq_j = xyzq[indj + lid];
+      int ja = vdwtype[indj + lid];
+
+      // Clear j forces
+      AT fjx = (AT)0;
+      AT fjy = (AT)0;
+      AT fjz = (AT)0;
+      
+      for (int t=0;t < num_excl;t++) {
+	
+	int ii;
+	if (tilesize == 16) {
+	  ii = (wid + t*2 + (wid/tilesize)*(tilesize-1)) % tilesize;
+	} else {
+	  ii = ((wid + t) % tilesize);
+	}
+	
+#if __CUDA_ARCH__ >= 300
+	float dx = __shfl(xi, ii) - xyzq_j.x;
+	float dy = __shfl(yi, ii) - xyzq_j.y;
+	float dz = __shfl(zi, ii) - xyzq_j.z;
+#else
+	float dx = sh_xi[ii] - xyzq_j.x;
+	float dy = sh_yi[ii] - xyzq_j.y;
+	float dz = sh_zi[ii] - xyzq_j.z;
+#endif
+	
+	float r2 = dx*dx + dy*dy + dz*dz;
+
+#if __CUDA_ARCH__ >= 300
+	float qq = __shfl(qi, ii)*xyzq_j.w;
+#else
+	float qq = sh_qi[ii]*xyzq_j.w;
+#endif
+
+#if __CUDA_ARCH__ >= 300
+	int ia = __shfl(vdwtypei, ii);
+#else
+	int ia = sh_vdwtypei[ii];
+#endif
+
+	if (!(excl & 1) && r2 < d_setup.roff2) {
+
+	  float rinv = rsqrtf(r2);
+	  float r = r2*rinv;
+	
+	  float fij_elec = pair_elec_force<elec_model, calc_energy>(r2, r, rinv, qq, coulpotl);
+	
+	  int aa = (ja > ia) ? ja : ia;      // aa = max(ja,ia)
+	  int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
+	
+	  float c6, c12;
+	  if (tex_vdwparam) {
+	    //c6 = __ldg(&vdwparam[ivdw]);
+	    //c12 = __ldg(&vdwparam[ivdw+1]);
+	    float2 c6c12 = tex1Dfetch(vdwparam_texref, ivdw);
+	    c6  = c6c12.x;
+	    c12 = c6c12.y;
+	  } else {
+	    c6 = sh_vdwparam[ivdw];
+	    c12 = sh_vdwparam[ivdw+1];
+	  }
+	
+	  float rinv2 = rinv*rinv;
+	  float fij_vdw = pair_vdw_force<vdw_model, calc_energy>(r2, r, rinv, rinv2,
+								 c6, c12, vdwpotl);
+	
+	  float fij = (fij_vdw - fij_elec)*rinv*rinv;
+
+	  AT fxij;
+	  AT fyij;
+	  AT fzij;
+	  calc_component_force<AT, CT>(fij, dx, dy, dz, fxij, fyij, fzij);
+	
+	  fjx -= fxij;
+	  fjy -= fyij;
+	  fjz -= fzij;
+	
+	  if (tilesize == 16) {
+	    // We need to re-calculate ii because ii must be warp sized in order to
+	    // prevent race condition
+	    int tmp = (wid + t*2) % 16 + (wid/16)*31;
+	    ii = tilesize*(threadIdx.x/warpsize)*2 + (tmp + (tmp/32)*16) % 32;
+	  }
+
+	  sh_fix[ii] += fxij;
+	  sh_fiy[ii] += fyij;
+	  sh_fiz[ii] += fzij;
+	} // if (!(excl & 1) && r2 < d_setup.roff2)
+
+	// Advance exclusion mask
+	excl >>= 1;
+      }
+
+      // Dump register forces (fjx, fjy, fjz)
+      write_force<AT>(fjx, fjy, fjz, indj + lid, stride, force);
+    }
+
+    // Dump shared memory force (fi)
+    // NOTE: no __syncthreads() required here because sh_fix is "volatile"
+    write_force<AT>(sh_fix[wid], sh_fiy[wid], sh_fiz[wid], indi + lid, stride, force);
+
+    if (calc_virial) {
+      // Virial is calculated from (sh_fix[], sh_fiy[], sh_fiz[])
+      // Variable "ish" depends on warp => Reduce within warp
+      
+      // Convert into double
+      volatile double *sh_sfix = (double *)sh_fix;
+      volatile double *sh_sfiy = (double *)sh_fiy;
+      volatile double *sh_sfiz = (double *)sh_fiz;
+
+      sh_sfix[wid] = ((double)sh_fix[wid])*INV_FORCE_SCALE;
+      sh_sfiy[wid] = ((double)sh_fiy[wid])*INV_FORCE_SCALE;
+      sh_sfiz[wid] = ((double)sh_fiz[wid])*INV_FORCE_SCALE;
+      
+      for (int d=16;d >= 1;d/=2) {
+	if (wid < d) {
+	  sh_sfix[wid] += sh_sfix[wid + d];
+	  sh_sfiy[wid] += sh_sfiy[wid + d];
+	  sh_sfiz[wid] += sh_sfiz[wid + d];
+	}
+      }
+      if (wid == 0) {
+	atomicAdd(&d_energy_virial.sforcex[ish], sh_sfix[0]);
+	atomicAdd(&d_energy_virial.sforcey[ish], sh_sfiy[0]);
+	atomicAdd(&d_energy_virial.sforcez[ish], sh_sfiz[0]);
+      }
+    }
+
+    if (wid == 0) ientry_ind = atomicAdd(&d_energy_virial.ientry_ind, 1);
+#if __CUDA_ARCH__ >= 300
+    ientry_ind = __shfl(ientry_ind, 0);
+#else
+    if (wid == 0) sh_ientry_ind[0] = ientry_ind;
+    ientry_ind = sh_ientry_ind[0];
+#endif
+
+  }
+
+  if (calc_energy) {
+    // Reduce energies across the entire thread block
+    // Shared memory required:
+    // blockDim.x*sizeof(double)*2
+    __syncthreads();
+    double2* sh_pot = (double2 *)(shmem);
+    sh_pot[threadIdx.x].x = vdwpotl;
+    sh_pot[threadIdx.x].y = coulpotl;
+    __syncthreads();
+    for (int i=1;i < blockDim.x;i *= 2) {
+      int pos = threadIdx.x + i;
+      double vdwpot_val  = (pos < blockDim.x) ? sh_pot[pos].x : 0.0;
+      double coulpot_val = (pos < blockDim.x) ? sh_pot[pos].y : 0.0;
+      __syncthreads();
+      sh_pot[threadIdx.x].x += vdwpot_val;
+      sh_pot[threadIdx.x].y += coulpot_val;
+      __syncthreads();
+    }
+    if (threadIdx.x == 0) {
+      atomicAdd(&d_energy_virial.energy_vdw,  sh_pot[0].x);
+      atomicAdd(&d_energy_virial.energy_elec, sh_pot[0].y);
+    }
+  }
+
+}
+
+#else
 //
 // Nonbonded force kernel
 //
@@ -686,9 +1002,8 @@ __global__ void calc_force_kernel(const int base,
     // Copy vdwparam to shared memory
     for (int i=threadIdx.x;i < nvdwparam;i+=blockDim.x)
       sh_vdwparam[i] = vdwparam[i];
+    __syncthreads();
   }
-
-  __syncthreads();
 
   double vdwpotl;
   double coulpotl;
@@ -782,7 +1097,7 @@ __global__ void calc_force_kernel(const int base,
 							       c6, c12, vdwpotl);
 	
 	float fij = (fij_vdw - fij_elec)*rinv*rinv;
-	
+
 	AT fxij;
 	AT fyij;
 	AT fzij;
@@ -868,6 +1183,8 @@ __global__ void calc_force_kernel(const int base,
   }
 
 }
+
+#endif
 
 //
 // Sets vdwtype from a global list
@@ -1770,13 +2087,23 @@ void DirectForce<AT, CT>::calc_force(const float4 *xyzq,
   } else {
     nwarp = 4;
   }
+#ifdef USE_NEW_KERNEL
+  int nthread = 256;
+  int nblock_tot = 16;
+#else
   int nthread = warpsize*nwarp;
   int nblock_tot = (nlist->n_ientry-1)/(nthread/warpsize)+1;
+#endif
 
   int shmem_size = 0;
   // (sh_xi, sh_yi, sh_zi, sh_qi, sh_vdwtypei)
   if (get_cuda_arch() < 300)
-    shmem_size += (nthread/warpsize)*tilesize*(sizeof(float)*4 + sizeof(int));
+    shmem_size += (nthread/warpsize)*tilesize*(sizeof(float)*4 + sizeof(int)) +
+#ifdef USE_NEW_KERNEL
+      (nthread/warpsize)*sizeof(int);
+#else
+      0;
+#endif
   // (sh_fix, sh_fiy, sh_fiz)
   shmem_size += (nthread/warpsize)*warpsize*sizeof(AT)*3;
   // If no texture fetch for vdwparam:
@@ -2271,6 +2598,7 @@ void DirectForce<AT, CT>::clear_energy_virial(cudaStream_t stream) {
     h_energy_virial->sforcey[i] = 0.0;
     h_energy_virial->sforcez[i] = 0.0;
   }
+  h_energy_virial->ientry_ind = 0;
   cudaCheck(cudaMemcpyToSymbolAsync(d_energy_virial, h_energy_virial, sizeof(DirectEnergyVirial_t),
 				    0, cudaMemcpyHostToDevice, stream));
 }

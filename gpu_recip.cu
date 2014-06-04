@@ -5,9 +5,9 @@
 #include "Bspline.h"
 #include "Grid.h"
 #include "Force.h"
-#ifdef USE_MPI
-#include "mpi_utils.h"
-#endif
+//#ifdef USE_MPI
+//#include "mpi_utils.h"
+//#endif
 #include "MultiNodeMatrix3d.h"
 
 void test4();
@@ -18,9 +18,9 @@ int mynode = 0;
 
 int main(int argc, char *argv[]) {
 
-#ifdef USE_MPI
-  start_mpi(argc, argv, numnode, mynode);
-#endif
+  //#ifdef USE_MPI
+  //  start_mpi(argc, argv, numnode, mynode);
+  //#endif
 
   start_gpu(numnode, mynode);
 
@@ -57,9 +57,9 @@ int main(int argc, char *argv[]) {
 
   test6();
 
-#ifdef USE_MPI
-  stop_mpi();
-#endif
+  //#ifdef USE_MPI
+  //  stop_mpi();
+  //#endif
 
   return 0;
 }

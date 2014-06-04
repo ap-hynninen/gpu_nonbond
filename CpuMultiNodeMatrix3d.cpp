@@ -1,12 +1,9 @@
-#ifdef USE_MPI
-#include <mpi.h>
-#endif
 #include <iostream>
 #include <cassert>
 #include <stdlib.h>
 #include "mpi_utils.h"
-#include "cuda_utils.h"
-#include "MultiNodeMatrix3d.h"
+#include "cpu_utils.h"
+#include "CpuMultiNodeMatrix3d.h"
 
 #define max(a,b) ((a) > (b) ? (a) : (b))
 #define min(a,b) ((a) < (b) ? (a) : (b))
@@ -48,20 +45,16 @@ int get_nz(const int nztot, const int nnodex, const int nnodey, const int nnodez
 }
 
 template <typename T>
-MultiNodeMatrix3d<T>::MultiNodeMatrix3d(const int nxtot, const int nytot, const int nztot,
-					const int nnodex, const int nnodey, const int nnodez,
-					const int mynode,
-					const char *filename) : 
+CpuMultiNodeMatrix3d<T>::CpuMultiNodeMatrix3d(const int nxtot, const int nytot, const int nztot,
+					      const int nnodex, const int nnodey, const int nnodez,
+					      const int mynode,
+					      const char *filename) : 
   nxtot(nxtot), nytot(nytot), nztot(nztot), 
   xsizetot(nxtot), ysizetot(nytot), zsizetot(nztot),
   nnodex(nnodex), nnodey(nnodey), nnodez(nnodez), mynode(mynode), nnode(nnodex*nnodey*nnodez),
-  Matrix3d<T>(get_nx(nxtot, nnodex, nnodey, nnodez, mynode), 
-	      get_ny(nytot, nnodex, nnodey, nnodez, mynode),
-	      get_nz(nztot, nnodex, nnodey, nnodez, mynode)) {
-
-  //  std::cout << get_nx(nxtot, nnodex, nnodey, nnodez, mynode) << " " << this->nx << std::endl;
-  //  std::cout << get_ny(nytot, nnodex, nnodey, nnodez, mynode) << " " << this->ny << std::endl;
-  //  std::cout << get_nz(nztot, nnodex, nnodey, nnodez, mynode) << " " << this->nz << std::endl;
+  CpuMatrix3d<T>(get_nx(nxtot, nnodex, nnodey, nnodez, mynode), 
+		 get_ny(nytot, nnodex, nnodey, nnodez, mynode),
+		 get_nz(nztot, nnodex, nnodey, nnodez, mynode)) {
 
   x0 = new int[nnode];
   x1 = new int[nnode];
@@ -102,8 +95,11 @@ MultiNodeMatrix3d<T>::MultiNodeMatrix3d(const int nxtot, const int nytot, const 
 
 }
 
+//
+// Class destructor
+//
 template <typename T>
-MultiNodeMatrix3d<T>::~MultiNodeMatrix3d() {
+CpuMultiNodeMatrix3d<T>::~CpuMultiNodeMatrix3d() {
   delete [] x0;
   delete [] x1;
   delete [] y0;
@@ -123,14 +119,14 @@ MultiNodeMatrix3d<T>::~MultiNodeMatrix3d() {
 // Prints matrix size on screen
 //
 template <typename T>
-void MultiNodeMatrix3d<T>::print_info() {
+void CpuMultiNodeMatrix3d<T>::print_info() {
   std::cout << "mynode = " << mynode << std::endl;
   std::cout << "nxtot nytot nztot          = " << nxtot << " "<< nytot << " "<< nztot << std::endl;
-  std::cout << "xsizetot ysizetot zsizetot = " << xsizetot << " "<< ysizetot << " "<< zsizetot << std::endl;  
+  std::cout << "xsizetot ysizetot zsizetot = " << xsizetot << " "<< ysizetot << " "<<zsizetot<<std::endl;
   std::cout << "x0...x1 = " << x0[mynode] << " ... " << x1[mynode] << std::endl;
   std::cout << "y0...y1 = " << y0[mynode] << " ... " << y1[mynode] << std::endl;
   std::cout << "z0...z1 = " << z0[mynode] << " ... " << z1[mynode] << std::endl;
-  Matrix3d<T>::print_info();
+  CpuMatrix3d<T>::print_info();
 }
 
 //
@@ -138,7 +134,7 @@ void MultiNodeMatrix3d<T>::print_info() {
 // NOTE: Comparison is done in double precision
 //
 template <typename T>
-bool MultiNodeMatrix3d<T>::compare(Matrix3d<T>* mat, const double tol, double& max_diff) {
+bool CpuMultiNodeMatrix3d<T>::compare(CpuMatrix3d<T>* mat, const double tol, double& max_diff) {
   assert(mat->get_nx() == nxtot);
   assert(mat->get_ny() == nytot);
   assert(mat->get_nz() == nztot);
@@ -146,29 +142,18 @@ bool MultiNodeMatrix3d<T>::compare(Matrix3d<T>* mat, const double tol, double& m
   int res = (int)false;
   int loc_res = (int)false;
 
-  //  if (mynode == 1) {
-    Matrix3d<T> loc(x1[mynode]-x0[mynode]+1,
-		    y1[mynode]-y0[mynode]+1,
-		    z1[mynode]-z0[mynode]+1);
+  CpuMatrix3d<T> loc(x1[mynode]-x0[mynode]+1,
+		     y1[mynode]-y0[mynode]+1,
+		     z1[mynode]-z0[mynode]+1);
+  
+  mat->copy(x0[mynode], y0[mynode], z0[mynode],
+	    0, 0, 0,
+	    x1[mynode]-x0[mynode]+1, y1[mynode]-y0[mynode]+1, z1[mynode]-z0[mynode]+1,
+	    &loc);
 
-    mat->copy_host(x0[mynode], y0[mynode], z0[mynode],
-		   0, 0, 0,
-		   x1[mynode]-x0[mynode]+1, y1[mynode]-y0[mynode]+1, z1[mynode]-z0[mynode]+1,
-		   &loc);
+  loc_res = (int)CpuMatrix3d<T>::compare(&loc, tol, max_diff);
 
-    //    std::cout << "in multinode:" << std::endl;
-    //    mat->print(0,0,0,0,1,1);
-    //    loc.print(0,0,0,0,1,1);
-
-    loc_res = (int)Matrix3d<T>::compare(&loc, tol, max_diff);
-    //  }
-
-#ifdef USE_MPI
   MPICheck(MPI_Allreduce(&loc_res, &res, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD));
-#else
-  std::cerr << "MultiNodeMatrix3d::transpose_xyz_yzx, MPI required for now" << std::endl;
-  exit(1);
-#endif
 
   return (bool)res;
 }
@@ -195,7 +180,7 @@ bool get_vol_overlap(int x0_a, int x1_a, int y0_a, int y1_a, int z0_a, int z1_a,
 // Setups a transpose for multi-node 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
 //
 template <typename T>
-void MultiNodeMatrix3d<T>::setup_transpose_xyz_yzx(MultiNodeMatrix3d<T>* mat) {
+void CpuMultiNodeMatrix3d<T>::setup_transpose_xyz_yzx(CpuMultiNodeMatrix3d<T>* mat) {
 
   mat_yzx = mat;
 
@@ -256,9 +241,7 @@ void MultiNodeMatrix3d<T>::setup_transpose_xyz_yzx(MultiNodeMatrix3d<T>* mat) {
       recv[nrecv].ysize = recv[nrecv].y1-recv[nrecv].y0+1;
       recv[nrecv].len = (recv[nrecv].x1-recv[nrecv].x0+1)*(recv[nrecv].y1-recv[nrecv].y0+1)*
 	(recv[nrecv].z1-recv[nrecv].z0+1);
-      //      recv[nrecv].h_data = new T[recv[nrecv].len];
-      allocate_host<T>(&recv[nrecv].h_data, recv[nrecv].len);
-      allocate<T>(&recv[nrecv].d_data, recv[nrecv].len);
+      recv[nrecv].data = new T[recv[nrecv].len];
       recv[nrecv].node = inode;
       nrecv++;
     }
@@ -294,45 +277,22 @@ void MultiNodeMatrix3d<T>::setup_transpose_xyz_yzx(MultiNodeMatrix3d<T>* mat) {
 	send[nsend].ysize = send[nsend].y1-send[nsend].y0+1;
 	send[nsend].len = (send[nsend].x1-send[nsend].x0+1)*(send[nsend].y1-send[nsend].y0+1)*
 	  (send[nsend].z1-send[nsend].z0+1);
-	//	send[nsend].h_data = new T[send[nsend].len];
-	allocate_host<T>(&send[nsend].h_data, send[nsend].len);
-	send[nsend].d_data = NULL;
+	send[nsend].data = new T[send[nsend].len];
 	send[nsend].node = inode;
 	nsend++;
       }
     }
   }
 
-  /*
-  std::cout << "mynode " << mynode << std::endl;
-  std::cout << "recv:" << std::endl;
-  for (int i=0;i < nrecv;i++) {
-    std::cout << recv[i].node<<std::endl;
-    std::cout << "x0...x1 = " << recv[i].x0 << " ... " << recv[i].x1 << std::endl;
-    std::cout << "y0...y1 = " << recv[i].y0 << " ... " << recv[i].y1 << std::endl;
-    std::cout << "z0...z1 = " << recv[i].z0 << " ... " << recv[i].z1 << std::endl;
-  }
-  
-  std::cout << "send: nsend = " << nsend << std::endl;
-  for (int i=0;i < nsend;i++) {
-    std::cout << send[i].node<<std::endl;
-    std::cout << "x0...x1 = " << send[i].x0 << " ... " << send[i].x1 << std::endl;
-    std::cout << "y0...y1 = " << send[i].y0 << " ... " << send[i].y1 << std::endl;
-    std::cout << "z0...z1 = " << send[i].z0 << " ... " << send[i].z1 << std::endl;
-  }
-  */
-
-#ifdef USE_MPI
   if (nrecv > 0) {
-    recv_req = (void *)(new MPI_Request[nrecv]);
-    recv_stat = (void *)(new MPI_Status[nrecv]);
+    recv_req = new MPI_Request[nrecv];
+    recv_stat = new MPI_Status[nrecv];
   }
 
   if (nsend > 0) {
-    send_req = (void *)(new MPI_Request[nsend]);
-    send_stat = (void *)(new MPI_Status[nsend]);
+    send_req = new MPI_Request[nsend];
+    send_stat = new MPI_Status[nsend];
   }
-#endif
 
 }
 
@@ -340,36 +300,22 @@ void MultiNodeMatrix3d<T>::setup_transpose_xyz_yzx(MultiNodeMatrix3d<T>* mat) {
 // Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
 //
 template <typename T>
-void MultiNodeMatrix3d<T>::transpose_xyz_yzx() {
+void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx() {
 
   int MPI_tag=1;
 
   // Post receives
   if (nrecv > 0) {
     for (int i=0;i < nrecv;i++) {
-#ifdef USE_MPI
-      MPICheck(MPI_Irecv(recv[i].h_data, sizeof(T)*recv[i].len, MPI_BYTE,
+      MPICheck(MPI_Irecv(recv[i].data, sizeof(T)*recv[i].len, MPI_BYTE,
 			 recv[i].node, MPI_tag, MPI_COMM_WORLD, &((MPI_Request *)recv_req)[i]));
-#else
-      std::cerr << "MultiNodeMatrix3d::transpose_xyz_yzx, MPI required for now" << std::endl;
-      exit(1);
-#endif
     }
   }
 
   // Copy data to host
-#ifdef USE_MPI
   if (nsend > 0) {
     for (int i=0;i < nsend;i++) {
-      /*
-      if (mynode == 0) {
-	std::cout << "send src: "<< send[i].x0 - x0[mynode] << " " << send[i].y0 - y0[mynode] << " " << send[i].z0 - z0[mynode] << std::endl;
-	std::cout << this->xsize << " " << this->ysize << std::endl;
-	std::cout << send[i].x1 - send[i].x0 << " " << send[i].y1 - send[i].y0 << " " << send[i].z1 - send[i].z0 << std::endl;
-	std::cout << send[i].xsize << " " << send[i].ysize << std::endl;
-      }
-      */
-      copy3D_DtoH<T>(this->data, send[i].h_data,
+      copy3D_HtoH<T>(this->data, send[i].data,
 		     send[i].x0 - x0[mynode],
 		     send[i].y0 - y0[mynode],
 		     send[i].z0 - z0[mynode],
@@ -379,30 +325,15 @@ void MultiNodeMatrix3d<T>::transpose_xyz_yzx() {
 		     send[i].y1 - send[i].y0 + 1,
 		     send[i].z1 - send[i].z0 + 1,
 		     send[i].xsize, send[i].ysize);
-      /*
-      if (mynode == 0) {
-	std::cout << "this->data[8]:" << std::endl;
-	this->print(8,8,0,0,0,0);
-	std::cout << "h_data[0]:" << std::endl;
-	std::cout << send[i].h_data[0] << std::endl;
-      }
-      */
-
     }
   }
-#endif
 
   // Post sends
   if (nsend > 0) {
     for (int i=0;i < nsend;i++) {
-#ifdef USE_MPI
       // Send via MPI
-      MPICheck(MPI_Isend(send[i].h_data, sizeof(T)*send[i].len, MPI_BYTE,
+      MPICheck(MPI_Isend(send[i].data, sizeof(T)*send[i].len, MPI_BYTE,
 			 send[i].node, MPI_tag, MPI_COMM_WORLD, &((MPI_Request *)send_req)[i]));
-#else
-      std::cerr << "MultiNodeMatrix3d::transpose_xyz_yzx, MPI required for now" << std::endl;
-      exit(1);
-#endif
     }
   }
 
@@ -410,108 +341,48 @@ void MultiNodeMatrix3d<T>::transpose_xyz_yzx() {
   // (loc_x0...loc_x1) x (loc_y0...loc_y1) x (loc_z0...loc_z1)
 
   if (loc_transpose) {
-    /*
-    std::cout << "mynode = " << mynode << std::endl;
-    std::cout << "loc_x =  " << loc_x0 << " ... " << loc_x1 << std::endl;
-    std::cout << "loc_y =  " << loc_y0 << " ... " << loc_y1 << std::endl;
-    std::cout << "loc_z =  " << loc_z0 << " ... " << loc_z1 << std::endl;
-    std::cout << "    x =  " << this->x0[mynode] << " ... " << this->x1[mynode] << std::endl;
-    std::cout << "    y =  " << this->y0[mynode] << " ... " << this->y1[mynode] << std::endl;
-    std::cout << "    z =  " << this->z0[mynode] << " ... " << this->z1[mynode] << std::endl;
-    std::cout << "mat x = " << mat_yzx->x0[mynode] << " ... " << mat_yzx->x1[mynode] << std::endl;
-    std::cout << "mat y = " << mat_yzx->y0[mynode] << " ... " << mat_yzx->y1[mynode] << std::endl;
-    std::cout << "mat z = " << mat_yzx->z0[mynode] << " ... " << mat_yzx->z1[mynode] << std::endl;
-    */
-
-    Matrix3d<T>::transpose_xyz_yzx(loc_x0 - this->x0[mynode],
-				   loc_y0 - this->y0[mynode],
-				   loc_z0 - this->z0[mynode],
-				   loc_y0 - mat_yzx->x0[mynode],
-				   loc_z0 - mat_yzx->y0[mynode],
-				   loc_x0 - mat_yzx->z0[mynode],
-				   loc_x1-loc_x0+1,
-				   loc_y1-loc_y0+1,
-				   loc_z1-loc_z0+1,
-				   mat_yzx);
+    CpuMatrix3d<T>::transpose_xyz_yzx_ref(loc_x0 - this->x0[mynode],
+					  loc_y0 - this->y0[mynode],
+					  loc_z0 - this->z0[mynode],
+					  loc_y0 - mat_yzx->x0[mynode],
+					  loc_z0 - mat_yzx->y0[mynode],
+					  loc_x0 - mat_yzx->z0[mynode],
+					  loc_x1-loc_x0+1,
+					  loc_y1-loc_y0+1,
+					  loc_z1-loc_z0+1,
+					  mat_yzx);
   }
 
   //  MPICheck(MPI_Barrier(MPI_COMM_WORLD));
   //  return;
 
-  // Wait for receives and copy to device memory
+  // Wait for receives
   if (nrecv > 0) {
     for (int i=0;i < nrecv;i++) {
       int k;
-#ifdef USE_MPI
-      //      range_start("MPI_Waitany");
       MPICheck(MPI_Waitany(nrecv, (MPI_Request *)recv_req, &k, (MPI_Status *)recv_stat));
-      //      range_stop();
-#else
-      k = i;
-#endif
 
-      /*
-      if (mynode == 1) {
-      std::cout << "mynode " << mynode << std::endl;
-      std::cout << "mat:  x0...x1 = " << mat_yzx->x0[mynode] << " ... " << mat_yzx->x1[mynode] << std::endl;
-      std::cout << "mat:  y0...y1 = " << mat_yzx->y0[mynode] << " ... " << mat_yzx->y1[mynode] << std::endl;
-      std::cout << "mat:  z0...z1 = " << mat_yzx->z0[mynode] << " ... " << mat_yzx->z1[mynode] << std::endl;
-      std::cout << "recv: x0...x1 = " << recv[k].x0 << " ... " << recv[k].x1 << std::endl;
-      std::cout << "recv: y0...y1 = " << recv[k].y0 << " ... " << recv[k].y1 << std::endl;
-      std::cout << "recv: z0...z1 = " << recv[k].z0 << " ... " << recv[k].z1 << std::endl;
-      }
-      */
+      CpuMatrix3d<T> loc(recv[k].x1-recv[k].x0+1,
+			 recv[k].y1-recv[k].y0+1,
+			 recv[k].z1-recv[k].z0+1,
+			 recv[k].xsize, recv[k].ysize, recv[k].z1-recv[k].z0+1, 
+			 recv[k].data);
 
-      copy3D_HtoD<T>(recv[k].h_data, recv[k].d_data, 0, 0, 0,
-      		     recv[k].xsize, recv[k].ysize,
-		     0,0,0,
-      		     recv[k].x1 - recv[k].x0 + 1,
-      		     recv[k].y1 - recv[k].y0 + 1,
-      		     recv[k].z1 - recv[k].z0 + 1,
-      		     recv[k].xsize, recv[k].ysize);
-
-      Matrix3d<T> loc(recv[k].x1-recv[k].x0+1,
-		      recv[k].y1-recv[k].y0+1,
-		      recv[k].z1-recv[k].z0+1,
-		      recv[k].xsize, recv[k].ysize, recv[k].z1-recv[k].z0+1, 
-		      recv[k].d_data);
-
-      /*
-      if (mynode == 0) {
-	std::cout << "node 0:" << std::endl;
-	Matrix3d<T>::print(32,32,0,0,0,0);
-      }
-
-      if (mynode == 1) {
-	mat_yzx->print(0,0,0,0,0,0);
-	loc.print(0,0,0,0,0,0);
-      }
-
-      if (mynode == 1) {
-	std::cout << "dst: " << recv[k].y0 - mat_yzx->x0[mynode] << " " << recv[k].z0 - mat_yzx->y0[mynode] << " " << recv[k].x0 - mat_yzx->z0[mynode] << std::endl;
-	std::cout << "len: " << recv[k].x1-recv[k].x0+1 << " " << recv[k].y1-recv[k].y0+1 << " " << recv[k].z1-recv[k].z0+1 << std::endl;
-      }
-      */
-
-      loc.transpose_xyz_yzx(0,0,0,
-			    recv[k].y0 - mat_yzx->x0[mynode],
-			    recv[k].z0 - mat_yzx->y0[mynode],
-			    recv[k].x0 - mat_yzx->z0[mynode],
-			    recv[k].x1-recv[k].x0+1,
-			    recv[k].y1-recv[k].y0+1,
-			    recv[k].z1-recv[k].z0+1,
-			    mat_yzx);
-
-      //      if (mynode == 1) mat_yzx->print(0,0,0,0,0,0);
+      loc.transpose_xyz_yzx_ref(0,0,0,
+				recv[k].y0 - mat_yzx->x0[mynode],
+				recv[k].z0 - mat_yzx->y0[mynode],
+				recv[k].x0 - mat_yzx->z0[mynode],
+				recv[k].x1-recv[k].x0+1,
+				recv[k].y1-recv[k].y0+1,
+				recv[k].z1-recv[k].z0+1,
+				mat_yzx);
 
     }
   }
 
   // Wait for sends to finish
   if (nsend > 0) {
-#ifdef USE_MPI
     MPICheck(MPI_Waitall(nsend, (MPI_Request *)send_req, (MPI_Status *)send_stat));
-#endif
   }
 
 }
@@ -520,14 +391,14 @@ void MultiNodeMatrix3d<T>::transpose_xyz_yzx() {
 // Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
 //
 template <typename T>
-void MultiNodeMatrix3d<T>::transpose_xyz_yzx(MultiNodeMatrix3d<T>* mat) {
+void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx(CpuMultiNodeMatrix3d<T>* mat) {
   setup_transpose_xyz_yzx(mat);
   transpose_xyz_yzx();
 }
 
 //
-// Explicit instances of MultiNodeMatrix3d
+// Explicit instances of CpuMultiNodeMatrix3d
 //
-template class MultiNodeMatrix3d<float>;
-//template class MultiNodeMatrix3d<float2>;
-template class MultiNodeMatrix3d<long long int>;
+template class CpuMultiNodeMatrix3d<float>;
+//template class CpuMultiNodeMatrix3d<float2>;
+template class CpuMultiNodeMatrix3d<long long int>;

@@ -4,9 +4,17 @@ OS := $(shell uname -s)
 
 DEFS = DUMMY #USE_MPI
 
+ifeq ($(OS),Linux)
+CCMPI = mpiicc
+CLMPI = mpiicc
+else
+CCMPI = mpic++
+CLMPI = mpic++
+endif
+
 ifeq ($(DEFS),USE_MPI)
-CC = mpiicc
-CL = mpiicc
+CC = CCMPI
+CL = CLMPI
 else
 ifeq ($(OS),Linux)
 CC = icc
@@ -17,17 +25,19 @@ CL = gcc
 endif
 endif
 
-SRC = BondedForce.cu NeighborList.cu Bspline.cu VirialPressure.cu CudaDomdec.cu	XYZQ.cu CudaLeapfrogIntegrator.cu cuda_utils.cu CudaPMEForcefield.cu DirectForce.cu gpu_bonded.cu gpu_const.cu Force.cu	gpu_direct.cu Grid.cu gpu_dyna.cu HoloConst.cu gpu_recip.cu Matrix3d.cu MultiNodeMatrix3d.cpp mpi_utils.cpp CudaDomdecBonded.cu
+SRC = BondedForce.cu NeighborList.cu Bspline.cu VirialPressure.cu CudaDomdec.cu	XYZQ.cu CudaLeapfrogIntegrator.cu cuda_utils.cu CudaPMEForcefield.cu DirectForce.cu gpu_bonded.cu gpu_const.cu Force.cu	gpu_direct.cu Grid.cu gpu_dyna.cu HoloConst.cu gpu_recip.cu Matrix3d.cu MultiNodeMatrix3d.cpp mpi_utils.cpp CudaDomdecBonded.cu cpu_transpose.cpp CpuMultiNodeMatrix3d.cpp CpuMatrix3d.cpp
 
-OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o cuda_utils.o gpu_recip.o mpi_utils.o
+OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o cuda_utils.o gpu_recip.o
 
-OBJS_DIRECT = XYZQ.o Force.o cuda_utils.o mpi_utils.o DirectForce.o NeighborList.o VirialPressure.o BondedForce.o gpu_direct.o
+OBJS_DIRECT = XYZQ.o Force.o cuda_utils.o DirectForce.o NeighborList.o VirialPressure.o BondedForce.o gpu_direct.o
 
 OBJS_BONDED = XYZQ.o Force.o cuda_utils.o VirialPressure.o BondedForce.o gpu_bonded.o
 
 OBJS_CONST = cuda_utils.o gpu_const.o HoloConst.o
 
 OBJS_DYNA = cuda_utils.o gpu_dyna.o Force.o CudaLeapfrogIntegrator.o CudaPMEForcefield.o NeighborList.o DirectForce.o BondedForce.o Grid.o Matrix3d.o XYZQ.o CudaDomdec.o CudaDomdecBonded.o HoloConst.o
+
+OBJS_TRANSPOSE = cpu_transpose.o mpi_utils.o CpuMultiNodeMatrix3d.o CpuMatrix3d.o
 
 CUDAROOT := $(subst /bin/,,$(dir $(shell which nvcc)))
 
@@ -42,7 +52,7 @@ GENCODE_SM30  := -gencode arch=compute_30,code=sm_30
 GENCODE_SM35  := -gencode arch=compute_35,code=sm_35
 GENCODE_FLAGS := $(GENCODE_SM20) $(GENCODE_SM30) $(GENCODE_SM35)
 
-all: gpu_direct gpu_bonded gpu_recip gpu_const gpu_dyna
+all: gpu_direct gpu_bonded gpu_recip gpu_const gpu_dyna cpu_transpose
 
 gpu_recip : $(OBJS_RECIP)
 	$(CL) $(LFLAGS) -o gpu_recip $(OBJS_RECIP)
@@ -59,6 +69,9 @@ gpu_const : $(OBJS_CONST)
 gpu_dyna : $(OBJS_DYNA)
 	$(CL) $(LFLAGS) -o gpu_dyna $(OBJS_DYNA)
 
+cpu_transpose : $(OBJS_TRANSPOSE)
+	$(CCMPI) $(LFLAGS) -o cpu_transpose $(OBJS_TRANSPOSE)
+
 clean: 
 	rm -f *.o
 	rm -f *~
@@ -67,12 +80,22 @@ clean:
 	rm -f gpu_bonded
 	rm -f gpu_const
 	rm -f gpu_dyna
+	rm -f cpu_transpose
 
 depend:
 	makedepend $(SRC)
 
 %.o : %.cu
 	nvcc -c -O3 $(GENCODE_FLAGS) -lineinfo -fmad=true -use_fast_math -D$(DEFS) $<
+
+CpuMultiNodeMatrix3d.o : CpuMultiNodeMatrix3d.cpp
+	$(CCMPI) -c -O3 -std=c++11 -D$(DEFS) $<
+
+cpu_transpose.o : cpu_transpose.cpp
+	$(CCMPI) -c -O3 -std=c++11 -D$(DEFS) $<
+
+mpi_utils.o : mpi_utils.cpp
+	$(CCMPI) -c -O3 -std=c++11 -D$(DEFS) $<
 
 %.o : %.cpp
 	$(CC) -c -O3 -std=c++11 -D$(DEFS) $<
