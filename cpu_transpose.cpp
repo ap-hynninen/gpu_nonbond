@@ -1,5 +1,6 @@
 #include <iostream>
 #include <math.h>
+#include <time.h>
 #include "mpi_utils.h"
 #include "CpuMultiNodeMatrix3d.h"
 
@@ -40,7 +41,20 @@ int main(int argc, char *argv[]) {
     if (mynode == 0) std::cout << "mat vs. q comparison OK" << std::endl;
   }
 
-  mat.setup_transpose_xyz_yzx(&mat_t);
+  MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+
+  clock_t begin = clock();
+  for (int i=0;i < 5000;i++) {
+    MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+    mat.setup_transpose_xyz_yzx(&mat_t);
+    MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+    mat_t.setup_transpose_xyz_yzx(&mat);
+  }
+  clock_t end = clock();
+
+  double time_spent = (double)(end - begin)*1000.0 / CLOCKS_PER_SEC;
+
+  std::cout << "time_spent (ms) = " << time_spent << std::endl;
 
   mat.transpose_xyz_yzx();
   mat_comp = mat_t.compare(&q_t, 0.0, max_diff);
