@@ -164,6 +164,11 @@ inline double CpuMatrix3d<float>::norm(float a, float b) {
   return (double)fabsf(a-b);
 }
 
+template <>
+inline double CpuMatrix3d<double>::norm(double a, double b) {
+  return fabs(a-b);
+}
+
 template<>
 inline bool CpuMatrix3d<long long int>::is_nan(long long int a) {return false;};
 
@@ -172,6 +177,11 @@ inline bool CpuMatrix3d<int>::is_nan(int a) {return false;};
 
 template<>
 inline bool CpuMatrix3d<float>::is_nan(float a) {
+  return isnan(a);
+}
+
+template<>
+inline bool CpuMatrix3d<double>::is_nan(double a) {
   return isnan(a);
 }
 
@@ -524,5 +534,6 @@ int CpuMatrix3d<T>::get_zsize() {
 // Explicit instances of CpuMatrix3d
 //
 template class CpuMatrix3d<float>;
+template class CpuMatrix3d<double>;
 template class CpuMatrix3d<long long int>;
 template class CpuMatrix3d<int>;

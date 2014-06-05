@@ -401,5 +401,6 @@ void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx(CpuMultiNodeMatrix3d<T>* mat) {
 // Explicit instances of CpuMultiNodeMatrix3d
 //
 template class CpuMultiNodeMatrix3d<float>;
+template class CpuMultiNodeMatrix3d<double>;
 //template class CpuMultiNodeMatrix3d<float2>;
 template class CpuMultiNodeMatrix3d<long long int>;
