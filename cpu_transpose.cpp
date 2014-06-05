@@ -1,8 +1,9 @@
+#include <mpi.h>
 #include <iostream>
 #include <math.h>
 #include <time.h>
-#include "mpi_utils.h"
 #include "CpuMultiNodeMatrix3d.h"
+#include "mpi_utils.h"
 
 int numnode;
 int mynode;

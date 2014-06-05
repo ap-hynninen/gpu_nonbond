@@ -43,8 +43,10 @@ CUDAROOT := $(subst /bin/,,$(dir $(shell which nvcc)))
 
 ifeq ($(OS),Linux)
 LFLAGS = -std=c++0x -L $(CUDAROOT)/lib64 -lcudart -lnvToolsExt -lcufft
+CFLAGS = -O3 -std=c++0x
 else
 LFLAGS = -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcufft -lcuda -lstdc++.6 -lnvToolsExt
+CFLAGS = -O3 -std=c++11
 endif
 
 GENCODE_SM20  := -gencode arch=compute_20,code=sm_20
@@ -89,16 +91,16 @@ depend:
 	nvcc -c -O3 $(GENCODE_FLAGS) -lineinfo -fmad=true -use_fast_math -D$(DEFS) $<
 
 CpuMultiNodeMatrix3d.o : CpuMultiNodeMatrix3d.cpp
-	$(CCMPI) -c -O3 -std=c++11 -D$(DEFS) $<
+	$(CCMPI) -c $(CFLAGS) -D$(DEFS) $<
 
 cpu_transpose.o : cpu_transpose.cpp
-	$(CCMPI) -c -O3 -std=c++11 -D$(DEFS) $<
+	$(CCMPI) -c $(CFLAGS) -D$(DEFS) $<
 
 mpi_utils.o : mpi_utils.cpp
-	$(CCMPI) -c -O3 -std=c++11 -D$(DEFS) $<
+	$(CCMPI) -c $(CFLAGS) -D$(DEFS) $<
 
 %.o : %.cpp
-	$(CC) -c -O3 -std=c++11 -D$(DEFS) $<
+	$(CC) -c $(CFLAGS) -D$(DEFS) $<
 
 # DO NOT DELETE
 
