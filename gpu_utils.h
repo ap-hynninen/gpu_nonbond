@@ -347,5 +347,27 @@ __forceinline__ __device__ int calc_ishift(const float4 xyzq_i, const float4 xyz
   return (is.x+1 + (is.y+1)*3 + (is.z+1)*9 + 1)*3 - 2;
 }
 
+//----------------------------------------------------------------------------------------
+//
+// Reads value val from warp wid
+//
+#if __CUDA_ARCH__ >= 300
+template <typename AT>
+__forceinline__ __device__
+void get_val(AT &val, const int wid) {
+  // This generic version does nothing!
+}
+
+template <>
+__forceinline__ __device__
+void get_val(long long int &val, const int wid) {
+  int lo = __double2loint( __longlong_as_double(val) );
+  int hi = __double2hiint( __longlong_as_double(val) );
+  lo = __shfl(lo, wid);
+  hi = __shfl(hi, wid);
+  val = __double_as_longlong(__hiloint2double(hi,lo));
+}
+#endif
+//----------------------------------------------------------------------------------------
 
 #endif // GPU_UTILS_H

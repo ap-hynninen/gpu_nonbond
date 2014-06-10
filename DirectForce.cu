@@ -6,7 +6,7 @@
 #include "gpu_utils.h"
 #include "cuda_utils.h"
 #include "NeighborList.h"
-#define USE_NEW_KERNEL
+//#define USE_NEW_KERNEL
 #include "DirectForce.h"
 
 static __constant__ const float ccelec = 332.0716;
@@ -2598,7 +2598,9 @@ void DirectForce<AT, CT>::clear_energy_virial(cudaStream_t stream) {
     h_energy_virial->sforcey[i] = 0.0;
     h_energy_virial->sforcez[i] = 0.0;
   }
+#ifdef USE_NEW_KERNEL
   h_energy_virial->ientry_ind = 0;
+#endif
   cudaCheck(cudaMemcpyToSymbolAsync(d_energy_virial, h_energy_virial, sizeof(DirectEnergyVirial_t),
 				    0, cudaMemcpyHostToDevice, stream));
 }
