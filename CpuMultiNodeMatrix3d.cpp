@@ -313,7 +313,7 @@ void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx() {
     }
   }
 
-  // Copy data to host
+  // Copy data to send buffer
   if (nsend > 0) {
     for (int i=0;i < nsend;i++) {
       copy3D_HtoH<T>(this->data, send[i].data,

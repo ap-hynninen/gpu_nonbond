@@ -44,21 +44,25 @@ int main(int argc, char *argv[]) {
 
   int ntranspose = 0;
   MPICheck(MPI_Barrier( MPI_COMM_WORLD));
-  clock_t begin = clock();
-  for (int i=0;i < 20000;i++) {
-    MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+  double begin = MPI_Wtime();
+  for (int i=0;i < 1;i++) {
+    //MPICheck(MPI_Barrier( MPI_COMM_WORLD));
     mat.setup_transpose_xyz_yzx(&mat_t);
-    MPICheck(MPI_Barrier( MPI_COMM_WORLD));
-    mat_t.setup_transpose_xyz_yzx(&mat);
-    ntranspose += 2;
+    //MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+    //mat_t.setup_transpose_xyz_yzx(&mat);
+    ntranspose += 1;
   }
   MPICheck(MPI_Barrier( MPI_COMM_WORLD));
-  clock_t end = clock();
+  double end = MPI_Wtime();
 
-  double time_spent = (double)(end - begin)*1000.0 / CLOCKS_PER_SEC;
+  double time_spent = end - begin;
 
-  if (mynode == 0) std::cout << "time_spent (ms) = " << time_spent
-			     << " per transpose (ms) = " << time_spent/(double)ntranspose << std::endl;
+  if (mynode == 0) {
+    std::cout << "ntranspose = " << ntranspose << std::endl;
+    std::cout << "time_spent (sec) = " << time_spent
+	      << " per transpose (micro sec) = "
+	      << time_spent*1.0e6/(double)ntranspose << std::endl;
+  }
 
   mat.transpose_xyz_yzx();
   mat_comp = mat_t.compare(&q_t, 0.0, max_diff);

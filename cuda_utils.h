@@ -309,7 +309,7 @@ void copy3D_DtoH(T* src_data, T* dst_data,
 #endif
 
 //----------------------------------------------------------------------------------------
-void gpu_range_start(char *range_name);
+void gpu_range_start(const char *range_name);
 void gpu_range_stop();
 //----------------------------------------------------------------------------------------
 

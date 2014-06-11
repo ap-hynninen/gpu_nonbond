@@ -237,7 +237,7 @@ void copy3D_DtoH_T(void* src_data, void* dst_data,
 
 //----------------------------------------------------------------------------------------
 
-void gpu_range_start(char *range_name) {
+void gpu_range_start(const char *range_name) {
   static int color_id=0;
   nvtxEventAttributes_t att;
   att.version = NVTX_VERSION;
