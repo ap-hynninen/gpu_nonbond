@@ -2,6 +2,7 @@
 #define CPUMULTINODEMATRIX3D_H
 
 #include <mpi.h>
+#include <cassert>
 #include "CpuMatrix3d.h"
 
 template <typename T>
@@ -28,7 +29,24 @@ public:
   }
 
   ~node_t() {
-    if (data != NULL) delete [] data;
+    if (data != NULL) {
+      //deallocate_data();
+      //delete [] data;
+    }
+  }
+
+  /*
+  void deallocate_data() {
+    fprintf(stderr,"deallocate: %x\n",(long long int)data);
+    MPICheck(MPI_Free_mem(data));
+    data = NULL;
+  }
+  */
+
+  void allocate_data(const int len) {
+    assert(data == NULL);
+    MPICheck(MPI_Alloc_mem(len*sizeof(T), MPI_INFO_NULL, &data));
+    //data = new T[len];
   }
 
 };
@@ -79,11 +97,15 @@ private:
   int loc_y0, loc_y1;
   int loc_z0, loc_z1;
 
+#ifdef use_onesided
+  bool win_set;
+  MPI_Win win;
+#else
   MPI_Request *recv_req;
   MPI_Request *send_req;
+#endif
 
-  MPI_Status *recv_stat;
-  MPI_Status *send_stat;
+  void deallocate_transpose();
 
 public:
 
@@ -97,8 +119,7 @@ public:
 
   void print_info();
   void setup_transpose_xyz_yzx(CpuMultiNodeMatrix3d<T>* mat);
-  void transpose_xyz_yzx();
-  void transpose_xyz_yzx(CpuMultiNodeMatrix3d<T>* mat);
+  void transpose_xyz_yzx(const CpuMultiNodeMatrix3d<T>* mat);
 
 };
 

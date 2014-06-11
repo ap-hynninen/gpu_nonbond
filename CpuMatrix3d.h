@@ -38,17 +38,17 @@ public:
   bool compare(CpuMatrix3d<T>* mat, const double tol, double& max_diff);
 
   void transpose_xyz_yzx_ref(int src_x0, int src_y0, int src_z0,
-			      int dst_x0, int dst_y0, int dst_z0,
-			      int xlen, int ylen, int zlen,
-			      CpuMatrix3d<T>* mat);
+			     int dst_x0, int dst_y0, int dst_z0,
+			     int xlen, int ylen, int zlen,
+			     CpuMatrix3d<T>* mat);
   void transpose_xyz_yzx_ref(CpuMatrix3d<T>* mat);
 
   void transpose_xyz_zxy_ref(CpuMatrix3d<T>* mat);
 
   void transpose_xyz_yzx(CpuMatrix3d<T>* mat);
-  void transpose_xyz_yzx(int src_x0, int src_y0, int src_z0,
-			 int dst_x0, int dst_y0, int dst_z0,
-			 int xlen, int ylen, int zlen,
+  void transpose_xyz_yzx(const int src_x0, const int src_y0, const int src_z0,
+			 const int dst_x0, const int dst_y0, const int dst_z0,
+			 const int xlen, const int ylen, const int zlen,
 			 CpuMatrix3d<T>* mat);
 
   void transpose_xyz_zxy(CpuMatrix3d<T>* mat);

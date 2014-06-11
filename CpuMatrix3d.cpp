@@ -4,6 +4,9 @@
 #include <math.h>
 #include "cpu_utils.h"
 #include "CpuMatrix3d.h"
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 /*
 const int TILEDIM = 32;
@@ -226,8 +229,7 @@ bool CpuMatrix3d<T>::compare(CpuMatrix3d<T>* mat, const double tol, double& max_
 
 //
 // Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
-// Copies a block
-// NOTE: this is a slow reference calculation performed on the host
+// NOTE: this is a slow reference calculation
 //
 template <typename T>
 void CpuMatrix3d<T>::transpose_xyz_yzx_ref(int src_x0, int src_y0, int src_z0,
@@ -272,7 +274,7 @@ void CpuMatrix3d<T>::transpose_xyz_yzx_ref(CpuMatrix3d<T>* mat) {
 
 //
 // Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
-// NOTE: this is a slow reference calculation performed on the host
+// NOTE: this is a slow reference calculation
 //
 template <typename T>
 void CpuMatrix3d<T>::transpose_xyz_zxy_ref(CpuMatrix3d<T>* mat) {
@@ -307,9 +309,9 @@ void CpuMatrix3d<T>::transpose_xyz_yzx(CpuMatrix3d<T>* mat) {
 // Sub block is: (x0...x1) x (y0...y1) x (z0...z1)
 //
 template <typename T>
-void CpuMatrix3d<T>::transpose_xyz_yzx(int src_x0, int src_y0, int src_z0,
-				       int dst_x0, int dst_y0, int dst_z0,
-				       int xlen, int ylen, int zlen,
+void CpuMatrix3d<T>::transpose_xyz_yzx(const int src_x0, const int src_y0, const int src_z0,
+				       const int dst_x0, const int dst_y0, const int dst_z0,
+				       const int xlen, const int ylen, const int zlen,
 				       CpuMatrix3d<T>* mat) {
   assert(xlen > 0);
   assert(ylen > 0);
@@ -323,23 +325,23 @@ void CpuMatrix3d<T>::transpose_xyz_yzx(int src_x0, int src_y0, int src_z0,
   assert(dst_y0 >= 0 && dst_y0 + zlen <= mat->ny);
   assert(dst_z0 >= 0 && dst_z0 + xlen <= mat->nz);
 
-  std::cerr << "CpuMatrix3d<T>::transpose_xyz_yzx NOT IMPLEMENTED" << std::endl;
-  exit(1);
+  int xysize = mat->xsize*mat->ysize;
 
-  /*
-  dim3 nthread(TILEDIM, TILEROWS, 1);
-  dim3 nblock((xlen-1)/TILEDIM+1, (ylen-1)/TILEDIM+1, zlen);
+  int x, y, z;
+  int dst_pos, src_pos;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) private(z, y, x, dst_pos, src_pos)
+#endif
+  for (z=0;z < zlen;z++) {
+    for (y=0;y < ylen;y++) {
+      dst_pos = y+dst_x0 + (z+dst_y0 + (dst_z0)*mat->ysize)*mat->xsize;
+      src_pos = src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize;
+      for (x=0;x < xlen;x++) {
+	mat->data[dst_pos + x*xysize] = data[src_pos + x];
+      }
+    }
+  }
 
-  int src_pos = src_x0 + (src_y0 + src_z0*ysize)*xsize;
-  int dst_pos = dst_x0 + (dst_y0 + dst_z0*mat->ysize)*mat->xsize;
-
-  transpose_xyz_yzx_kernel<<< nblock, nthread >>>(xlen, ylen, zlen,
-						  xsize, ysize, zsize,
-						  mat->xsize, mat->ysize, mat->zsize,
-						  &data[src_pos], &mat->data[dst_pos]);
-
-  cudaCheck(cudaGetLastError());
-  */
 }
 
 //

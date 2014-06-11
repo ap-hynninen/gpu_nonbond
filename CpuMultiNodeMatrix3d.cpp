@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include "mpi_utils.h"
 #include "cpu_utils.h"
+//#define use_onesided
 #include "CpuMultiNodeMatrix3d.h"
 
 #define max(a,b) ((a) > (b) ? (a) : (b))
@@ -66,14 +67,17 @@ CpuMultiNodeMatrix3d<T>::CpuMultiNodeMatrix3d(const int nxtot, const int nytot, 
 
   nodeID = new int[nnode];
 
+  mat_yzx = NULL;
+
   send = NULL;
   recv = NULL;
 
+#ifdef use_onesided
+  win_set = false;
+#else
   send_req = NULL;
   recv_req = NULL;
-
-  send_stat = NULL;
-  recv_stat = NULL;
+#endif
 
   for (int inode=0;inode < nnode;inode++) {
     int inodex, inodey, inodez;
@@ -108,12 +112,22 @@ CpuMultiNodeMatrix3d<T>::~CpuMultiNodeMatrix3d() {
   delete [] z0;
   delete [] z1;
   delete [] nodeID;
+  this->deallocate_transpose();
+}
+
+//
+// De-allocates memory buffers used for tranpose
+//
+template <typename T>
+void CpuMultiNodeMatrix3d<T>::deallocate_transpose() {
   if (send != NULL) delete [] send;
   if (recv != NULL) delete [] recv;
+#ifdef use_onesided
+  if (win_set) MPICheck(MPI_Win_free(&win));
+#else
   if (send_req != NULL) delete [] send_req;
   if (recv_req != NULL) delete [] recv_req;
-  if (send_stat != NULL) delete [] send_stat;
-  if (recv_stat != NULL) delete [] recv_stat;
+#endif
 }
 
 //
@@ -183,6 +197,10 @@ bool get_vol_overlap(int x0_a, int x1_a, int y0_a, int y1_a, int z0_a, int z1_a,
 template <typename T>
 void CpuMultiNodeMatrix3d<T>::setup_transpose_xyz_yzx(CpuMultiNodeMatrix3d<T>* mat) {
 
+  assert(mat != NULL);
+
+  if (mat_yzx != NULL) this->deallocate_transpose();
+
   mat_yzx = mat;
 
   assert(mat->nnode == nnode);
@@ -242,7 +260,7 @@ void CpuMultiNodeMatrix3d<T>::setup_transpose_xyz_yzx(CpuMultiNodeMatrix3d<T>* m
       recv[nrecv].ysize = recv[nrecv].y1-recv[nrecv].y0+1;
       recv[nrecv].len = (recv[nrecv].x1-recv[nrecv].x0+1)*(recv[nrecv].y1-recv[nrecv].y0+1)*
 	(recv[nrecv].z1-recv[nrecv].z0+1);
-      recv[nrecv].data = new T[recv[nrecv].len];
+      recv[nrecv].allocate_data(recv[nrecv].len);
       recv[nrecv].node = inode;
       nrecv++;
     }
@@ -278,33 +296,40 @@ void CpuMultiNodeMatrix3d<T>::setup_transpose_xyz_yzx(CpuMultiNodeMatrix3d<T>* m
 	send[nsend].ysize = send[nsend].y1-send[nsend].y0+1;
 	send[nsend].len = (send[nsend].x1-send[nsend].x0+1)*(send[nsend].y1-send[nsend].y0+1)*
 	  (send[nsend].z1-send[nsend].z0+1);
-	send[nsend].data = new T[send[nsend].len];
+	send[nsend].allocate_data(send[nsend].len);
 	send[nsend].node = inode;
 	nsend++;
       }
     }
   }
 
+  //std::cout << "nrecv = " << nrecv << " nsend = " << nsend << std::endl;
+
+#ifdef use_onesided
+  MPI_Win_create(recv[0].data, recv[0].len*sizeof(T), sizeof(T), MPI_INFO_NULL, MPI_COMM_WORLD, &win);
+  win_set = true;
+#else
   if (nrecv > 0) {
     recv_req = new MPI_Request[nrecv];
-    recv_stat = new MPI_Status[nrecv];
   }
 
   if (nsend > 0) {
     send_req = new MPI_Request[nsend];
-    send_stat = new MPI_Status[nsend];
   }
-
+#endif
 }
 
 //
 // Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
 //
 template <typename T>
-void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx() {
+void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx(const CpuMultiNodeMatrix3d<T>* mat) {
 
-  int MPI_tag=1;
+  assert(mat == mat_yzx);
 
+  const int MPI_tag = 1;
+
+#ifndef use_onesided
   // Post receives
   if (nrecv > 0) {
     for (int i=0;i < nrecv;i++) {
@@ -312,6 +337,7 @@ void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx() {
 			 recv[i].node, MPI_tag, MPI_COMM_WORLD, &((MPI_Request *)recv_req)[i]));
     }
   }
+#endif
 
   // Copy data to send buffer
   if (nsend > 0) {
@@ -329,6 +355,15 @@ void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx() {
     }
   }
 
+#ifdef use_onesided
+  MPICheck(MPI_Win_fence(0, win));
+  if (nsend > 0) {
+    for (int i=0;i < nsend;i++) {
+      MPICheck(MPI_Put(send[i].data, send[i].len, MPI_FLOAT, send[i].node,
+		       0, send[i].len, MPI_FLOAT, win));
+    }
+  }
+#else
   // Post sends
   if (nsend > 0) {
     for (int i=0;i < nsend;i++) {
@@ -337,31 +372,42 @@ void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx() {
 			 send[i].node, MPI_tag, MPI_COMM_WORLD, &((MPI_Request *)send_req)[i]));
     }
   }
+#endif
 
   // Perform local matrix transpose on a sub block:
   // (loc_x0...loc_x1) x (loc_y0...loc_y1) x (loc_z0...loc_z1)
 
   if (loc_transpose) {
-    CpuMatrix3d<T>::transpose_xyz_yzx_ref(loc_x0 - this->x0[mynode],
-					  loc_y0 - this->y0[mynode],
-					  loc_z0 - this->z0[mynode],
-					  loc_y0 - mat_yzx->x0[mynode],
-					  loc_z0 - mat_yzx->y0[mynode],
-					  loc_x0 - mat_yzx->z0[mynode],
-					  loc_x1-loc_x0+1,
-					  loc_y1-loc_y0+1,
-					  loc_z1-loc_z0+1,
-					  mat_yzx);
+    CpuMatrix3d<T>::transpose_xyz_yzx(loc_x0 - this->x0[mynode],
+				      loc_y0 - this->y0[mynode],
+				      loc_z0 - this->z0[mynode],
+				      loc_y0 - mat_yzx->x0[mynode],
+				      loc_z0 - mat_yzx->y0[mynode],
+				      loc_x0 - mat_yzx->z0[mynode],
+				      loc_x1-loc_x0+1,
+				      loc_y1-loc_y0+1,
+				      loc_z1-loc_z0+1,
+				      mat_yzx);
   }
 
-  //  MPICheck(MPI_Barrier(MPI_COMM_WORLD));
-  //  return;
+#ifdef use_onesided
+  MPICheck(MPI_Win_fence(0, win));
+#else
+  // Wait for sends to finish
+  if (nsend > 0) {
+    MPICheck(MPI_Waitall(nsend, (MPI_Request *)send_req, MPI_STATUSES_IGNORE));
+  }
+
+  if (nrecv > 0) {
+    MPICheck(MPI_Waitall(nrecv, (MPI_Request *)recv_req, MPI_STATUSES_IGNORE));
+  }
+#endif
 
   // Wait for receives
   if (nrecv > 0) {
     for (int i=0;i < nrecv;i++) {
-      int k;
-      MPICheck(MPI_Waitany(nrecv, (MPI_Request *)recv_req, &k, (MPI_Status *)recv_stat));
+      int k=i;
+      //MPICheck(MPI_Waitany(nrecv, (MPI_Request *)recv_req, &k, (MPI_Status *)recv_stat));
 
       CpuMatrix3d<T> loc(recv[k].x1-recv[k].x0+1,
 			 recv[k].y1-recv[k].y0+1,
@@ -369,32 +415,18 @@ void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx() {
 			 recv[k].xsize, recv[k].ysize, recv[k].z1-recv[k].z0+1, 
 			 recv[k].data);
 
-      loc.transpose_xyz_yzx_ref(0,0,0,
-				recv[k].y0 - mat_yzx->x0[mynode],
-				recv[k].z0 - mat_yzx->y0[mynode],
-				recv[k].x0 - mat_yzx->z0[mynode],
-				recv[k].x1-recv[k].x0+1,
-				recv[k].y1-recv[k].y0+1,
-				recv[k].z1-recv[k].z0+1,
-				mat_yzx);
+      loc.transpose_xyz_yzx(0,0,0,
+			    recv[k].y0 - mat_yzx->x0[mynode],
+			    recv[k].z0 - mat_yzx->y0[mynode],
+			    recv[k].x0 - mat_yzx->z0[mynode],
+			    recv[k].x1-recv[k].x0+1,
+			    recv[k].y1-recv[k].y0+1,
+			    recv[k].z1-recv[k].z0+1,
+			    mat_yzx);
 
     }
   }
 
-  // Wait for sends to finish
-  if (nsend > 0) {
-    MPICheck(MPI_Waitall(nsend, (MPI_Request *)send_req, (MPI_Status *)send_stat));
-  }
-
-}
-
-//
-// Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
-//
-template <typename T>
-void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx(CpuMultiNodeMatrix3d<T>* mat) {
-  setup_transpose_xyz_yzx(mat);
-  transpose_xyz_yzx();
 }
 
 //
@@ -402,5 +434,4 @@ void CpuMultiNodeMatrix3d<T>::transpose_xyz_yzx(CpuMultiNodeMatrix3d<T>* mat) {
 //
 template class CpuMultiNodeMatrix3d<float>;
 template class CpuMultiNodeMatrix3d<double>;
-//template class CpuMultiNodeMatrix3d<float2>;
 template class CpuMultiNodeMatrix3d<long long int>;

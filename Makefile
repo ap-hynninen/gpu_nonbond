@@ -5,8 +5,8 @@ OS := $(shell uname -s)
 DEFS = DUMMY #USE_MPI
 
 ifeq ($(OS),Linux)
-CCMPI = mpiicc
-CLMPI = mpiicc
+CCMPI = mpic++
+CLMPI = mpic++
 else
 CCMPI = mpic++
 CLMPI = mpic++
@@ -23,6 +23,12 @@ else
 CC = gcc
 CL = gcc
 endif
+endif
+
+ifeq ($(OS),Linux)
+OPENMP_OPT = -openmp
+else
+OPENMP_OPT = -fopenmp
 endif
 
 SRC = BondedForce.cu NeighborList.cu Bspline.cu VirialPressure.cu CudaDomdec.cu	XYZQ.cu CudaLeapfrogIntegrator.cu cuda_utils.cu CudaPMEForcefield.cu DirectForce.cu gpu_bonded.cu gpu_const.cu Force.cu	gpu_direct.cu Grid.cu gpu_dyna.cu HoloConst.cu gpu_recip.cu Matrix3d.cu MultiNodeMatrix3d.cpp mpi_utils.cpp CudaDomdecBonded.cu cpu_transpose.cpp CpuMultiNodeMatrix3d.cpp CpuMatrix3d.cpp
@@ -72,7 +78,7 @@ gpu_dyna : $(OBJS_DYNA)
 	$(CL) $(LFLAGS) -o gpu_dyna $(OBJS_DYNA)
 
 cpu_transpose : $(OBJS_TRANSPOSE)
-	$(CCMPI) $(LFLAGS) -o cpu_transpose $(OBJS_TRANSPOSE)
+	$(CCMPI) $(LFLAGS) $(OPENMP_OPT) -o cpu_transpose $(OBJS_TRANSPOSE)
 
 clean: 
 	rm -f *.o
@@ -91,16 +97,16 @@ depend:
 	nvcc -c -O3 $(GENCODE_FLAGS) -lineinfo -fmad=true -use_fast_math -D$(DEFS) $<
 
 CpuMultiNodeMatrix3d.o : CpuMultiNodeMatrix3d.cpp
-	$(CCMPI) -c $(CFLAGS) -D$(DEFS) $<
+	$(CCMPI) -c $(CFLAGS) $(OPENMP_OPT) -D$(DEFS) $<
 
 cpu_transpose.o : cpu_transpose.cpp
-	$(CCMPI) -c $(CFLAGS) -D$(DEFS) $<
+	$(CCMPI) -c $(CFLAGS) $(OPENMP_OPT) -D$(DEFS) $<
 
 mpi_utils.o : mpi_utils.cpp
 	$(CCMPI) -c $(CFLAGS) -D$(DEFS) $<
 
 %.o : %.cpp
-	$(CC) -c $(CFLAGS) -D$(DEFS) $<
+	$(CC) -c $(CFLAGS) $(OPENMP_OPT) -D$(DEFS) $<
 
 # DO NOT DELETE
 
