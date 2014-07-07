@@ -2447,9 +2447,9 @@ void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspli
   nblock.x = (nfftx*nffty*nfftz - 1)/nthread.x + 1;
   nblock.y = 1;
   nblock.z = 1;
-  reduce_data<AT, CT> <<< nblock, nthread >>>(xsize*ysize*zsize,
-					      (AT *)accum_grid->data,
-					      charge_grid->data);
+  reduce_force<AT, CT> <<< nblock, nthread >>>(xsize*ysize*zsize,
+					       (AT *)accum_grid->data,
+					       charge_grid->data);
   cudaCheck(cudaGetLastError());
 
 }
@@ -2508,7 +2508,7 @@ void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, cons
   nblock.x = (nfftx*nffty*nfftz - 1)/nthread.x + 1;
   nblock.y = 1;
   nblock.z = 1;
-  reduce_data<AT, CT> <<< nblock, nthread, 0, stream >>>
+  reduce_force<AT, CT> <<< nblock, nthread, 0, stream >>>
     (xsize*ysize*zsize,
      (AT *)accum_grid->data,
      charge_grid->data);

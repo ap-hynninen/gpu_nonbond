@@ -2,46 +2,44 @@
 # Detect OS
 OS := $(shell uname -s)
 
-DEFS = DUMMY #USE_MPI
+# Detect Intel compiler
+INTEL_COMPILER := $(shell which icc | wc -l)
 
-ifeq ($(OS),Linux)
-CCMPI = mpic++
-CLMPI = mpic++
-else
-CCMPI = mpic++
-CLMPI = mpic++
+MPI_FOUND := $(shell which mpicc | wc -l )
+
+DEFS := DONT_USE_MPI
+ifeq ($(MPI_FOUND),1)
+DEFS := USE_MPI
 endif
 
-ifeq ($(DEFS),USE_MPI)
-CC = CCMPI
-CL = CLMPI
-else
-ifeq ($(OS),Linux)
+CCMPI = mpic++
+CLMPI = mpic++
+
+ifeq ($(INTEL_COMPILER),1)
 CC = icc
 CL = icc
 else
-CC = gcc
-CL = gcc
-endif
+CC = g++
+CL = g++
 endif
 
-ifeq ($(OS),Linux)
+ifeq ($(INTEL_COMPILER),1)
 OPENMP_OPT = -openmp
 else
 OPENMP_OPT = -fopenmp
 endif
 
-SRC = BondedForce.cu NeighborList.cu Bspline.cu VirialPressure.cu CudaDomdec.cu	XYZQ.cu CudaLeapfrogIntegrator.cu cuda_utils.cu CudaPMEForcefield.cu DirectForce.cu gpu_bonded.cu gpu_const.cu Force.cu	gpu_direct.cu Grid.cu gpu_dyna.cu HoloConst.cu gpu_recip.cu Matrix3d.cu MultiNodeMatrix3d.cpp mpi_utils.cpp CudaDomdecBonded.cu cpu_transpose.cpp CpuMultiNodeMatrix3d.cpp CpuMatrix3d.cpp
+SRC = BondedForce.cu NeighborList.cu Bspline.cu VirialPressure.cu CudaDomdec.cu	XYZQ.cu CudaLeapfrogIntegrator.cu cuda_utils.cu CudaPMEForcefield.cu DirectForce.cu gpu_bonded.cu gpu_const.cu Force.cu	reduce.cu gpu_direct.cu Grid.cu gpu_dyna.cu HoloConst.cu gpu_recip.cu Matrix3d.cu MultiNodeMatrix3d.cpp mpi_utils.cpp CudaDomdecBonded.cu cpu_transpose.cpp CpuMultiNodeMatrix3d.cpp CpuMatrix3d.cpp
 
-OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o cuda_utils.o gpu_recip.o
+OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o reduce.o cuda_utils.o gpu_recip.o
 
-OBJS_DIRECT = XYZQ.o Force.o cuda_utils.o DirectForce.o NeighborList.o VirialPressure.o BondedForce.o gpu_direct.o
+OBJS_DIRECT = XYZQ.o Force.o reduce.o cuda_utils.o DirectForce.o NeighborList.o VirialPressure.o BondedForce.o gpu_direct.o
 
-OBJS_BONDED = XYZQ.o Force.o cuda_utils.o VirialPressure.o BondedForce.o gpu_bonded.o
+OBJS_BONDED = XYZQ.o Force.o reduce.o cuda_utils.o VirialPressure.o BondedForce.o gpu_bonded.o
 
 OBJS_CONST = cuda_utils.o gpu_const.o HoloConst.o
 
-OBJS_DYNA = cuda_utils.o gpu_dyna.o Force.o CudaLeapfrogIntegrator.o CudaPMEForcefield.o NeighborList.o DirectForce.o BondedForce.o Grid.o Matrix3d.o XYZQ.o CudaDomdec.o CudaDomdecBonded.o HoloConst.o
+OBJS_DYNA = cuda_utils.o gpu_dyna.o Force.o reduce.o CudaLeapfrogIntegrator.o CudaPMEForcefield.o NeighborList.o DirectForce.o BondedForce.o Grid.o Matrix3d.o XYZQ.o CudaDomdec.o CudaDomdecBonded.o HoloConst.o
 
 OBJS_TRANSPOSE = cpu_transpose.o mpi_utils.o CpuMultiNodeMatrix3d.o CpuMatrix3d.o
 
@@ -49,10 +47,14 @@ CUDAROOT := $(subst /bin/,,$(dir $(shell which nvcc)))
 
 ifeq ($(OS),Linux)
 LFLAGS = -std=c++0x -L $(CUDAROOT)/lib64 -lcudart -lnvToolsExt -lcufft
-CFLAGS = -O3 -std=c++0x
 else
 LFLAGS = -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcufft -lcuda -lstdc++.6 -lnvToolsExt
-CFLAGS = -O3 -std=c++11
+endif
+
+ifeq ($(INTEL_COMPILER),1)
+CFLAGS = -O3 -std=c++0x
+else
+CFLAGS = -O3 -std=c++0x #-std=c++11
 endif
 
 GENCODE_SM20  := -gencode arch=compute_20,code=sm_20
@@ -60,7 +62,12 @@ GENCODE_SM30  := -gencode arch=compute_30,code=sm_30
 GENCODE_SM35  := -gencode arch=compute_35,code=sm_35
 GENCODE_FLAGS := $(GENCODE_SM20) $(GENCODE_SM30) $(GENCODE_SM35)
 
-all: gpu_direct gpu_bonded gpu_recip gpu_const gpu_dyna cpu_transpose
+exec_targets := gpu_direct gpu_bonded gpu_recip gpu_const gpu_dyna
+ifeq ($(MPI_FOUND),1)
+exec_targets = $(exec_targets) cpu_transpose
+endif
+
+all: $(exec_targets)
 
 gpu_recip : $(OBJS_RECIP)
 	$(CL) $(LFLAGS) -o gpu_recip $(OBJS_RECIP)

@@ -156,12 +156,12 @@ void Force<T>::convert(Force<T2>* force, cudaStream_t stream) {
   if (force->xyz.stride == xyz.stride) {
     int nthread = 512;
     int nblock = (3*xyz.stride - 1)/nthread + 1;
-    reduce_data<T, T2>
+    reduce_force<T, T2>
       <<< nblock, nthread, 0, stream >>>(3*xyz.stride, xyz.data, force->xyz.data);
   } else {
     int nthread = 512;
     int nblock = (xyz.n - 1)/nthread + 1;
-    reduce_data<T, T2>
+    reduce_force<T, T2>
       <<< nblock, nthread, 0, stream >>>(xyz.n, xyz.stride, xyz.data,
 					 force->xyz.stride, force->xyz.data);
   }
@@ -181,7 +181,7 @@ void Force<T>::convert_to(Force<T3>* force, cudaStream_t stream) {
   int nthread = 512;
   int nblock = (3*xyz.stride - 1)/nthread + 1;
 
-  reduce_data<T, T2>
+  reduce_force<T, T2>
     <<< nblock, nthread, 0, stream >>>(3*xyz.stride, xyz.data, (T2 *)force->xyz.data);
 }
 
@@ -198,7 +198,7 @@ void Force<T>::convert(cudaStream_t stream) {
   int nthread = 512;
   int nblock = (3*xyz.stride - 1)/nthread + 1;
 
-  reduce_data<T, T2>
+  reduce_force<T, T2>
     <<< nblock, nthread, 0, stream >>>(3*xyz.stride, xyz.data);
 }
 
@@ -217,7 +217,7 @@ void Force<T>::convert_add(Force<T3> *force, cudaStream_t stream) {
   int nthread = 512;
   int nblock = (3*xyz.stride - 1)/nthread + 1;
 
-  reduce_add_data<T, T2, T3>
+  reduce_add_force<T, T2, T3>
     <<< nblock, nthread, 0, stream >>>(3*xyz.stride, force->xyz.data, xyz.data);
 }
 
