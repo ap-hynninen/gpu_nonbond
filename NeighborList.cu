@@ -2597,7 +2597,7 @@ void NeighborList<tilesize>::sort_alloc_realloc(const int ncol_tot, const int nc
 // Builds indices etc. after sort. xyzq is the sorted array
 //
 template <int tilesize>
-void NeighborList<tilesize>::sort_build_indices(const int ncoord, float4 *xyzq, int *loc2glo,
+void NeighborList<tilesize>::sort_build_indices(const int ncoord, float4 *xyzq, const int *loc2glo,
 						cudaStream_t stream) {
   // Value of ncoord on previous call
   static int ncoord_prev = 0;

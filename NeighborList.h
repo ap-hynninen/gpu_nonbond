@@ -252,7 +252,7 @@ private:
 
   void sort_alloc_realloc(const int ncol_tot, const int ncoord);
 
-  void sort_build_indices(const int ncoord, float4 *xyzq, int *loc2glo, cudaStream_t stream);
+  void sort_build_indices(const int ncoord, float4 *xyzq, const int *loc2glo, cudaStream_t stream);
 
   void sort_core(const int ncol_tot, const int ncoord,
 		 float4 *xyzq,

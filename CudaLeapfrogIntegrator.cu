@@ -37,9 +37,14 @@ __global__ void calc_step_kernel(const int ncoord, const int stride, const int s
 
   if (tid < ncoord) {
     double gamma_val = dtsq/(double)mass[tid];
+    /*
     step[tid]         = prev_step[tid]         - force[tid]*gamma_val;
     step[tid+stride]  = prev_step[tid+stride]  - force[tid+stride_force]*gamma_val;
     step[tid+stride2] = prev_step[tid+stride2] - force[tid+stride_force2]*gamma_val;
+    */
+    step[tid]         = prev_step[tid];
+    step[tid+stride]  = prev_step[tid+stride];
+    step[tid+stride2] = prev_step[tid+stride2];
   }
 }
 
@@ -128,15 +133,14 @@ void CudaLeapfrogIntegrator::take_step() {
 void CudaLeapfrogIntegrator::calc_step() {
   assert(prev_coord.match(step));
 
-  return;
-
   int ncoord = step.n;
   int stride = step.stride;
   int stride_force = stride;
   int nthread = 512;
   int nblock = (ncoord - 1)/nthread + 1;
 
-  double dtsq = timestep*timestep;
+  double timestep_in_ps = timestep*1.0e-3;
+  double dtsq = timestep_in_ps*timestep_in_ps;
 
   calc_step_kernel<<< nblock, nthread, 0, stream >>>
     (ncoord, stride, stride_force, dtsq,

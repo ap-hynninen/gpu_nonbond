@@ -1,6 +1,7 @@
 #ifndef LEAPFROGINTEGRATOR_H
 #define LEAPFROGINTEGRATOR_H
 
+#include <stdio.h>
 #include "Forcefield.h"
 
 //
@@ -28,7 +29,7 @@ private:
 
 protected:
 
-  // timestep in ps (10e-12 s)
+  // timestep in fs (10e-15 s)
   double timestep;
 
   // Forcefield
@@ -124,6 +125,14 @@ public:
   // Runs dynamics for nstep steps
   //
   void run(const int nstep, const int print_freq, const int restart_freq) {
+
+    printf("DYNA DYN: Step         Time      TOTEner        TOTKe       ENERgy  TEMPerature\n");
+    printf("DYNA PROP:             GRMS      HFCTote        HFCKe       EHFCor        VIRKe\n");
+    printf("DYNA INTERN:          BONDs       ANGLes       UREY-b    DIHEdrals    IMPRopers\n");
+    printf("DYNA EXTERN:        VDWaals         ELEC       HBONds          ASP         USER\n");
+    printf("DYNA EWALD:          EWKSum       EWSElf       EWEXcl       EWQCor       EWUTil\n");
+    printf("DYNA PRESS:            VIRE         VIRI       PRESSE       PRESSI       VOLUme\n");
+    printf("----------       ---------    ---------    ---------    ---------    ---------\n");
 
     for (int istep=0;istep < nstep;istep++) {
 

@@ -88,7 +88,8 @@ CudaDomdec::~CudaDomdec() {
 
 //
 // Builds coordinate distribution across all nodes
-// NOTE: Here all nodes have all coordinates
+// NOTE: Here all nodes have all coordinates.
+// NOTE: Used only in the beginning of dynamics
 //
 void CudaDomdec::build_homezone(cudaXYZ<double> *coord, cudaStream_t stream) {
   if (numnode == 1) {
@@ -113,6 +114,7 @@ void CudaDomdec::build_homezone(cudaXYZ<double> *coord, cudaStream_t stream) {
 
 //
 // Update coordinate distribution across all nodes
+// NOTE: Used during dynamics
 //
 void CudaDomdec::update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, cudaStream_t stream) {
   /*
@@ -127,7 +129,7 @@ void CudaDomdec::update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2
 //
 // Communicate coordinates
 //
-void CudaDomdec::comm_coord(cudaXYZ<double> *coord, bool update, cudaStream_t stream) {
+void CudaDomdec::comm_coord(cudaXYZ<double> *coord, const bool update, cudaStream_t stream) {
 
   // Calculate zone_pcoord
   zone_pcoord[0] = zone_ncoord[0];
@@ -164,7 +166,7 @@ void CudaDomdec::comm_force(Force<long long int> *force, cudaStream_t stream) {
 }
 
 //
-// Re-order coordinates using loc2glo
+// Re-order coordinates using loc2glo: coord_src => coord_dst
 //
 void CudaDomdec::reorder_coord(cudaXYZ<double> *coord_src, cudaXYZ<double> *coord_dst, cudaStream_t stream) {
   assert(coord_src->match(coord_dst));

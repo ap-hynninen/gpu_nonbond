@@ -173,7 +173,7 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
     // NOTE: Builds rest of domdec->loc2glo and domdec->xyz_shift
     domdec->comm_coord(coord, true);
 
-    // Copy coord => xyzq_copy
+    // Copy: coord => xyzq_copy
     xyzq_copy.set_xyzq(coord, q, domdec->get_xyz_shift(),
 		       domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz());
 
@@ -181,7 +181,7 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
     // NOTE: Builds domdec->loc2glo and nlist->glo2loc
     nlist->sort(domdec->get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec->get_loc2glo());
 
-    // Update neighborlist
+    // Build neighborlist
     nlist->build(domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), domdec->get_rnl(),
 		 xyzq.xyzq, domdec->get_loc2glo());
 
@@ -236,6 +236,8 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
     xyzq.set_xyz(coord);
   }
 
+  force->clear();
+
   // Clear energy and virial variables
   if (calc_energy || calc_virial) {
     dir.clear_energy_virial();
@@ -251,7 +253,7 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
 
   // Bonded forces
   bonded.calc_force(xyzq.xyzq, domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(),
-		    calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
+  		    calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
 
   // Reciprocal forces (Only reciprocal nodes calculate these)
   if (grid != NULL) {
@@ -395,15 +397,15 @@ void CudaPMEForcefield::get_restart_data(hostXYZ<double> *h_coord, hostXYZ<doubl
 
   for (int i=0;i < ncoord;i++) {
     int j = h_loc2glo[i];
-    x[i] = h_coord->data[j];
-    y[i] = h_coord->data[j + coord_stride];
-    z[i] = h_coord->data[j + coord_stride2];
-    dx[i] = h_step->data[j];
-    dy[i] = h_step->data[j + step_stride];
-    dz[i] = h_step->data[j + step_stride2];
-    fx[i] = h_force->data[j];
-    fy[i] = h_force->data[j + force_stride];
-    fz[i] = h_force->data[j + force_stride2];
+    x[j] = h_coord->data[i];
+    y[j] = h_coord->data[i + coord_stride];
+    z[j] = h_coord->data[i + coord_stride2];
+    dx[j] = h_step->data[i];
+    dy[j] = h_step->data[i + step_stride];
+    dz[j] = h_step->data[i + step_stride2];
+    fx[j] = h_force->data[i];
+    fy[j] = h_force->data[i + force_stride];
+    fz[j] = h_force->data[i + force_stride2];
   }
 
 }

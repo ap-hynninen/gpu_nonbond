@@ -12,8 +12,8 @@ ifeq ($(MPI_FOUND),1)
 DEFS := USE_MPI
 endif
 
-CCMPI = mpic++
-CLMPI = mpic++
+CCMPI = mpicc
+CLMPI = mpicc
 
 ifeq ($(INTEL_COMPILER),1)
 CC = icc
@@ -31,7 +31,7 @@ endif
 
 SRC = BondedForce.cu NeighborList.cu Bspline.cu VirialPressure.cu CudaDomdec.cu	XYZQ.cu CudaLeapfrogIntegrator.cu cuda_utils.cu CudaPMEForcefield.cu DirectForce.cu gpu_bonded.cu gpu_const.cu Force.cu	reduce.cu gpu_direct.cu Grid.cu gpu_dyna.cu HoloConst.cu gpu_recip.cu Matrix3d.cu MultiNodeMatrix3d.cpp mpi_utils.cpp CudaDomdecBonded.cu cpu_transpose.cpp CpuMultiNodeMatrix3d.cpp CpuMatrix3d.cpp
 
-OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o MultiNodeMatrix3d.o Force.o reduce.o cuda_utils.o gpu_recip.o
+OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o Force.o reduce.o cuda_utils.o gpu_recip.o
 
 OBJS_DIRECT = XYZQ.o Force.o reduce.o cuda_utils.o DirectForce.o NeighborList.o VirialPressure.o BondedForce.o gpu_direct.o
 
@@ -64,7 +64,7 @@ GENCODE_FLAGS := $(GENCODE_SM20) $(GENCODE_SM30) $(GENCODE_SM35)
 
 exec_targets := gpu_direct gpu_bonded gpu_recip gpu_const gpu_dyna
 ifeq ($(MPI_FOUND),1)
-exec_targets = $(exec_targets) cpu_transpose
+exec_targets += cpu_transpose
 endif
 
 all: $(exec_targets)
@@ -104,6 +104,9 @@ depend:
 	nvcc -c -O3 $(GENCODE_FLAGS) -lineinfo -fmad=true -use_fast_math -D$(DEFS) $<
 
 CpuMultiNodeMatrix3d.o : CpuMultiNodeMatrix3d.cpp
+	$(CCMPI) -c $(CFLAGS) $(OPENMP_OPT) -D$(DEFS) $<
+
+MultiNodeMatrix3d.o : MultiNodeMatrix3d.cpp
 	$(CCMPI) -c $(CFLAGS) $(OPENMP_OPT) -D$(DEFS) $<
 
 cpu_transpose.o : cpu_transpose.cpp

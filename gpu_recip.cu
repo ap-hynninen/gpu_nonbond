@@ -5,10 +5,6 @@
 #include "Bspline.h"
 #include "Grid.h"
 #include "Force.h"
-//#ifdef USE_MPI
-//#include "mpi_utils.h"
-//#endif
-#include "MultiNodeMatrix3d.h"
 
 void test4();
 void test6();

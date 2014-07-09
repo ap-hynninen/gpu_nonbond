@@ -188,28 +188,28 @@ void test() {
   const int ncmapcoef = 0;
 
   bond_t *bond = new bond_t[nbond];
-  float2 *bondcoef = new float2[nbondcoef];
   load_vec<int>(3, "test_data/bond.txt", nbond, (int *)bond);
+  float2 *bondcoef = new float2[nbondcoef];
   load_vec<float>(2, "test_data/bondcoef.txt", nbondcoef, (float *)bondcoef);
 
   bond_t *ureyb = new bond_t[nureyb];
-  float2 *ureybcoef = new float2[nureybcoef];
   load_vec<int>(3, "test_data/ureyb.txt", nureyb, (int *)ureyb);
+  float2 *ureybcoef = new float2[nureybcoef];
   load_vec<float>(2, "test_data/ureybcoef.txt", nureybcoef, (float *)ureybcoef);
 
   angle_t *angle = new angle_t[nangle];
-  float2 *anglecoef = new float2[nanglecoef];
   load_vec<int>(4, "test_data/angle.txt", nangle, (int *)angle);
+  float2 *anglecoef = new float2[nanglecoef];
   load_vec<float>(2, "test_data/anglecoef.txt", nanglecoef, (float *)anglecoef);
 
   dihe_t *dihe = new dihe_t[ndihe];
-  float4 *dihecoef = new float4[ndihecoef];
   load_vec<int>(5, "test_data/dihe.txt", ndihe, (int *)dihe);
+  float4 *dihecoef = new float4[ndihecoef];
   load_vec<float>(4, "test_data/dihecoef.txt", ndihecoef, (float *)dihecoef);
 
   dihe_t *imdihe = new dihe_t[nimdihe];
-  float4 *imdihecoef = new float4[nimdihecoef];
   load_vec<int>(5, "test_data/imdihe.txt", nimdihe, (int *)imdihe);
+  float4 *imdihecoef = new float4[nimdihecoef];
   load_vec<float>(4, "test_data/imdihecoef.txt", nimdihecoef, (float *)imdihecoef);
 
   cmap_t *cmap = NULL;
@@ -348,6 +348,7 @@ void test() {
   leapfrog.set_coord_buffers(x, y, z);
   leapfrog.set_step_buffers(dx, dy, dz);
   leapfrog.set_force_buffers(fx, fy, fz);
+  leapfrog.set_timestep(1.0);
   leapfrog.run(1, 1, 1);
 
   write_xyz(ncoord, x, y, z, "coord.txt");
@@ -368,19 +369,19 @@ void test() {
 
   //-------------------------------------------------------------------------------------
 
-  delete [] bond;
+  if (bond != NULL) delete [] bond;
   delete [] bondcoef;
   
-  delete [] ureyb;
+  if (ureyb != NULL) delete [] ureyb;
   delete [] ureybcoef;
   
-  delete [] angle;
+  if (angle != NULL) delete [] angle;
   delete [] anglecoef;
 
-  delete [] dihe;
+  if (dihe != NULL) delete [] dihe;
   delete [] dihecoef;
   
-  delete [] imdihe;
+  if (imdihe != NULL) delete [] imdihe;
   delete [] imdihecoef;
 
   //delete [] cmap;
