@@ -15,9 +15,11 @@ class LeapfrogIntegrator {
 private:
 
   virtual void swap_step()=0;
+  virtual void swap_coord()=0;
   virtual void take_step()=0;
   virtual void calc_step()=0;
   virtual void calc_force(const bool calc_energy, const bool calc_virial)=0;
+  virtual void calc_temperature()=0;
   virtual void do_holoconst()=0;
   virtual void do_pressure()=0;
   virtual void do_temperature()=0;
@@ -29,8 +31,19 @@ private:
 
 protected:
 
-  // timestep in fs (10e-15 s)
-  double timestep;
+  //     TIMFAC is the conversion factor from AKMA time to picoseconds.
+  //            (TIMFAC = SQRT ( ( 1A )**2 * 1amu * Na  / 1Kcal )
+  //            this factor is used only intrinsically, all I/O is in ps.
+  static const double TIMFAC = 4.88882129E-02;
+
+  // Total number of coordinates in the system
+  int ncoord;
+
+  // timestep in ps (10e-12 s)
+  double timestep_ps;
+
+  // timestep in AKMA
+  double timestep_akma;
 
   // Forcefield
   Forcefield *forcefield;
@@ -55,6 +68,7 @@ public:
   // Class creator
   //
   LeapfrogIntegrator() {
+    ncoord = 0;
     forcefield = NULL;
     x = NULL;
     y = NULL;
@@ -81,10 +95,11 @@ public:
   }
 
   //
-  // Sets timestep
+  // Sets timestep in femto seconds (fs)
   //
   void set_timestep(const double timestep) {
-    this->timestep = timestep;
+    this->timestep_ps = timestep*1.0e-3;
+    this->timestep_akma = timestep*1.0e-3/TIMFAC;
   }
 
   //
@@ -115,12 +130,48 @@ public:
   }
 
   //
+  // Write xyz buffer on disk
+  //
+  void write_xyz_data(const int istep, const double *x, const double *y, const double *z,
+		      const char *base) {
+    char filename[256];
+    sprintf(filename,"%s%d.txt",base,istep);
+    FILE *handle = fopen(filename,"wt");
+    for (int i=0;i < ncoord;i++) {
+      fprintf(handle,"%lf %lf %lf\n",x[i],y[i],z[i]);
+    }
+    fclose(handle);
+  }
+
+  //
+  // Write restart buffers on disk
+  // NOTE: This will be moved into its own class later
+  //
+  void write_restart_data(const int istep,
+			  const double *x, const double *y, const double *z,
+			  const double *dx, const double *dy, const double *dz,
+			  const double *fx, const double *fy, const double *fz) {
+    write_xyz_data(istep, x, y, z, "coord");
+    write_xyz_data(istep, dx, dy, dz, "step");
+    write_xyz_data(istep, fx, fy, fz, "force");
+  }
+
+  //
   // Initialize
   //
-  virtual void init(const int ncoord,
-		    const double *x, const double *y, const double *z,
-		    const double *dx, const double *dy, const double *dz)=0;
+  void init(const int ncoord,
+	    const double *x, const double *y, const double *z,
+	    const double *dx, const double *dy, const double *dz,
+	    const double *mass) {
+    this->ncoord = ncoord;
+    spec_init(ncoord, x, y, z, dx, dy, dz, mass);
+  }
 
+  virtual void spec_init(const int ncoord,
+			 const double *x, const double *y, const double *z,
+			 const double *dx, const double *dy, const double *dz,
+			 const double *mass)=0;
+  
   //
   // Runs dynamics for nstep steps
   //
@@ -160,6 +211,7 @@ public:
       do_temperature();
       
       // Calculate temperature
+      calc_temperature();
       
       // Calculate RMS gradient and work
       
@@ -172,11 +224,15 @@ public:
 
       if ((istep % restart_freq) == 0) {
 	get_restart_data(x, y, z, dx, dy, dz, fx, fy, fz);
+	write_restart_data(istep, x, y, z, dx, dy, dz, fx, fy, fz);
       }
 
       // Swap: dx <=> dx_prev
       swap_step();
-      
+
+      // Swap: x <=> x_prev
+      swap_coord();
+
     }
 
   }

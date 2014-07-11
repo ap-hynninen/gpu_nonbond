@@ -27,17 +27,21 @@ class CudaDomdec : public Decomp {
   int loc2glo_len;
   int *loc2glo;
 
-  // Packed -> global mapping
-  //int pack2glo_len;
-  //int *pack2glo;
-
   // Number of coordinates in each node
   int zone_ncoord[8];
   int zone_pcoord[8];
 
   // (x,y,z) shift
-  int xyz_shift_len;
-  float3 *xyz_shift;
+  // NOTE: we have two copies for mappings
+  int xyz_shift0_len;
+  float3 *xyz_shift0;
+
+  int xyz_shift1_len;
+  float3 *xyz_shift1;
+
+  // Temporary mass array
+  int mass_tmp_len;
+  float *mass_tmp;
 
  public:
 
@@ -60,7 +64,7 @@ class CudaDomdec : public Decomp {
   int* get_loc2glo() {return loc2glo;}
 
   // Return pointer to (x, y, z) shift (=-1.0f, 0.0f, 1.0f)
-  float3* get_xyz_shift() {return xyz_shift;}
+  float3* get_xyz_shift() {return xyz_shift0;}
 
   // Return neighborlist cut-off
   double get_rnl() {return rnl;}
@@ -71,7 +75,13 @@ class CudaDomdec : public Decomp {
   void comm_coord(cudaXYZ<double> *coord, const bool update, cudaStream_t stream=0);
   void comm_force(Force<long long int> *force, cudaStream_t stream=0);
 
-  void reorder_coord(cudaXYZ<double> *coord, cudaXYZ<double> *ref_coord, cudaStream_t stream=0);
+  void reorder_coord(cudaXYZ<double> *coord_src, cudaXYZ<double> *coord_dst,
+		     const int* ind_sorted, cudaStream_t stream=0);
+
+  void reorder_xyz_shift(const int* ind_sorted, cudaStream_t stream=0);
+
+  void reorder_mass(float *mass, const int* ind_sorted, cudaStream_t stream=0);
+
 };
 
 #endif // CUDADOMDEC_H

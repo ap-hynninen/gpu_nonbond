@@ -30,12 +30,17 @@ public:
   void set_xyzq(int ncopy, float4 *h_xyzq, size_t offset=0, cudaStream_t stream=0);
 
   void set_xyzq(const cudaXYZ<double> *coord, const float *q, cudaStream_t stream=0);
-  void set_xyzq(const cudaXYZ<double> *coord, const float *q, const float3 *xyz_shift,
-		const double boxx, const double boxy, const double boxz, cudaStream_t stream=0);
+  void set_xyzq(const cudaXYZ<double> *coord, const float *q, const int *loc2glo,
+		const float3 *xyz_shift, const double boxx, const double boxy, const double boxz,
+		cudaStream_t stream=0);
 
   void set_xyz(const cudaXYZ<double> *coord, cudaStream_t stream=0);
+  void set_xyz(const cudaXYZ<double> *coord, const float3 *xyz_shift,
+	       const double boxx, const double boxy, const double boxz, cudaStream_t stream=0);
 
   bool compare(XYZQ& xyzq_in, const double tol, double& max_diff);
+
+  void print(const int start, const int end, std::ostream& out);
 };
 
 #endif // XYZQ_H

@@ -160,6 +160,11 @@ private:
   int atom_icol_len;
   int *atom_icol;
 
+  // Index sorting performed by this class
+  // Usage: ind_sorted[i] = j : Atom j belongs to position i
+  int ind_sorted_len;
+  int *ind_sorted;
+
   // Global -> local mapping
   int *glo2loc;
 
@@ -214,6 +219,9 @@ private:
   // Maximum number of atom-atom exclusions
   int max_nexcl;
 
+  // Flag for testing neighborlist build
+  bool test;
+
   void get_tile_ientry_est(int *n_int_zone, int int_zone[][8],
 			   int *ncellx, int *ncelly, int *ncellz_max,
 			   float *celldx, float *celldy, float *celldz_min,
@@ -231,17 +239,16 @@ private:
 		      const int ncol_tot,
 		      const float3* min_xyz,
 		      const float* inv_dx, const float* inv_dy,
-		      float4* xyzq, float4* xyzq_sorted,
-		      int* col_patom, int* loc2glo);
+		      const float4* xyzq, const float4* xyzq_sorted,
+		      const int* col_patom);
 
   bool test_sort(const int* zone_patom,
 		 const int* ncellx, const int* ncelly,
 		 const int ncol_tot, const int ncell_max,
 		 const float3* min_xyz,
 		 const float* inv_dx, const float* inv_dy,
-		 float4* xyzq, float4* xyzq_sorted,
-		 int* col_patom, int* cell_patom,
-		 int* loc2glo);
+		 const float4* xyzq, const float4* xyzq_sorted,
+		 const int* col_patom, const int* cell_patom);
 
   void set_nlist_param(cudaStream_t stream);
   void get_nlist_param();
@@ -252,12 +259,11 @@ private:
 
   void sort_alloc_realloc(const int ncol_tot, const int ncoord);
 
-  void sort_build_indices(const int ncoord, float4 *xyzq, const int *loc2glo, cudaStream_t stream);
+  void sort_build_indices(const int ncoord, float4 *xyzq, int *loc2glo, cudaStream_t stream);
 
   void sort_core(const int ncol_tot, const int ncoord,
 		 float4 *xyzq,
 		 float4 *xyzq_sorted,
-		 int *loc2glo,
 		 cudaStream_t stream);
 
   void setup_top_excl(const int ncoord_glo, const int *iblo14, const int *inb14);
@@ -310,6 +316,10 @@ public:
   void analyze();
 
   int *get_glo2loc() {return glo2loc;}
+
+  int *get_ind_sorted() {return ind_sorted;}
+
+  void set_test(bool test_in) {this->test = test_in;}
 
 };
 

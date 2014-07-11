@@ -38,16 +38,44 @@ __global__ void calc_xyz_shift(const int ncoord, const int stride, const double*
 // Re-order coordinates
 //
 __global__ void reorder_coord_kernel(const int ncoord, const int stride,
-				     const int* __restrict__ loc2glo,
+				     const int* __restrict__ ind_sorted,
 				     const double* __restrict__ coord_src,
 				     double* __restrict__ coord_dst) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
   const int stride2 = stride*2;
   if (i < ncoord) {
-    int j = loc2glo[i];
-    coord_dst[j]         = coord_src[i];
-    coord_dst[j+stride]  = coord_src[i+stride];
-    coord_dst[j+stride2] = coord_src[i+stride2];
+    int j = ind_sorted[i];
+    coord_dst[i]         = coord_src[j];
+    coord_dst[i+stride]  = coord_src[j+stride];
+    coord_dst[i+stride2] = coord_src[j+stride2];
+  }
+}
+
+//
+// Re-order xyz_shift
+//
+__global__ void reorder_xyz_shift_kernel(const int ncoord,
+					 const int* __restrict__ ind_sorted,
+					 const float3* __restrict__ xyz_shift_in,
+					 float3* __restrict__ xyz_shift_out) {
+  const int i = threadIdx.x + blockIdx.x*blockDim.x;
+  if (i < ncoord) {
+    int j = ind_sorted[i];
+    xyz_shift_out[i] = xyz_shift_in[j];
+  }
+}
+
+//
+// Re-order mass
+//
+__global__ void reorder_mass_kernel(const int ncoord,
+				    const int* __restrict__ ind_sorted,
+				    const float* __restrict__ mass_in,
+				    float* __restrict__ mass_out) {
+  const int i = threadIdx.x + blockIdx.x*blockDim.x;
+  if (i < ncoord) {
+    int j = ind_sorted[i];
+    mass_out[i] = mass_in[j];
   }
 }
 
@@ -74,8 +102,14 @@ CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, do
   loc2glo_len = 0;
   loc2glo = NULL;
 
-  xyz_shift_len = 0;
-  xyz_shift = NULL;
+  xyz_shift0_len = 0;
+  xyz_shift0 = NULL;
+
+  xyz_shift1_len = 0;
+  xyz_shift1 = NULL;
+
+  mass_tmp_len = 0;
+  mass_tmp = NULL;
 }
 
 //
@@ -83,7 +117,9 @@ CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, do
 //
 CudaDomdec::~CudaDomdec() {
   if (loc2glo != NULL) deallocate<int>(&loc2glo);
-  if (xyz_shift != NULL) deallocate<float3>(&xyz_shift);
+  if (xyz_shift0 != NULL) deallocate<float3>(&xyz_shift0);
+  if (xyz_shift1 != NULL) deallocate<float3>(&xyz_shift1);
+  if (mass_tmp != NULL) deallocate<float>(&mass_tmp);
 }
 
 //
@@ -147,13 +183,14 @@ void CudaDomdec::comm_coord(cudaXYZ<double> *coord, const bool update, cudaStrea
     double inv_boxz = 1.0/boxz;
 
     float fac = (numnode > 1) ? 1.2f : 1.0f;
-    reallocate<float3>(&xyz_shift, &xyz_shift_len, zone_pcoord[7], fac);
+    reallocate<float3>(&xyz_shift0, &xyz_shift0_len, zone_pcoord[7], fac);
+    reallocate<float3>(&xyz_shift1, &xyz_shift1_len, zone_pcoord[7], fac);
     
     int nthread = 512;
     int nblock = (zone_pcoord[7] - 1)/nthread + 1;
     calc_xyz_shift<<< nblock, nthread, 0, stream >>>
       (zone_pcoord[7], coord->stride, coord->data,
-       x0, y0, z0, inv_boxx, inv_boxy, inv_boxz, xyz_shift);
+       x0, y0, z0, inv_boxx, inv_boxy, inv_boxz, xyz_shift0);
     cudaCheck(cudaGetLastError());
   }
 
@@ -168,7 +205,8 @@ void CudaDomdec::comm_force(Force<long long int> *force, cudaStream_t stream) {
 //
 // Re-order coordinates using loc2glo: coord_src => coord_dst
 //
-void CudaDomdec::reorder_coord(cudaXYZ<double> *coord_src, cudaXYZ<double> *coord_dst, cudaStream_t stream) {
+void CudaDomdec::reorder_coord(cudaXYZ<double> *coord_src, cudaXYZ<double> *coord_dst,
+			       const int* ind_sorted, cudaStream_t stream) {
   assert(coord_src->match(coord_dst));
   assert(zone_pcoord[7] == coord_src->n);
 
@@ -176,11 +214,47 @@ void CudaDomdec::reorder_coord(cudaXYZ<double> *coord_src, cudaXYZ<double> *coor
     int nthread = 512;
     int nblock = (zone_pcoord[7] - 1)/nthread + 1;
     reorder_coord_kernel<<< nblock, nthread, 0, stream >>>
-      (zone_pcoord[7], coord_src->stride, loc2glo, coord_src->data, coord_dst->data);
+      (zone_pcoord[7], coord_src->stride, ind_sorted, coord_src->data, coord_dst->data);
     cudaCheck(cudaGetLastError());
   } else {
     std::cerr << "CudaDomdec::reorder_coord, not ready for numnode > 1" << std::endl;
     exit(1);
   }
 
+}
+
+//
+// Re-order xyz_shift
+//
+void CudaDomdec::reorder_xyz_shift(const int* ind_sorted, cudaStream_t stream) {
+
+  int nthread = 512;
+  int nblock = (zone_pcoord[7] - 1)/nthread + 1;
+  reorder_xyz_shift_kernel<<< nblock, nthread, 0, stream >>>
+    (zone_pcoord[7], ind_sorted, xyz_shift0, xyz_shift1);
+  cudaCheck(cudaGetLastError());
+
+  float3 *p = xyz_shift0;
+  xyz_shift0 = xyz_shift1;
+  xyz_shift1 = p;
+
+  int t = xyz_shift0_len;
+  xyz_shift0_len = xyz_shift1_len;
+  xyz_shift1_len = t;
+}
+
+//
+// Re-order mass
+//
+void CudaDomdec::reorder_mass(float *mass, const int* ind_sorted, cudaStream_t stream) {
+
+  reallocate<float>(&mass_tmp, &mass_tmp_len, zone_pcoord[7], 1.2f);
+
+  int nthread = 512;
+  int nblock = (zone_pcoord[7] - 1)/nthread + 1;
+  reorder_mass_kernel<<< nblock, nthread, 0, stream >>>
+    (zone_pcoord[7], ind_sorted, mass, mass_tmp);
+  cudaCheck(cudaGetLastError());
+
+  copy_DtoD<float>(mass_tmp, mass, zone_pcoord[7], stream);
 }

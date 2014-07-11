@@ -53,6 +53,7 @@ __global__ void set_xyzq_kernel(const int ncoord, const int stride,
 __global__ void set_xyzq_shift_kernel(const int ncoord, const int stride,
 				      const double* __restrict__ xyz,
 				      const float* __restrict__ q,
+				      const int* __restrict__ loc2glo,
 				      const float3* __restrict__ xyz_shift,
 				      const double boxx, const double boxy, const double boxz,
 				      float4* __restrict__ xyzq) {
@@ -63,8 +64,29 @@ __global__ void set_xyzq_shift_kernel(const int ncoord, const int stride,
     xyzq_val.x = (float)(xyz[tid]            + ((double)shift.x)*boxx);
     xyzq_val.y = (float)(xyz[tid + stride]   + ((double)shift.y)*boxy);
     xyzq_val.z = (float)(xyz[tid + stride*2] + ((double)shift.z)*boxz);
-    xyzq_val.w = q[tid];
+    xyzq_val.w = q[loc2glo[tid]];
     xyzq[tid] = xyzq_val;
+  }
+}
+
+//
+// Copies (x, y, z) into xyzq -array and also shifts (x, y, z)
+//
+__global__ void set_xyz_shift_kernel(const int ncoord, const int stride,
+				     const double* __restrict__ xyz,
+				     const float3* __restrict__ xyz_shift,
+				     const double boxx, const double boxy, const double boxz,
+				     float4* __restrict__ xyzq) {
+  const int tid = threadIdx.x + blockIdx.x*blockDim.x;
+  if (tid < ncoord) {
+    float4 xyzq_val;
+    float3 shift = xyz_shift[tid];
+    xyzq_val.x = (float)(xyz[tid]            + ((double)shift.x)*boxx);
+    xyzq_val.y = (float)(xyz[tid + stride]   + ((double)shift.y)*boxy);
+    xyzq_val.z = (float)(xyz[tid + stride*2] + ((double)shift.z)*boxz);
+    xyzq[tid].x = xyzq_val.x;
+    xyzq[tid].y = xyzq_val.y;
+    xyzq[tid].z = xyzq_val.z;
   }
 }
 
@@ -72,8 +94,12 @@ __global__ void set_xyzq_shift_kernel(const int ncoord, const int stride,
 //##########################################################################################
 //##########################################################################################
 
+//
+// Return xyzq length that has extra align:
+// ncoord-1 = last possible index
+//
 int XYZQ::get_xyzq_len() {
-  return ((ncoord-1)/align+1)*align;
+  return (ncoord-1 + align);
 }
 
 //
@@ -176,17 +202,17 @@ void XYZQ::set_xyzq(const cudaXYZ<double> *coord, const float *q, cudaStream_t s
 //
 // Copies x,y,z,q (on device) into the coordinate slots
 //
-void XYZQ::set_xyzq(const cudaXYZ<double> *coord, const float *q, const float3 *xyz_shift,
+void XYZQ::set_xyzq(const cudaXYZ<double> *coord, const float *q, const int *loc2glo,
+		    const float3 *xyz_shift,
 		    const double boxx, const double boxy, const double boxz, cudaStream_t stream) {
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
   set_xyzq_shift_kernel<<< nblock, nthread, 0, stream >>>(coord->n, coord->stride, coord->data, q,
-							  xyz_shift, boxx, boxy, boxz, xyzq);
+							  loc2glo, xyz_shift, boxx, boxy, boxz, xyzq);
 
   cudaCheck(cudaGetLastError());
 }
-
 
 //
 // Copies x,y,z (on device) into the coordinate slots
@@ -196,6 +222,20 @@ void XYZQ::set_xyz(const cudaXYZ<double> *coord, cudaStream_t stream) {
   int nblock = (ncoord-1)/nthread+1;
 
   set_xyz_kernel<<< nblock, nthread, 0, stream >>>(coord->n, coord->stride, coord->data, xyzq);
+
+  cudaCheck(cudaGetLastError());
+}
+
+//
+// Copies x,y,z,q (on device) into the coordinate slots
+//
+void XYZQ::set_xyz(const cudaXYZ<double> *coord, const float3 *xyz_shift,
+		    const double boxx, const double boxy, const double boxz, cudaStream_t stream) {
+  int nthread = 512;
+  int nblock = (ncoord-1)/nthread+1;
+
+  set_xyz_shift_kernel<<< nblock, nthread, 0, stream >>>(coord->n, coord->stride, coord->data,
+							 xyz_shift, boxx, boxy, boxz, xyzq);
 
   cudaCheck(cudaGetLastError());
 }
@@ -241,4 +281,17 @@ bool XYZQ::compare(XYZQ& xyzq_in, const double tol, double& max_diff) {
   delete [] h_xyzq_in;
 
   return ok;
+}
+
+void XYZQ::print(const int start, const int end, std::ostream& out) {
+
+  float4 *h_xyzq = new float4[ncoord];
+  copy_DtoH<float4>(xyzq, h_xyzq, ncoord);
+
+  for (int i=start;i <= end;i++) {
+    out << i << " " << h_xyzq[i].x << " " << h_xyzq[i].y << " "
+	<< h_xyzq[i].z << " " << h_xyzq[i].w << std::endl;
+  }
+
+  delete [] h_xyzq;
 }

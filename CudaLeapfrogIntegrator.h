@@ -7,6 +7,11 @@
 #include "CudaPMEForcefield.h"
 #include "HoloConst.h"
 
+struct CudaLeapfrogIntegrator_storage_t {
+  // Kinetic energy
+  double kine;
+};
+
 class CudaLeapfrogIntegrator : public LeapfrogIntegrator {
 
   //friend class LangevinPiston;
@@ -26,6 +31,7 @@ private:
   cudaXYZ<double> prev_step;
 
   // Mass
+  int mass_len;
   float *mass;
 
   // Force array
@@ -39,15 +45,21 @@ private:
   // Holonomic constraints
   HoloConst *holoconst;
 
+  // Host version of storage
+  CudaLeapfrogIntegrator_storage_t *h_CudaLeapfrogIntegrator_storage;
+
   cudaEvent_t copy_rms_work_done_event;
   cudaEvent_t copy_temp_ekin_done_event;
 
   cudaStream_t stream;
 
+  // Pure virtual function overriders
   void swap_step();
+  void swap_coord();
   void take_step();
   void calc_step();
   void calc_force(const bool calc_energy, const bool calc_virial);
+  void calc_temperature();
   void do_holoconst();
   void do_pressure();
   void do_temperature();
@@ -62,9 +74,10 @@ public:
   CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_t stream=0);
   ~CudaLeapfrogIntegrator();
 
-  void init(const int ncoord,
-	    const double *x, const double *y, const double *z,
-	    const double *dx, const double *dy, const double *dz);
+  void spec_init(const int ncoord,
+		 const double *x, const double *y, const double *z,
+		 const double *dx, const double *dy, const double *dz,
+		 const double *h_mass);
 
 };
 

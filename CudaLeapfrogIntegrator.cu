@@ -5,17 +5,22 @@
 #include "gpu_utils.h"
 
 //
+// Storage
+//
+static __device__ CudaLeapfrogIntegrator_storage_t d_CudaLeapfrogIntegrator_storage;
+
+//
 // Calculates: coord = prev_coord + step
 //
 __global__ void take_step_kernel(const int stride3,
-				 const double* __restrict__ prev_coord,
+				 double* __restrict__ prev_coord,
 				 const double* __restrict__ step,
 				 double* __restrict__ coord) {
 
   const int tid = threadIdx.x + blockIdx.x*blockDim.x;
 
   if (tid < stride3) {
-    coord[tid] = prev_coord[tid] + 0*step[tid];
+    coord[tid] = prev_coord[tid] + step[tid];
   }
 
 }
@@ -37,15 +42,49 @@ __global__ void calc_step_kernel(const int ncoord, const int stride, const int s
 
   if (tid < ncoord) {
     double gamma_val = dtsq/(double)mass[tid];
-    /*
     step[tid]         = prev_step[tid]         - force[tid]*gamma_val;
     step[tid+stride]  = prev_step[tid+stride]  - force[tid+stride_force]*gamma_val;
     step[tid+stride2] = prev_step[tid+stride2] - force[tid+stride_force2]*gamma_val;
-    */
-    step[tid]         = prev_step[tid];
-    step[tid+stride]  = prev_step[tid+stride];
-    step[tid+stride2] = prev_step[tid+stride2];
   }
+}
+
+//
+// Calculates kinetic energy
+//
+__global__ void calc_kine_kernel(const int ncoord, const int stride,
+				 const double fac,
+				 const float* __restrict__ mass,
+				 const double* __restrict__ prev_step,
+				 const double* __restrict__ step) {
+
+  // Required shared memory:
+  // blockDim.x*sizeof(double)
+  extern __shared__ double sh_kine[];
+
+  const int tid = threadIdx.x + blockIdx.x*blockDim.x;
+
+  double kine = 0.0;
+  if (tid < ncoord) {
+    double vx = (prev_step[tid]          + step[tid])*fac;
+    double vy = (prev_step[tid+stride]   + step[tid+stride])*fac;
+    double vz = (prev_step[tid+stride*2] + step[tid+stride*2])*fac;
+    kine = ((double)mass[tid])*(vx*vx + vy*vy + vz*vz);
+  }
+
+  sh_kine[threadIdx.x] = kine;
+  __syncthreads();
+  for (int d=1;d < blockDim.x;d*=2) {
+    int t = threadIdx.x + d;
+    double kine_val = (t < blockDim.x) ? sh_kine[t] : 0.0;
+    __syncthreads();
+    sh_kine[threadIdx.x] += kine_val;
+    __syncthreads();
+  }
+  
+  if (threadIdx.x == 0) {
+    atomicAdd(&d_CudaLeapfrogIntegrator_storage.kine, sh_kine[0]);
+  }
+
 }
 
 //##################################################################################################
@@ -58,7 +97,9 @@ CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_
   this->stream = stream;
   cudaCheck(cudaEventCreate(&copy_rms_work_done_event));
   cudaCheck(cudaEventCreate(&copy_temp_ekin_done_event));
+  mass_len = 0;
   mass = NULL;
+  allocate_host<CudaLeapfrogIntegrator_storage_t>(&h_CudaLeapfrogIntegrator_storage, 1);
 }
 
 //
@@ -68,19 +109,41 @@ CudaLeapfrogIntegrator::~CudaLeapfrogIntegrator() {
   cudaCheck(cudaEventDestroy(copy_rms_work_done_event));
   cudaCheck(cudaEventDestroy(copy_temp_ekin_done_event));
   if (mass != NULL) deallocate<float>(&mass);
+  deallocate_host<CudaLeapfrogIntegrator_storage_t>(&h_CudaLeapfrogIntegrator_storage);
 }
 
 //
 // Initialize integrator
 //
-void CudaLeapfrogIntegrator::init(const int ncoord,
-				  const double *x, const double *y, const double *z,
-				  const double *dx, const double *dy, const double *dz) {
+void CudaLeapfrogIntegrator::spec_init(const int ncoord,
+				       const double *x, const double *y, const double *z,
+				       const double *dx, const double *dy, const double *dz,
+				       const double *h_mass) {
+
+  // Resize arrays
+  step.resize(ncoord);
+  prev_step.resize(ncoord);
+
+  coord.resize(ncoord);
+  prev_coord.resize(ncoord);
+
+  force.set_ncoord(ncoord);
+
+  reallocate<float>(&mass, &mass_len, ncoord);
+
+  // Copy array data
   prev_coord.set_data_sync(ncoord, x, y, z);
   prev_step.set_data_sync(ncoord, dx, dy, dz);
-  step.resize(ncoord);
-  coord.resize(ncoord);
-  force.set_ncoord(ncoord);
+
+  float *h_mass_f = new float[ncoord];
+  for (int i=0;i < ncoord;i++) {
+    h_mass_f[i] = (float)h_mass[i];
+  }
+  copy_HtoD<float>(h_mass_f, mass, ncoord);
+  delete [] h_mass_f;
+
+  step.clear();
+  coord.clear();
 
   // Host versions of coordinate, step, and force arrays
   // NOTE: These are used for copying coordinates
@@ -107,6 +170,18 @@ void CudaLeapfrogIntegrator::swap_step() {
 
 }
 
+//
+// Swaps coord <=> prev_coord
+//
+void CudaLeapfrogIntegrator::swap_coord() {
+  assert(coord.match(prev_coord));
+
+  // Wait here until work on stream has stopped
+  cudaCheck(cudaStreamSynchronize(stream));
+
+  coord.swap(prev_coord);
+
+}
 
 //
 // Calculates new current coordinate positions (cur) using 
@@ -135,12 +210,11 @@ void CudaLeapfrogIntegrator::calc_step() {
 
   int ncoord = step.n;
   int stride = step.stride;
-  int stride_force = stride;
+  int stride_force = force.xyz.stride;
   int nthread = 512;
   int nblock = (ncoord - 1)/nthread + 1;
 
-  double timestep_in_ps = timestep*1.0e-3;
-  double dtsq = timestep_in_ps*timestep_in_ps;
+  double dtsq = timestep_akma*timestep_akma;
 
   calc_step_kernel<<< nblock, nthread, 0, stream >>>
     (ncoord, stride, stride_force, dtsq,
@@ -157,9 +231,37 @@ void CudaLeapfrogIntegrator::calc_force(const bool calc_energy, const bool calc_
 
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    p->calc(&coord, &prev_step, calc_energy, calc_virial, &force);
+    p->calc(&coord, &prev_step, mass, calc_energy, calc_virial, &force);
   }
 
+}
+
+//
+// Calculate temperature
+//
+void CudaLeapfrogIntegrator::calc_temperature() {
+  // Clear kinetic energy accumulator
+  h_CudaLeapfrogIntegrator_storage->kine = 0.0;
+  cudaCheck(cudaMemcpyToSymbolAsync(d_CudaLeapfrogIntegrator_storage,
+				    h_CudaLeapfrogIntegrator_storage,
+				    sizeof(CudaLeapfrogIntegrator_storage_t),
+				    0, cudaMemcpyHostToDevice, stream));
+  // Calculate kinetic energy
+  int ncoord = step.n;
+  int stride = step.stride;
+  int nthread = 512;
+  int nblock = (ncoord - 1)/nthread + 1;
+  int shmem_size = nthread*sizeof(double);
+  double fac = 0.5/timestep_akma;
+  calc_kine_kernel<<< nblock, nthread, shmem_size, stream >>>
+    (ncoord, stride, fac, mass, prev_step.data, step.data);
+  cudaCheck(cudaGetLastError());
+  // Retrieve result
+  cudaCheck(cudaMemcpyFromSymbol(h_CudaLeapfrogIntegrator_storage,
+				 d_CudaLeapfrogIntegrator_storage,
+				 sizeof(CudaLeapfrogIntegrator_storage_t),
+				 0, cudaMemcpyDeviceToHost));
+  //std::cout << "kinetic energy = " << 0.5*h_CudaLeapfrogIntegrator_storage->kine << std::endl;
 }
 
 //

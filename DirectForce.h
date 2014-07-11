@@ -186,6 +186,7 @@ public:
 			 double *energy_vdw, double *energy_elec,
 			 double *energy_excl,
 			 double *vir);
+
 };
 
 #endif // DIRECTFORCE_H

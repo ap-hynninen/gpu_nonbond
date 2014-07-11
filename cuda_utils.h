@@ -6,7 +6,7 @@
 template <typename T>
 inline int calc_stride(int ncoord) {
   //const int sizeof_T = 4;
-  return ((ncoord*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
+  return (( (ncoord-1+32)*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
   //return ((ncoord*sizeof_T - 1)/256 + 1)*256/sizeof_T;
 }
 

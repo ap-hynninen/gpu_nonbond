@@ -776,8 +776,7 @@ __global__ void reorder_atoms_z_column_kernel(const int ncoord,
 					      const int* col_patom,
 					      const float4* __restrict__ xyzq_in,
 					      float4* __restrict__ xyzq_out,
-					      const int* __restrict__ loc2glo_in,
-					      int* __restrict__ loc2glo_out) {
+					      int* __restrict__ ind_sorted) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
   
   if (i < ncoord) {
@@ -786,14 +785,30 @@ __global__ void reorder_atoms_z_column_kernel(const int ncoord,
     int n = atomicAdd(&col_natom[icol], 1);
     // new position = pos + n
     int newpos = pos + n;
-    loc2glo_out[newpos] = loc2glo_in[i];
+    ind_sorted[newpos] = i;
     xyzq_out[newpos] = xyzq_in[i];
   }
 
 }
 
 //
-// Builds glo2loc
+// Reorders loc2glo
+//
+__global__ void build_loc2glo_kernel(const int ncoord,
+				     const int* __restrict__ ind_sorted,
+				     const int* __restrict__ loc2glo_in,
+				     int* __restrict__ loc2glo_out) {
+  const int i = threadIdx.x + blockIdx.x*blockDim.x;
+  
+  if (i < ncoord) {
+    int j = ind_sorted[i];
+    loc2glo_out[i] = loc2glo_in[j];
+  }
+}
+
+
+//
+// Builds glo2loc using loc2glo
 //
 __global__ void build_glo2loc_kernel(const int ncoord,
 				     const int* __restrict__ loc2glo,
@@ -836,7 +851,7 @@ struct keyval_t {
 };
 __global__ void sort_z_column_kernel(const int* __restrict__ col_patom,
 				     float4* __restrict__ xyzq,
-				     int* __restrict__ loc2glo) {
+				     int* __restrict__ ind_sorted) {
 
   // Shared memory
   // Requires: blockDim.x*sizeof(keyval_t)
@@ -888,15 +903,15 @@ __global__ void sort_z_column_kernel(const int* __restrict__ col_patom,
   float4 xyzq_val;
   int ind_val;
   if (threadIdx.x < n) {
-    int i = sh_keyval[threadIdx.x].val;
-    ind_val = loc2glo[i];
+    int i = sh_keyval[threadIdx.x].val;    
+    ind_val = ind_sorted[i];
     xyzq_val = xyzq[i];
   }
   __syncthreads();
   if (threadIdx.x < n) {
     int newpos = threadIdx.x + col_patom0;
+    ind_sorted[newpos] = ind_val;
     xyzq[newpos] = xyzq_val;
-    loc2glo[newpos] = ind_val;
   }
 
 }
@@ -1943,6 +1958,7 @@ NeighborList<tilesize>::~NeighborList() {
   if (col_patom != NULL) deallocate<int>(&col_patom);
   if (atom_icol != NULL) deallocate<int>(&atom_icol);
   if (glo2loc != NULL) deallocate<int>(&glo2loc);
+  if (ind_sorted != NULL) deallocate<int>(&ind_sorted);
   if (cell_patom != NULL) deallocate<int>(&cell_patom);
   if (atom_pcell != NULL) deallocate<int>(&atom_pcell);
   if (col_ncellz != NULL) deallocate<int>(&col_ncellz);
@@ -1992,6 +2008,9 @@ void NeighborList<tilesize>::init() {
 
   col_patom_len = 0;
   col_patom = NULL;
+
+  ind_sorted_len = 0;
+  ind_sorted = NULL;
 
   atom_icol_len = 0;
   atom_icol = NULL;
@@ -2058,6 +2077,8 @@ void NeighborList<tilesize>::init() {
     h_nlist_param->imz_lo = -1;
     h_nlist_param->imz_hi = 1;
   }
+
+  test = false;
 }
 
 //
@@ -2129,11 +2150,13 @@ void NeighborList<tilesize>::set_cell_sizes(const int *zone_natom,
     }
   }
 
+  /*
   std::cout << "celldx = " << celldx[0] << " ncellx[0] = " << ncellx[0] 
 	    << " xsize = " << max_xyz[0].x - min_xyz[0].x + 0.001f << std::endl;
 
   std::cout << "celldy = " << celldy[0] << " ncelly[0] = " << ncelly[0] 
 	    << " ysize = " << max_xyz[0].y - min_xyz[0].y + 0.001f << std::endl;
+  */
 
 }
 
@@ -2146,8 +2169,8 @@ bool NeighborList<tilesize>::test_z_columns(const int* zone_patom,
 					    const int ncol_tot,
 					    const float3* min_xyz,
 					    const float* celldx, const float* celldy,
-					    float4* xyzq, float4* xyzq_sorted,
-					    int* col_patom, int* loc2glo) {
+					    const float4* xyzq, const float4* xyzq_sorted,
+					    const int* col_patom) {
 
   int ncoord = zone_patom[7];
   float4 *h_xyzq = new float4[ncoord];
@@ -2157,8 +2180,8 @@ bool NeighborList<tilesize>::test_z_columns(const int* zone_patom,
 
   int *h_col_patom = new int[ncol_tot+1];
   copy_DtoH<int>(col_patom, h_col_patom, ncol_tot+1);
-  int *h_loc2glo = new int[ncoord];
-  copy_DtoH<int>(loc2glo, h_loc2glo, ncoord);
+  int *h_ind_sorted = new int[ncoord];
+  copy_DtoH<int>(ind_sorted, h_ind_sorted, ncoord);
 
   bool ok = true;
 
@@ -2189,9 +2212,9 @@ bool NeighborList<tilesize>::test_z_columns(const int* zone_patom,
 	  if (i < lo_ind || i > hi_ind) throw 1;
 	}
 	for (i=istart;i <= iend;i++) {
+	  j = h_ind_sorted[i];
 	  x = h_xyzq_sorted[i].x;
 	  y = h_xyzq_sorted[i].y;
-	  j = h_loc2glo[i];
 	  xj = h_xyzq[j].x;
 	  yj = h_xyzq[j].y;
 	  if (x != xj || y != yj) {
@@ -2218,7 +2241,7 @@ bool NeighborList<tilesize>::test_z_columns(const int* zone_patom,
   delete [] h_xyzq;
   delete [] h_xyzq_sorted;
   delete [] h_col_patom;
-  delete [] h_loc2glo;
+  delete [] h_ind_sorted;
 
   return ok;
 }
@@ -2232,9 +2255,8 @@ bool NeighborList<tilesize>::test_sort(const int* zone_patom,
 				       const int ncol_tot, const int ncell_max,
 				       const float3* min_xyz,
 				       const float* celldx, const float* celldy,
-				       float4* xyzq, float4* xyzq_sorted,
-				       int* col_patom, int* cell_patom,
-				       int* loc2glo) {
+				       const float4* xyzq, const float4* xyzq_sorted,
+				       const int* col_patom, const int* cell_patom) {
 
   int ncoord = zone_patom[7];
   float4 *h_xyzq = new float4[ncoord];
@@ -2243,8 +2265,8 @@ bool NeighborList<tilesize>::test_sort(const int* zone_patom,
   copy_DtoH<float4>(xyzq_sorted, h_xyzq_sorted, ncoord);
   int *h_col_patom = new int[ncol_tot+1];
   copy_DtoH<int>(col_patom, h_col_patom, ncol_tot+1);
-  int *h_loc2glo = new int[ncoord];
-  copy_DtoH<int>(loc2glo, h_loc2glo, ncoord);
+  int *h_ind_sorted = new int[ncoord];
+  copy_DtoH<int>(ind_sorted, h_ind_sorted, ncoord);
   int *h_cell_patom = new int[ncell_max];
   copy_DtoH<int>(cell_patom, h_cell_patom, ncell_max);
 
@@ -2300,10 +2322,10 @@ bool NeighborList<tilesize>::test_sort(const int* zone_patom,
 	}
 
 	for (i=istart;i <= iend;i++) {
+	  j = h_ind_sorted[i];
 	  x = h_xyzq_sorted[i].x;
 	  y = h_xyzq_sorted[i].y;
-	  z = h_xyzq_sorted[i].z;	  
-	  j = h_loc2glo[i];
+	  z = h_xyzq_sorted[i].z;
 	  xj = h_xyzq[j].x;
 	  yj = h_xyzq[j].y;
 	  zj = h_xyzq[j].z;
@@ -2338,7 +2360,7 @@ bool NeighborList<tilesize>::test_sort(const int* zone_patom,
   delete [] h_xyzq_sorted;
   delete [] h_col_patom;
   delete [] h_cell_patom;
-  delete [] h_loc2glo;
+  delete [] h_ind_sorted;
 
   return ok;
 }
@@ -2402,7 +2424,6 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
 				  cudaStream_t stream) {
   int ncoord = zone_patom[7];
   int ncol_tot;
-  bool test = true;
 
   if (ncoord > ncoord_glo) {
     std::cerr << "NeighborList::sort(1), Invalid value for ncoord" << std::endl;
@@ -2418,7 +2439,7 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
   // --------------------------------------------------------------
 
   // ---------------------- Do actual sorting ---------------------
-  sort_core(ncol_tot, ncoord, xyzq, xyzq_sorted, loc2glo, stream);
+  sort_core(ncol_tot, ncoord, xyzq, xyzq_sorted, stream);
   // --------------------------------------------------------------
 
   // ------------------ Build indices etc. after sort -------------
@@ -2430,7 +2451,7 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
     cudaCheck(cudaDeviceSynchronize());
     test_sort(h_nlist_param->zone_patom, h_nlist_param->ncellx, h_nlist_param->ncelly,
 	      ncol_tot, ncell_max, min_xyz, h_nlist_param->celldx, h_nlist_param->celldy,
-	      xyzq, xyzq_sorted, col_patom, cell_patom, loc2glo);
+	      xyzq, xyzq_sorted, col_patom, cell_patom);
   }
 
 }
@@ -2446,7 +2467,6 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
 				  cudaStream_t stream) {
   const int ncoord = zone_patom[7];
   int ncol_tot;
-  bool test = true;
 
   if (ncoord > ncoord_glo) {
     std::cerr << "NeighborList::sort(1), Invalid value for ncoord" << std::endl;
@@ -2479,6 +2499,7 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
   cudaCheck(cudaDeviceSynchronize());
   get_nlist_param();
 
+  /*
   std::cout << "min_xyz = " << h_nlist_param->min_xyz[0].x << " "
 	    << h_nlist_param->min_xyz[0].y << " "
 	    << h_nlist_param->min_xyz[0].z << " " << std::endl;
@@ -2486,6 +2507,7 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
   std::cout << "max_xyz = " << h_nlist_param->max_xyz[0].x << " "
 	    << h_nlist_param->max_xyz[0].y << " "
 	    << h_nlist_param->max_xyz[0].z << " " << std::endl;
+  */
 
   // -------------------------- Setup -----------------------------
   sort_setup(zone_patom, h_nlist_param->max_xyz, h_nlist_param->min_xyz, ncol_tot, stream);
@@ -2496,7 +2518,7 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
   // --------------------------------------------------------------
 
   // ---------------------- Do actual sorting ---------------------
-  sort_core(ncol_tot, ncoord, xyzq, xyzq_sorted, loc2glo, stream);
+  sort_core(ncol_tot, ncoord, xyzq, xyzq_sorted, stream);
   // --------------------------------------------------------------
 
   // ------------------ Build indices etc. after sort -------------
@@ -2509,7 +2531,7 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
     test_sort(h_nlist_param->zone_patom, h_nlist_param->ncellx, h_nlist_param->ncelly,
 	      ncol_tot, ncell_max, h_nlist_param->min_xyz,
 	      h_nlist_param->celldx, h_nlist_param->celldy,
-	      xyzq, xyzq_sorted, col_patom, cell_patom, loc2glo);
+	      xyzq, xyzq_sorted, col_patom, cell_patom);
   }
 
 }
@@ -2591,13 +2613,15 @@ void NeighborList<tilesize>::sort_alloc_realloc(const int ncol_tot, const int nc
   reallocate<int>(&col_ncellz, &col_ncellz_len, ncol_tot, 1.2f);
   reallocate<int3>(&col_xy_zone, &col_xy_zone_len, ncol_tot, 1.2f);
   reallocate<int>(&col_cell, &col_cell_len, ncol_tot, 1.2f);
+
+  reallocate<int>(&ind_sorted, &ind_sorted_len, ncoord, 1.2f);
 }
 
 //
 // Builds indices etc. after sort. xyzq is the sorted array
 //
 template <int tilesize>
-void NeighborList<tilesize>::sort_build_indices(const int ncoord, float4 *xyzq, const int *loc2glo,
+void NeighborList<tilesize>::sort_build_indices(const int ncoord, float4 *xyzq, int *loc2glo,
 						cudaStream_t stream) {
   // Value of ncoord on previous call
   static int ncoord_prev = 0;
@@ -2609,7 +2633,19 @@ void NeighborList<tilesize>::sort_build_indices(const int ncoord, float4 *xyzq, 
 
   int nthread, nblock, shmem_size;
 
+  //
+  // Build loc2glo (really we are reordering it with ind_sorted)
+  //
+  // Make a copy of loc2glo to glo2loc
+  // NOTE: This is temporary, glo2loc will be used for a different purpose later
+  copy_DtoD<int>(loc2glo, glo2loc, ncoord, stream);
+  nthread = 512;
+  nblock = (ncoord - 1)/nthread + 1;
+  build_loc2glo_kernel<<< nblock, nthread, 0, stream >>>(ncoord, ind_sorted, glo2loc, loc2glo);
+  cudaCheck(cudaGetLastError());
+
   // Build glo2loc
+  // NOTE: We mark atoms that do not exist with -1
   if (ncoord_prev > 0) set_gpu_array<int>(glo2loc, ncoord_prev, -1, stream);
   ncoord_prev = ncoord;
   nthread = 512;
@@ -2651,10 +2687,8 @@ template <int tilesize>
 void NeighborList<tilesize>::sort_core(const int ncol_tot, const int ncoord,
 				       float4 *xyzq,
 				       float4 *xyzq_sorted,
-				       int *loc2glo,
 				       cudaStream_t stream) {
 
-  bool test = true;
   int nthread, nblock, shmem_size;
 
   // Clear col_natom
@@ -2662,7 +2696,7 @@ void NeighborList<tilesize>::sort_core(const int ncol_tot, const int ncoord,
 
   // Make a copy of loc2glo to glo2loc
   // NOTE: This is temporary, glo2loc will be used for a different purpose later
-  copy_DtoD<int>(loc2glo, glo2loc, ncoord, stream);
+  //copy_DtoD<int>(loc2glo, glo2loc, ncoord, stream);
 
   //
   // Calculate number of atoms in each z-column (col_natom)
@@ -2691,7 +2725,7 @@ void NeighborList<tilesize>::sort_core(const int ncol_tot, const int ncoord,
   nthread = 512;
   nblock = (ncoord-1)/nthread+1;
   reorder_atoms_z_column_kernel<<< nblock, nthread, 0, stream >>>
-    (ncoord, atom_icol, col_natom, col_patom, xyzq, xyzq_sorted, glo2loc, loc2glo);
+    (ncoord, atom_icol, col_natom, col_patom, xyzq, xyzq_sorted, ind_sorted);
   cudaCheck(cudaGetLastError());
 
   // Test z columns
@@ -2699,7 +2733,7 @@ void NeighborList<tilesize>::sort_core(const int ncol_tot, const int ncoord,
     cudaCheck(cudaDeviceSynchronize());
     test_z_columns(h_nlist_param->zone_patom, h_nlist_param->ncellx, h_nlist_param->ncelly,
 		   ncol_tot, h_nlist_param->min_xyz, h_nlist_param->celldx, h_nlist_param->celldy,
-		   xyzq, xyzq_sorted, col_patom, loc2glo);
+		   xyzq, xyzq_sorted, col_patom);
   }
 
   // Now sort according to z coordinate
@@ -2708,7 +2742,7 @@ void NeighborList<tilesize>::sort_core(const int ncol_tot, const int ncoord,
   if (nthread < get_max_nthread()) {
     shmem_size = nthread*sizeof(keyval_t);
     sort_z_column_kernel<<< nblock, nthread, shmem_size, stream >>>
-      (col_patom, xyzq_sorted, loc2glo);
+      (col_patom, xyzq_sorted, ind_sorted);
     cudaCheck(cudaGetLastError());
   } else {
     std::cerr << "Neighborlist::sort_core, this version of sort_z_column_kernel not implemented yet"
@@ -2744,14 +2778,14 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
   int nthread, nblock, shmem_size;
 
   get_nlist_param();
-  std::cout << "ncell = " << h_nlist_param->ncell << " ncell_max = " << ncell_max << std::endl;
+  //std::cout << "ncell = " << h_nlist_param->ncell << " ncell_max = " << ncell_max << std::endl;
 
   int n_tile_est, n_ientry_est;
   get_tile_ientry_est(h_nlist_param->n_int_zone, h_nlist_param->int_zone,
 		      h_nlist_param->ncellx, h_nlist_param->ncelly, h_nlist_param->ncellz_max,
 		      h_nlist_param->celldx, h_nlist_param->celldy, h_nlist_param->celldz_min,
 		      rcut, n_tile_est, n_ientry_est);
-  std::cout << "n_ientry_est = " << n_ientry_est << " n_tile_est = " << n_tile_est << std::endl;
+  //std::cout << "n_ientry_est = " << n_ientry_est << " n_tile_est = " << n_tile_est << std::endl;
 
   reallocate<ientry_t>(&ientry, &ientry_len, n_ientry_est, 1.0f);
   reallocate<tile_excl_t<tilesize> >(&tile_excl, &tile_excl_len, n_tile_est, 1.0f);
@@ -2769,7 +2803,7 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
     nthread*sizeof(int);
   if (get_cuda_arch() < 300) shmem_size += nthread*sizeof(int);
   // For !IvsI, shmem_size += (nthread/warpsize)*n_int_zone_max*sizeof(int4)
-  std::cout << "NeighborList::build, shmem_size = " << shmem_size << std::endl;
+  //std::cout << "NeighborList::build, shmem_size = " << shmem_size << std::endl;
   build_kernel<tilesize, true>
     <<< nblock, nthread, shmem_size, stream >>>
     (max_nexcl, cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom, loc2glo, glo2loc,
@@ -2783,11 +2817,12 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
   n_ientry = h_nlist_param->n_ientry;
   n_tile = h_nlist_param->n_tile;
 
+  /*
   std::cout << "n_ientry = " << h_nlist_param->n_ientry
 	    << " n_tile = " << h_nlist_param->n_tile
 	    << " nexcl = " << h_nlist_param->nexcl
 	    << std::endl;
-
+  */
 }
 
 //

@@ -121,7 +121,8 @@ public:
 		    const int order);
   ~CudaPMEForcefield();
 
-  void calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step, const bool calc_energy, const bool calc_virial,
+  void calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step, float *mass,
+	    const bool calc_energy, const bool calc_virial,
 	    Force<long long int> *force);
 
   void init_coord(cudaXYZ<double> *coord);

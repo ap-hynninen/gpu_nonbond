@@ -93,9 +93,9 @@ public:
     copy_DtoD_sync<T>((T *)xyz->data, this->data, 3*this->stride);
   }
 
-  // Sets data from list of numbers on host
+  // Sets data from host arrays
   void set_data_sync(const int n, const T *h_x, const T *h_y, const T *h_z) {
-    resize(n);
+    assert(this->n == n);
     copy_HtoD_sync<T>(h_x, this->data, this->n);
     copy_HtoD_sync<T>(h_y, &this->data[this->stride], this->n);
     copy_HtoD_sync<T>(h_z, &this->data[this->stride*2], this->n);
@@ -108,6 +108,21 @@ public:
     copy_DtoH_sync<T>(this->data,                  h_x, this->n);
     copy_DtoH_sync<T>(&this->data[this->stride],   h_y, this->n);
     copy_DtoH_sync<T>(&this->data[this->stride*2], h_z, this->n);
+  }
+
+  //--------------------------------------------------------------------------
+
+  void print(const int start, const int end, std::ostream& out) {
+    assert((start >= 0) && (end >= start) && (end < this->n));
+    T *h_data = new T[this->stride*3];
+    copy_DtoH<T>(this->data, h_data, this->stride*3);
+
+    for (int i=start;i <= end;i++) {
+      out << i << " " << h_data[i] << " " << h_data[i+this->stride] << " "
+	  << h_data[i+this->stride*2] << std::endl;
+    }
+    
+    delete [] h_data;
   }
 
 };

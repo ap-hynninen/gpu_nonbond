@@ -123,6 +123,9 @@ void CudaPMEForcefield::setup_direct_nonbonded(const double roff, const double r
 					       const int nvdwparam, const float *h_vdwparam,
 					       const float *h_vdwparam14, const int *h_glo_vdwtype) {
 
+  this->roff = roff;
+  this->ron = ron;
+
   dir.setup(domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), kappa, roff, ron,
 	    e14fac, vdw_model, elec_model);
 
@@ -154,12 +157,10 @@ void CudaPMEForcefield::setup_recip_nonbonded(const double kappa,
 //
 // Calculate forces
 //
-void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
+void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step, float *mass,
 			     const bool calc_energy, const bool calc_virial,
 			     Force<long long int> *force) {
 
-
-  std::cout << "CudaPMEForcefield::calc" << std::endl;
 
   // Check for neighborlist heuristic update
   if (heuristic_check(coord)) {
@@ -174,7 +175,9 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
     domdec->comm_coord(coord, true);
 
     // Copy: coord => xyzq_copy
-    xyzq_copy.set_xyzq(coord, q, domdec->get_xyz_shift(),
+    // NOTE: coord and xyz_shift are already in the order determined by domdec->loc2glo,
+    //       however, q is in the original global order.
+    xyzq_copy.set_xyzq(coord, q, domdec->get_loc2glo(), domdec->get_xyz_shift(),
 		       domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz());
 
     // Sort coordinates
@@ -220,20 +223,26 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
 		    domdec_bonded->get_nex14_tbl(), domdec_bonded->get_ex14_tbl(),
 		    domdec_bonded->get_ex14());
 
+    // Re-order mass
+    domdec->reorder_mass(mass, nlist->get_ind_sorted());
+
+    // Re-order xyz_shift
+    domdec->reorder_xyz_shift(nlist->get_ind_sorted());
+
     // Re-order step vector:
-    domdec->reorder_coord(prev_step, &ref_coord);
+    domdec->reorder_coord(prev_step, &ref_coord, nlist->get_ind_sorted());
     prev_step->set_data(ref_coord);
 
-    // Re-order coordinates using loc2glo: coord -> ref_coord
-    domdec->reorder_coord(coord, &ref_coord);
+    // Re-order coordinates (coord) and copy to reference coordinates (ref_coord)
+    domdec->reorder_coord(coord, &ref_coord, nlist->get_ind_sorted());
     coord->set_data(ref_coord);
 
   } else {
-    std::cout << "  Not building neighborlist" << std::endl;
     // Communicate coordinates
     domdec->comm_coord(coord, false);
     // Copy coordinates to xyzq -array
-    xyzq.set_xyz(coord);
+    xyzq.set_xyz(coord, domdec->get_xyz_shift(),
+		 domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz());
   }
 
   force->clear();

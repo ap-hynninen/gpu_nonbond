@@ -303,6 +303,7 @@ void test() {
 				 nin14, in14, nex14, ex14);
   CudaDomdec domdec(ncoord, boxx, boxy, boxz, rnl, 1, 1, 1, 0);
 
+  // Charges
   float *q = new float[ncoord];
   load_vec<float>(1, "test_data/q.txt", ncoord, q);
 
@@ -323,7 +324,11 @@ void test() {
   delete [] q;
 
   leapfrog.set_forcefield(&forcefield);
-  
+
+  // Masses
+  double *mass = new double[ncoord];
+  load_vec<double>(1, "test_data/mass.txt", ncoord, mass);
+
   // Coordinates
   double *x = new double[ncoord];
   double *y = new double[ncoord];
@@ -344,16 +349,21 @@ void test() {
   double *fy = new double[ncoord];
   double *fz = new double[ncoord];
 
-  leapfrog.init(ncoord, x, y, z, dx, dy, dz);
+  leapfrog.init(ncoord, x, y, z, dx, dy, dz, mass);
   leapfrog.set_coord_buffers(x, y, z);
   leapfrog.set_step_buffers(dx, dy, dz);
   leapfrog.set_force_buffers(fx, fy, fz);
   leapfrog.set_timestep(1.0);
-  leapfrog.run(1, 1, 1);
+  int nstep = 100;
+  int print_freq = 10;
+  int restart_freq = 1000;
+  leapfrog.run(nstep, print_freq, restart_freq);
 
   write_xyz(ncoord, x, y, z, "coord.txt");
   write_xyz(ncoord, dx, dy, dz, "step.txt");
   write_xyz(ncoord, fx, fy, fz, "force.txt");
+
+  delete [] mass;
 
   delete [] x;
   delete [] y;
