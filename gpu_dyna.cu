@@ -355,8 +355,8 @@ void test() {
   leapfrog.set_force_buffers(fx, fy, fz);
   leapfrog.set_timestep(1.0);
   int nstep = 100;
-  int print_freq = 10;
-  int restart_freq = 1000;
+  int print_freq = 1000;
+  int restart_freq = 10000;
   leapfrog.run(nstep, print_freq, restart_freq);
 
   write_xyz(ncoord, x, y, z, "coord.txt");

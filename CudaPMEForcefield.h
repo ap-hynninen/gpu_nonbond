@@ -89,6 +89,12 @@ private:
   double energy_ewself;
   double vir[9];
 
+  // Streams for force calculation
+  cudaStream_t direct_stream[2];
+  cudaStream_t recip_stream;
+  cudaStream_t in14_stream;
+  cudaStream_t bonded_stream;
+
   bool heuristic_check(const cudaXYZ<double> *coord);
 
   void setup_direct_nonbonded(const double roff, const double ron,

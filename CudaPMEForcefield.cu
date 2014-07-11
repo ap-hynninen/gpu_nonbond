@@ -73,6 +73,13 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec *domdec, CudaDomdecBonded *domde
 				     const int nfftx, const int nffty, const int nfftz,
 				     const int order) {
 
+  // Create streams
+  cudaCheck(cudaStreamCreate(&direct_stream[0]));
+  cudaCheck(cudaStreamCreate(&direct_stream[1]));
+  cudaCheck(cudaStreamCreate(&recip_stream));
+  cudaCheck(cudaStreamCreate(&in14_stream));
+  cudaCheck(cudaStreamCreate(&bonded_stream));
+
   // Domain decomposition
   this->domdec = domdec;
   this->domdec_bonded = domdec_bonded;
@@ -112,6 +119,12 @@ CudaPMEForcefield::~CudaPMEForcefield() {
   deallocate<float>(&q);
   if (grid != NULL) delete grid;
   if (h_loc2glo != NULL) delete [] h_loc2glo;
+  // Destroy streams
+  cudaCheck(cudaStreamDestroy(direct_stream[0]));
+  cudaCheck(cudaStreamDestroy(direct_stream[1]));
+  cudaCheck(cudaStreamDestroy(recip_stream));
+  cudaCheck(cudaStreamDestroy(in14_stream));
+  cudaCheck(cudaStreamDestroy(bonded_stream));
 }
 
 //
@@ -147,7 +160,7 @@ void CudaPMEForcefield::setup_recip_nonbonded(const double kappa,
 
   if (nfftx > 0 && nffty > 0 && nfftz > 0 && order > 0) {
     const FFTtype fft_type = BOX;
-    grid = new Grid<int, float, float2>(nfftx, nffty, nfftz, order, fft_type, 1, 0);
+    grid = new Grid<int, float, float2>(nfftx, nffty, nfftz, order, fft_type, 1, 0, recip_stream);
   } else {
     grid = NULL;
   }
@@ -255,14 +268,17 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
   }
 
   // Direct non-bonded force
-  dir.calc_force(xyzq.xyzq, nlist, calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
+  dir.calc_force(xyzq.xyzq, nlist, calc_energy, calc_virial, force->xyz.stride, force->xyz.data,
+		 direct_stream[0]);
 
   // 1-4 interactions
-  dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
+  dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force->xyz.stride, force->xyz.data,
+		    in14_stream);
 
   // Bonded forces
   bonded.calc_force(xyzq.xyzq, domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(),
-  		    calc_energy, calc_virial, force->xyz.stride, force->xyz.data);
+  		    calc_energy, calc_virial, force->xyz.stride, force->xyz.data,
+		    bonded_stream);
 
   // Reciprocal forces (Only reciprocal nodes calculate these)
   if (grid != NULL) {
