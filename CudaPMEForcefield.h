@@ -89,11 +89,24 @@ private:
   double energy_ewself;
   double vir[9];
 
+  // ------------------------------
   // Streams for force calculation
+  // ------------------------------
   cudaStream_t direct_stream[2];
   cudaStream_t recip_stream;
   cudaStream_t in14_stream;
   cudaStream_t bonded_stream;
+
+  // ------------------------------------------------------------
+  // Flags for energy terms that are included in the calculation
+  // NOTE: All true by default
+  // ------------------------------------------------------------
+  bool calc_bond;
+  bool calc_ureyb;
+  bool calc_angle;
+  bool calc_dihe;
+  bool calc_imdihe;
+  bool calc_cmap;
 
   bool heuristic_check(const cudaXYZ<double> *coord);
 

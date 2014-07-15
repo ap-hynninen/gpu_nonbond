@@ -145,7 +145,8 @@ void test() {
 			   ncmaplist, h_cmaplist);
 
     bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, true, false,
-			   force_fp.xyz.stride, force_fp.xyz.data);
+			   force_fp.xyz.stride, force_fp.xyz.data,
+			   true, true, true, true, true, true);
     bondedforce.get_energy_virial(true, false,
 				  &energy_bond, &energy_ureyb,
 				  &energy_angle,
@@ -210,7 +211,8 @@ void test() {
 
     force_fp.clear();
     bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, false, false,
-			   force_fp.xyz.stride, force_fp.xyz.data);
+			   force_fp.xyz.stride, force_fp.xyz.data,
+			   true, true, true, true, true, true);
     force_fp.convert(&force);
 
     tol = 0.0057;
@@ -241,7 +243,8 @@ void test() {
 			   nimdihelist, h_imdihelist, 
 			   ncmaplist, h_cmaplist);
     bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, true, false,
-			   force_fp.xyz.stride, force_fp.xyz.data);
+			   force_fp.xyz.stride, force_fp.xyz.data,
+			   true, true, true, true, true, true);
     force_fp.convert(&force);
 
     double max_diff;

@@ -200,9 +200,9 @@ public:
 		  const bool calc_energy,
 		  const bool calc_virial,
 		  const int stride, AT *force,
-		  const bool calc_bond=true, const bool calc_ureyb=true,
-		  const bool calc_angle=true, const bool calc_dihe=true,
-		  const bool calc_imdihe=true, const bool calc_cmap=true,
+		  const bool calc_bond, const bool calc_ureyb,
+		  const bool calc_angle, const bool calc_dihe,
+		  const bool calc_imdihe, const bool calc_cmap,
 		  cudaStream_t stream=0);
 
 

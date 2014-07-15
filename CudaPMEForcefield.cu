@@ -80,6 +80,14 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec *domdec, CudaDomdecBonded *domde
   cudaCheck(cudaStreamCreate(&in14_stream));
   cudaCheck(cudaStreamCreate(&bonded_stream));
 
+  // Set energy term flags
+  calc_bond = true;
+  calc_ureyb = true;
+  calc_angle = true;
+  calc_dihe = true;
+  calc_imdihe = true;
+  calc_cmap = true;
+
   // Domain decomposition
   this->domdec = domdec;
   this->domdec_bonded = domdec_bonded;
@@ -278,6 +286,7 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
   // Bonded forces
   bonded.calc_force(xyzq.xyzq, domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(),
   		    calc_energy, calc_virial, force->xyz.stride, force->xyz.data,
+		    calc_bond, calc_ureyb, calc_angle, calc_dihe, calc_imdihe, calc_cmap,
 		    bonded_stream);
 
   // Reciprocal forces (Only reciprocal nodes calculate these)
