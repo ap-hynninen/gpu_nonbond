@@ -2,6 +2,7 @@
 #include <fstream>
 #include <cuda.h>
 #include "cuda_utils.h"
+#include "gpu_utils.h"
 #include "CudaLeapfrogIntegrator.h"
 #include "CudaDomdec.h"
 #include "CudaDomdecBonded.h"
@@ -292,7 +293,10 @@ void test() {
 
   //-------------------------------------------------------------------------------------
 
-  CudaLeapfrogIntegrator leapfrog(NULL /*&holoconst*/);
+  cudaStream_t integrator_stream;
+  cudaCheck(cudaStreamCreate(&integrator_stream));
+
+  CudaLeapfrogIntegrator leapfrog(NULL /*&holoconst*/, 0);
 
   // Neighborlist
   NeighborList<32> nlist(ncoord, iblo14, inb14);
@@ -353,7 +357,7 @@ void test() {
   leapfrog.set_coord_buffers(x, y, z);
   leapfrog.set_step_buffers(dx, dy, dz);
   leapfrog.set_force_buffers(fx, fy, fz);
-  leapfrog.set_timestep(1.0);
+  leapfrog.set_timestep(2.0);
   int nstep = 100;
   int print_freq = 1000;
   int restart_freq = 10000;
@@ -362,6 +366,8 @@ void test() {
   write_xyz(ncoord, x, y, z, "coord.txt");
   write_xyz(ncoord, dx, dy, dz, "step.txt");
   write_xyz(ncoord, fx, fy, fz, "force.txt");
+
+  cudaCheck(cudaStreamDestroy(integrator_stream));
 
   delete [] mass;
 

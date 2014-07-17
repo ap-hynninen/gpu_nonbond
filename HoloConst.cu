@@ -867,12 +867,11 @@ void HoloConst::setup_textures(double *xyz0, double *xyz1, int stride) {
 }
 
 //
-// Apply constraints
+// Apply constraints: xyz0 = reference (input), xyz1 = constrained (input/output)
 //
 void HoloConst::apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1, cudaStream_t stream) {
 
   assert(xyz0->match(xyz1));
-
 
   int stride = xyz0->stride;
 

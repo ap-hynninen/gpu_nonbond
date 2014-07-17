@@ -2408,7 +2408,7 @@ void Grid<AT, CT, CT2>::print_info() {
 template <typename AT, typename CT, typename CT2>
 void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspline) {
 
-  clear_gpu_array<AT>((AT *)accum_grid->data, xsize*ysize*zsize);
+  clear_gpu_array<AT>((AT *)accum_grid->data, xsize*ysize*zsize, stream);
 
   dim3 nthread, nblock;
 
@@ -2460,7 +2460,7 @@ void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspli
 template <typename AT, typename CT, typename CT2>
 void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, const double *recip) {
 
-  clear_gpu_array<AT>((AT *)accum_grid->data, xsize*ysize*zsize);
+  clear_gpu_array<AT>((AT *)accum_grid->data, xsize*ysize*zsize, stream);
 
   dim3 nthread, nblock;
 

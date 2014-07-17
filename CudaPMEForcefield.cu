@@ -80,6 +80,13 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec *domdec, CudaDomdecBonded *domde
   cudaCheck(cudaStreamCreate(&in14_stream));
   cudaCheck(cudaStreamCreate(&bonded_stream));
 
+  // Create events
+  cudaCheck(cudaEventCreate(&done_direct_event));
+  cudaCheck(cudaEventCreate(&done_recip_event));
+  cudaCheck(cudaEventCreate(&done_in14_event));
+  cudaCheck(cudaEventCreate(&done_bonded_event));
+  cudaCheck(cudaEventCreate(&done_calc_event));
+
   // Set energy term flags
   calc_bond = true;
   calc_ureyb = true;
@@ -133,6 +140,12 @@ CudaPMEForcefield::~CudaPMEForcefield() {
   cudaCheck(cudaStreamDestroy(recip_stream));
   cudaCheck(cudaStreamDestroy(in14_stream));
   cudaCheck(cudaStreamDestroy(bonded_stream));
+  // Destroy events
+  cudaCheck(cudaEventDestroy(done_direct_event));
+  cudaCheck(cudaEventDestroy(done_recip_event));
+  cudaCheck(cudaEventDestroy(done_in14_event));
+  cudaCheck(cudaEventDestroy(done_bonded_event));
+  cudaCheck(cudaEventDestroy(done_calc_event));
 }
 
 //
@@ -184,7 +197,7 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
 
 
   // Check for neighborlist heuristic update
-  if (heuristic_check(coord)) {
+  if (heuristic_check(coord, direct_stream[0])) {
     std::cout << "  Building neighborlist" << std::endl;
 
     // Update homezone coordinates (coord) and step vector (prev_step)
@@ -263,10 +276,10 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
     domdec->comm_coord(coord, false);
     // Copy coordinates to xyzq -array
     xyzq.set_xyz(coord, domdec->get_xyz_shift(),
-		 domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz());
+		 domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), direct_stream[0]);
   }
 
-  force->clear();
+  force->clear(direct_stream[0]);
 
   // Clear energy and virial variables
   if (calc_energy || calc_virial) {
@@ -278,16 +291,19 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
   // Direct non-bonded force
   dir.calc_force(xyzq.xyzq, nlist, calc_energy, calc_virial, force->xyz.stride, force->xyz.data,
 		 direct_stream[0]);
+  cudaCheck(cudaEventRecord(done_direct_event, direct_stream[0]));
 
   // 1-4 interactions
   dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force->xyz.stride, force->xyz.data,
 		    in14_stream);
+  cudaCheck(cudaEventRecord(done_in14_event, in14_stream));
 
   // Bonded forces
   bonded.calc_force(xyzq.xyzq, domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(),
   		    calc_energy, calc_virial, force->xyz.stride, force->xyz.data,
 		    calc_bond, calc_ureyb, calc_angle, calc_dihe, calc_imdihe, calc_cmap,
 		    bonded_stream);
+  cudaCheck(cudaEventRecord(done_bonded_event, bonded_stream));
 
   // Reciprocal forces (Only reciprocal nodes calculate these)
   if (grid != NULL) {
@@ -307,8 +323,16 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
     }
     if (calc_energy) grid->calc_self_energy(xyzq.xyzq, xyzq.ncoord);
   }
+  cudaCheck(cudaEventRecord(done_recip_event, recip_stream));
 
-  force->convert<double>();
+  // Make GPU wait until all computation is done
+  cudaCheck(cudaStreamWaitEvent(direct_stream[0], done_in14_event, 0));
+  cudaCheck(cudaStreamWaitEvent(direct_stream[0], done_bonded_event, 0));
+  cudaCheck(cudaStreamWaitEvent(direct_stream[0], done_recip_event, 0));
+  cudaCheck(cudaStreamWaitEvent(direct_stream[0], done_direct_event, 0));
+
+  // Convert forces from FP to DP
+  force->convert<double>(direct_stream[0]);
 
   bonded.get_energy_virial(calc_energy, calc_virial,
 			   &energy_bond, &energy_ureyb,
@@ -325,6 +349,15 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
 
   // Communicate forces (After this all nodes have their correct total force)
   domdec->comm_force(force);
+
+  cudaCheck(cudaEventRecord(done_calc_event, direct_stream[0]));
+}
+
+//
+// Make stream "stream" wait until calc - routine is done
+//
+void CudaPMEForcefield::wait_calc(cudaStream_t stream) {
+  cudaCheck(cudaStreamWaitEvent(stream, done_calc_event, 0));
 }
 
 //
@@ -343,7 +376,7 @@ void CudaPMEForcefield::init_coord(cudaXYZ<double> *coord) {
 // Checks if non-bonded list needs to be updated
 // Returns true if update is needed
 //
-bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double> *coord) {
+bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double> *coord, cudaStream_t stream) {
   assert(ref_coord.match(coord));
   assert(warpsize <= 32);
 
@@ -359,9 +392,9 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double> *coord) {
   int shmem_size = (nthread/warpsize)*sizeof(int);
 
   *h_heuristic_flag = 0;
-  copy_HtoD<int>(h_heuristic_flag, d_heuristic_flag, 1, 0);
+  copy_HtoD<int>(h_heuristic_flag, d_heuristic_flag, 1, stream);
 
-  heuristic_check_kernel<<< nblock, nthread, shmem_size, 0 >>>
+  heuristic_check_kernel<<< nblock, nthread, shmem_size, stream >>>
     (ncoord, stride, coord->data, ref_coord.data, rsq_limit, d_heuristic_flag);
 
   cudaCheck(cudaGetLastError());

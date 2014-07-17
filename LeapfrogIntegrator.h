@@ -204,14 +204,19 @@ public:
       // Calculate step vector: dx = dx_prev - fx*dt*dt/mass
       calc_step();
       
-      // Do holonomic constraints (if necessary)
+      // Do holonomic constraints (if necessary):
+      // New position is at x' = x + dx
+      // this is constrained to x'' = x + dx'
+      // => Constrained step is dx' = x'' - x
       do_holoconst();
       
       // Constant temperature (if needed)
       do_temperature();
       
       // Calculate temperature
-      calc_temperature();
+      if (print_energy) {
+	calc_temperature();
+      }
       
       // Calculate RMS gradient and work
       

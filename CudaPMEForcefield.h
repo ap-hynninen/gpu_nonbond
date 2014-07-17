@@ -97,6 +97,15 @@ private:
   cudaStream_t in14_stream;
   cudaStream_t bonded_stream;
 
+  // -----------------------------
+  // Events for force calculation
+  // -----------------------------
+  cudaEvent_t done_direct_event;
+  cudaEvent_t done_recip_event;
+  cudaEvent_t done_in14_event;
+  cudaEvent_t done_bonded_event;
+  cudaEvent_t done_calc_event;
+
   // ------------------------------------------------------------
   // Flags for energy terms that are included in the calculation
   // NOTE: All true by default
@@ -108,7 +117,7 @@ private:
   bool calc_imdihe;
   bool calc_cmap;
 
-  bool heuristic_check(const cudaXYZ<double> *coord);
+  bool heuristic_check(const cudaXYZ<double> *coord, cudaStream_t stream=0);
 
   void setup_direct_nonbonded(const double roff, const double ron,
 			      const double kappa, const double e14fac,
@@ -143,6 +152,8 @@ public:
   void calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step, float *mass,
 	    const bool calc_energy, const bool calc_virial,
 	    Force<long long int> *force);
+
+  void wait_calc(cudaStream_t stream);
 
   void init_coord(cudaXYZ<double> *coord);
 

@@ -17,6 +17,8 @@ public:
 		    const bool calc_energy, const bool calc_virial,
 		    Force<long long int> *force)=0;
 
+  virtual void wait_calc(cudaStream_t stream)=0;
+
   virtual void init_coord(cudaXYZ<double> *coord)=0;
 
   virtual void get_restart_data(hostXYZ<double> *h_coord, hostXYZ<double> *h_step, hostXYZ<double> *h_force,

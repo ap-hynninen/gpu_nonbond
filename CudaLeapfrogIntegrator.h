@@ -51,7 +51,13 @@ private:
   cudaEvent_t copy_rms_work_done_event;
   cudaEvent_t copy_temp_ekin_done_event;
 
+  cudaEvent_t done_integrate_event;
+
   cudaStream_t stream;
+
+  // private functions
+  void add_coord(cudaXYZ<double> &b, cudaXYZ<double> &c, cudaXYZ<double> &a);
+  void sub_coord(cudaXYZ<double> &b, cudaXYZ<double> &c, cudaXYZ<double> &a);
 
   // Pure virtual function overriders
   void swap_step();

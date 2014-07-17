@@ -10,17 +10,33 @@
 static __device__ CudaLeapfrogIntegrator_storage_t d_CudaLeapfrogIntegrator_storage;
 
 //
-// Calculates: coord = prev_coord + step
+// Calculates: a = b + c
 //
-__global__ void take_step_kernel(const int stride3,
-				 double* __restrict__ prev_coord,
-				 const double* __restrict__ step,
-				 double* __restrict__ coord) {
+__global__ void add_coord_kernel(const int stride3,
+				 const double* __restrict__ b,
+				 const double* __restrict__ c,
+				 double* __restrict__ a) {
 
   const int tid = threadIdx.x + blockIdx.x*blockDim.x;
 
   if (tid < stride3) {
-    coord[tid] = prev_coord[tid] + step[tid];
+    a[tid] = b[tid] + c[tid];
+  }
+
+}
+
+//
+// Calculates: a = b - c
+//
+__global__ void sub_coord_kernel(const int stride3,
+				 const double* __restrict__ b,
+				 const double* __restrict__ c,
+				 double* __restrict__ a) {
+
+  const int tid = threadIdx.x + blockIdx.x*blockDim.x;
+
+  if (tid < stride3) {
+    a[tid] = b[tid] - c[tid];
   }
 
 }
@@ -97,6 +113,7 @@ CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_
   this->stream = stream;
   cudaCheck(cudaEventCreate(&copy_rms_work_done_event));
   cudaCheck(cudaEventCreate(&copy_temp_ekin_done_event));
+  cudaCheck(cudaEventCreate(&done_integrate_event));
   mass_len = 0;
   mass = NULL;
   allocate_host<CudaLeapfrogIntegrator_storage_t>(&h_CudaLeapfrogIntegrator_storage, 1);
@@ -108,6 +125,7 @@ CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_
 CudaLeapfrogIntegrator::~CudaLeapfrogIntegrator() {
   cudaCheck(cudaEventDestroy(copy_rms_work_done_event));
   cudaCheck(cudaEventDestroy(copy_temp_ekin_done_event));
+  cudaCheck(cudaEventDestroy(done_integrate_event));
   if (mass != NULL) deallocate<float>(&mass);
   deallocate_host<CudaLeapfrogIntegrator_storage_t>(&h_CudaLeapfrogIntegrator_storage);
 }
@@ -186,20 +204,13 @@ void CudaLeapfrogIntegrator::swap_coord() {
 //
 // Calculates new current coordinate positions (cur) using 
 // the previous coordinates (prev) and the step vector (step)
-// coord = prev_coord + step
+// coord = prev_coord + prev_step
 //
 void CudaLeapfrogIntegrator::take_step() {
-  assert(prev_coord.match(step));
-  assert(prev_coord.match(coord));
 
-  int stride = coord.stride;
-  int nthread = 512;
-  int nblock = (3*stride - 1)/nthread + 1;
+  add_coord(prev_coord, prev_step, coord);
 
-  take_step_kernel<<< nblock, nthread, 0, stream >>>
-    (3*stride, prev_coord.data, prev_step.data, coord.data);
-
-  cudaCheck(cudaGetLastError());
+  cudaCheck(cudaEventRecord(done_integrate_event, stream));
 }
 
 //
@@ -231,7 +242,9 @@ void CudaLeapfrogIntegrator::calc_force(const bool calc_energy, const bool calc_
 
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
+    cudaCheck(cudaStreamWaitEvent(stream, done_integrate_event, 0));
     p->calc(&coord, &prev_step, mass, calc_energy, calc_virial, &force);
+    p->wait_calc(stream);
   }
 
 }
@@ -268,8 +281,50 @@ void CudaLeapfrogIntegrator::calc_temperature() {
 // Do holonomic constraints
 //
 void CudaLeapfrogIntegrator::do_holoconst() {
-  if (holoconst != NULL)
-    holoconst->apply(&prev_coord, &coord);
+  if (holoconst != NULL) {
+    // prev_coord = coord + step
+    add_coord(coord, step, prev_coord);
+    // holonomic constraint, result in prev_coord
+    holoconst->apply(&coord, &prev_coord, stream);
+    // step = prev_coord - coord
+    sub_coord(prev_coord, coord, step);
+  }
+}
+
+//
+// Calculates: a = b + c
+//
+void CudaLeapfrogIntegrator::add_coord(cudaXYZ<double> &b, cudaXYZ<double> &c,
+				       cudaXYZ<double> &a) {
+  assert(b.match(c));
+  assert(b.match(a));
+
+  int stride = a.stride;
+  int nthread = 512;
+  int nblock = (3*stride - 1)/nthread + 1;
+
+  add_coord_kernel<<< nblock, nthread, 0, stream >>>
+    (3*stride, b.data, c.data, a.data);
+
+  cudaCheck(cudaGetLastError());
+}
+
+//
+// Calculates: a = b - c
+//
+void CudaLeapfrogIntegrator::sub_coord(cudaXYZ<double> &b, cudaXYZ<double> &c,
+				       cudaXYZ<double> &a) {
+  assert(b.match(c));
+  assert(b.match(a));
+
+  int stride = a.stride;
+  int nthread = 512;
+  int nblock = (3*stride - 1)/nthread + 1;
+
+  sub_coord_kernel<<< nblock, nthread, 0, stream >>>
+    (3*stride, b.data, c.data, a.data);
+
+  cudaCheck(cudaGetLastError());
 }
 
 //
