@@ -3728,7 +3728,7 @@ void NeighborList<tilesize>::load(const char *filename) {
 }
 
 //
-// Explicit instances of DirectForce
+// Explicit instances of NeighborList
 //
 template class NeighborList<16>;
 template class NeighborList<32>;

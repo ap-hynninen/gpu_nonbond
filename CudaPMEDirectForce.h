@@ -1,5 +1,5 @@
-#ifndef DIRECTFORCE_H
-#define DIRECTFORCE_H
+#ifndef CUDAPMEDIRECTFORCE_H
+#define CUDAPMEDIRECTFORCE_H
 #include <cuda.h>
 #include "Bonded_struct.h"
 
@@ -26,9 +26,6 @@ struct DirectEnergyVirial_t {
   double sforcey[27];
   double sforcez[27];
 
-#ifdef USE_NEW_KERNEL
-  int ientry_ind;
-#endif
 };
 
 struct DirectSettings_t {
@@ -75,7 +72,7 @@ enum {NONE=0,
 enum {VDW_MAIN, VDW_IN14};
 
 template <typename AT, typename CT>
-class DirectForce {
+class CudaPMEDirectForce {
 
 private:
 
@@ -104,6 +101,7 @@ private:
   int vdwtype_len;
   int *vdwtype;
   
+  // Type of VdW and electrostatic models (see above: NONE, VDW_VSH, VDW_VSW ...)
   int vdw_model;
   int elec_model;
 
@@ -131,8 +129,8 @@ private:
 
 public:
 
-  DirectForce();
-  ~DirectForce();
+  CudaPMEDirectForce();
+  ~CudaPMEDirectForce();
 
   void setup(CT boxx, CT boxy, CT boxz, 
 	     CT kappa,
@@ -189,4 +187,4 @@ public:
 
 };
 
-#endif // DIRECTFORCE_H
+#endif // CUDAPMEDIRECTFORCE_H

@@ -4,7 +4,7 @@
 #include "cudaXYZ.h"
 #include "XYZQ.h"
 #include "NeighborList.h"
-#include "DirectForce.h"
+#include "CudaPMEDirectForce.h"
 #include "BondedForce.h"
 #include "Grid.h"
 #include "CudaDomdec.h"
@@ -41,7 +41,7 @@ private:
   // ------------------------
   // Direct non-bonded force
   // ------------------------
-  DirectForce<long long int, float> dir;
+  CudaPMEDirectForce<long long int, float> dir;
 
   // Global vdw types
   int *glo_vdwtype;

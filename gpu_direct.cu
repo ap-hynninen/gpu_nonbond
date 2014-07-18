@@ -5,7 +5,8 @@
 #include "XYZQ.h"
 #include "Force.h"
 #include "NeighborList.h"
-#include "DirectForce.h"
+#include "CudaPMEDirectForce.h"
+#include "CudaPMEDirectForceBlock.h"
 #include "VirialPressure.h"
 
 void test();
@@ -147,7 +148,7 @@ void test() {
 
   // ------------------- Non-bonded -----------------
 
-  DirectForce<long long int, float> dir;
+  CudaPMEDirectForce<long long int, float> dir;
   dir.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, VDW_VSH, EWALD);
   dir.set_vdwparam(1260, "test_data/vdwparam.txt");
   dir.set_vdwtype(ncoord, "test_data/vdwtype.txt");

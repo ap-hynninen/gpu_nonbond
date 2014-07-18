@@ -94,11 +94,11 @@ struct bb_t {
   float wx, wy, wz;   // Half-width
 };
 
-template<typename AT, typename CT> class DirectForce;
+template<typename AT, typename CT> class CudaPMEDirectForce;
 
 template <int tilesize>
 class NeighborList {
-  friend class DirectForce<long long int, float>;
+  friend class CudaPMEDirectForce<long long int, float>;
 private:
 
   // Global total number of atoms in this system

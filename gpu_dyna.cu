@@ -150,7 +150,7 @@ void test() {
 
   // ------------------- Non-bonded -----------------
 
-  DirectForce<long long int, float> dir;
+  CudaPMEDirectForce<long long int, float> dir;
   dir.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, VDW_VSH, EWALD, true, true);
   dir.set_vdwparam("test_data/vdwparam.txt");
   dir.set_vdwtype("test_data/vdwtype.txt");
