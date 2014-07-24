@@ -3,9 +3,9 @@
 OS := $(shell uname -s)
 
 # Detect Intel compiler
-INTEL_COMPILER := $(shell which icc | wc -l)
+INTEL_COMPILER := $(shell which icc | wc -l 2> /dev/null)
 
-MPI_FOUND := $(shell which mpicc | wc -l )
+MPI_FOUND := $(shell which mpicc | wc -l 2> /dev/null)
 
 DEFS := DONT_USE_MPI
 ifeq ($(MPI_FOUND),1)
@@ -175,7 +175,8 @@ gpu_recip.o: cuda_utils.h XYZQ.h cudaXYZ.h XYZ.h Bspline.h Grid.h Matrix3d.h
 gpu_recip.o: Force.h hostXYZ.h
 Matrix3d.o: gpu_utils.h cuda_utils.h Matrix3d.h
 MultiNodeMatrix3d.o: cuda_utils.h MultiNodeMatrix3d.h Matrix3d.h
-mpi_utils.o: mpi_utils.h CudaDomdecBonded.o: cuda_utils.h gpu_utils.h
+mpi_utils.o: mpi_utils.h
+CudaDomdecBonded.o: cuda_utils.h gpu_utils.h
 CudaDomdecBonded.o: CudaDomdecBonded.h
 CudaDomdecBonded.o: Bonded_struct.h CudaDomdec.h Decomp.h cudaXYZ.h XYZ.h
 CudaDomdecBonded.o: Force.h hostXYZ.h
