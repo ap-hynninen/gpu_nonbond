@@ -17,10 +17,24 @@ template <typename AT, typename CT>
 
  private:
 
+  // Number of blocks
+  int nblock;
+
+  // block type for each atom (ncoord -size)
+  int blocktype_len;
+  int *blocktype;
+
+  // parameter (lambda) for each block pair, size nblock*(nblock+1)/2
+  float *blockparam;
+
  public:
 
-  CudaPMEDirectForceBlock();
+  CudaPMEDirectForceBlock(int nblock);
   ~CudaPMEDirectForceBlock();
+
+  void set_blocktype(const int ncoord, const int *h_blocktype);
+
+  void set_blockparam(const CT *h_blockparam);
 
   void calc_14_force(const float4 *xyzq,
 		     const bool calc_energy, const bool calc_virial,

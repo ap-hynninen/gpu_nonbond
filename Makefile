@@ -146,9 +146,9 @@ CudaPMEForcefield.o: XYZ.h Force.h hostXYZ.h XYZQ.h NeighborList.h
 CudaPMEForcefield.o: CudaPMEDirectForce.h Bonded_struct.h BondedForce.h
 CudaPMEForcefield.o: Grid.h Bspline.h Matrix3d.h CudaDomdec.h Decomp.h
 CudaPMEForcefield.o: CudaDomdecBonded.h gpu_utils.h
-CudaPMEDirectForce.o: gpu_utils.h cuda_utils.h
+CudaPMEDirectForce.o: gpu_utils.h cuda_utils.h CudaDirectForce_util.h
 CudaPMEDirectForce.o: NeighborList.h CudaPMEDirectForce.h Bonded_struct.h
-CudaPMEDirectForceBlock.o: cuda_utils.h
+CudaPMEDirectForceBlock.o: cuda_utils.h CudaDirectForce_util.h
 CudaPMEDirectForceBlock.o: NeighborList.h CudaPMEDirectForceBlock.h
 CudaPMEDirectForceBlock.o: CudaPMEDirectForce.h Bonded_struct.h
 gpu_bonded.o: cuda_utils.h gpu_utils.h XYZQ.h cudaXYZ.h XYZ.h Force.h

@@ -74,7 +74,7 @@ enum {VDW_MAIN, VDW_IN14};
 template <typename AT, typename CT>
 class CudaPMEDirectForce {
 
-private:
+protected:
 
   // VdW parameters
   int nvdwparam;
