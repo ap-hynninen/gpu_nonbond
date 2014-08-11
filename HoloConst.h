@@ -12,16 +12,26 @@ private:
   void update_setup(int stride, double *xyz0, double *xyz1, double *xyz2,
 		    cudaStream_t stream=0);
 
-  void set_solvent_ind(int nsolvent, int3 *h_solvent_ind);
+  void set_solvent(const int nsolvent, const int3 *h_solvent_ind);
+  void set_solvent(const int nsolvent, const int3 *global_solvent_ind, const int *loc2glo);
 
-  void set_pair_ind(int npair, int2 *h_pair_ind,
-		    double *h_pair_constr, double *h_pair_mass);
+  void set_pair(const int npair, const int2 *h_pair_ind,
+		const double *h_pair_constr, const double *h_pair_mass);
+  void set_pair(const int npair, const int2 *global_pair_ind,
+		const double *global_pair_constr, const double *global_pair_mass,
+		const int *loc2glo);
 
-  void set_trip_ind(int ntrip, int3 *h_trip_ind,
-		    double *h_trip_constr, double *h_trip_mass);
+  void set_trip(const int ntrip, const int3 *h_trip_ind,
+		const double *h_trip_constr, const double *h_trip_mass);
+  void set_trip(const int ntrip, const int3 *global_trip_ind,
+		const double *global_trip_constr, const double *global_trip_mass,
+		const int *loc2glo);
 
-  void set_quad_ind(int nquad, int4 *h_quad_ind,
-		    double *h_quad_constr, double *h_quad_mass);
+  void set_quad(const int nquad, const int4 *h_quad_ind,
+		const double *h_quad_constr, const double *h_quad_mass);
+  void set_quad(const int nquad, const int4 *global_quad_ind,
+		const double *global_quad_constr, const double *global_quad_mass,
+		const int *loc2glo);
 
   // Maximum number of iterations for triplet and quad shake
   int max_niter;
@@ -82,13 +92,22 @@ public:
 
   void setup_solvent_parameters(double mO, double mH, double rOHsq, double rHHsq);
 
-  void setup_ind_mass_constr(int npair, int2 *h_pair_ind,
-			     double *h_pair_constr, double *h_pair_mass,
-			     int ntrip, int3 *h_trip_ind,
-			     double *h_trip_constr, double *h_trip_mass,
-			     int nquad, int4 *h_quad_ind,
-			     double *h_quad_constr, double *h_quad_mass,
-			     int nsolvent, int3 *h_solvent_ind);
+  void setup_ind_mass_constr(const int npair, const int2 *h_pair_ind,
+			     const double *h_pair_constr, const double *h_pair_mass,
+			     const int ntrip, const int3 *h_trip_ind,
+			     const double *h_trip_constr, const double *h_trip_mass,
+			     const int nquad, const int4 *h_quad_ind,
+			     const double *h_quad_constr, const double *h_quad_mass,
+			     const int nsolvent, const int3 *h_solvent_ind);
+
+  void setup_ind_mass_constr(const int npair, const int2 *global_pair_ind,
+			     const double *global_pair_constr, const double *global_pair_mass,
+			     const int ntrip, const int3 *global_trip_ind,
+			     const double *global_trip_constr, const double *global_trip_mass,
+			     const int nquad, const int4 *global_quad_ind,
+			     const double *global_quad_constr, const double *global_quad_mass,
+			     const int nsolvent, const int3 *global_solvent_ind,
+			     const int* loc2glo);
 
   void apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1, cudaStream_t stream=0);
 

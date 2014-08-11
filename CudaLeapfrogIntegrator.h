@@ -30,9 +30,41 @@ private:
   // Previous step vector 
   cudaXYZ<double> prev_step;
 
-  // Mass
+  // Masses
   int mass_len;
   float *mass;
+
+  // Holonomic constraint global arrays:
+  //
+  // pair_ind[npair]
+  // pair_constr[npair]
+  // pair_mass[npair*2]
+  //
+  // trip_ind[ntrip]
+  // trip_constr[ntrip*2]
+  // trip_mass[ntrip*5]
+  //
+  // quad_ind[nquad]
+  // quad_constr[nquad*3]
+  // quad_mass[nquad*7]
+  //
+  int npair;
+  int2 *pair_ind;
+  double *pair_constr;
+  double *pair_mass;
+
+  int ntrip;
+  int3 *trip_ind;
+  double *trip_constr;
+  double *trip_mass;
+
+  int nquad;
+  int4 *quad_ind;
+  double *quad_constr;
+  double *quad_mass;
+
+  int nsolvent;
+  int3 *solvent_ind;
 
   // Force array
   Force<long long int> force;
@@ -64,7 +96,9 @@ private:
   void swap_coord();
   void take_step();
   void calc_step();
+  void pre_calc_force();
   void calc_force(const bool calc_energy, const bool calc_virial);
+  void post_calc_force();
   void calc_temperature();
   void do_holoconst();
   void do_pressure();
@@ -77,7 +111,15 @@ private:
 
 public:
 
-  CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_t stream=0);
+  CudaLeapfrogIntegrator(HoloConst *holoconst,
+			 const int npair, const int2 *h_pair_ind,
+			 const double *h_pair_constr, const double *h_pair_mass,
+			 const int ntrip, const int3 *h_trip_ind,
+			 const double *h_trip_constr, const double *h_trip_mass,
+			 const int nquad, const int4 *h_quad_ind,
+			 const double *h_quad_constr, const double *h_quad_mass,
+			 const int nsolvent, const int3 *h_solvent_ind,
+			 cudaStream_t stream=0);
   ~CudaLeapfrogIntegrator();
 
   void spec_init(const int ncoord,

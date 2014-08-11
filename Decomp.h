@@ -2,7 +2,7 @@
 #define DECOMP_H
 
 //
-// Abstract base class for decompositors
+// Abstract base class for atom decompositors
 //
 class Decomp {
 

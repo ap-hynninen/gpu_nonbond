@@ -247,7 +247,6 @@ void test() {
 
   //-------------------------------------------------------------------------------------
 
-  /*
   const double mO = 15.9994;
   const double mH = 1.008;
   const double rOHsq = 0.91623184;
@@ -259,32 +258,33 @@ void test() {
 
   // Load constraint indices
   int *solvent_ind = (int *)malloc(nsolvent*3*sizeof(int));
-  load_vec<int>(3, "test_data/solvent_ind.txt", nsolvent, solvent_ind);
+  load_vec<int>(3, "test_data/global_solvent_ind.txt", nsolvent, solvent_ind);
 
   int *pair_ind = (int *)malloc(npair*2*sizeof(int));
-  load_vec<int>(2, "test_data/pair_ind.txt", npair, pair_ind);
+  load_vec<int>(2, "test_data/global_pair_ind.txt", npair, pair_ind);
 
   int *trip_ind = (int *)malloc(ntrip*3*sizeof(int));
-  load_vec<int>(3, "test_data/trip_ind.txt", ntrip, trip_ind);
+  load_vec<int>(3, "test_data/global_trip_ind.txt", ntrip, trip_ind);
 
   int *quad_ind = (int *)malloc(nquad*4*sizeof(int));
-  load_vec<int>(4, "test_data/quad_ind.txt", nquad, quad_ind);
+  load_vec<int>(4, "test_data/global_quad_ind.txt", nquad, quad_ind);
 
   // Load constraint distances and masses
   double *pair_constr = (double *)malloc(npair*sizeof(double));
   double *pair_mass = (double *)malloc(npair*2*sizeof(double));
-  load_constr_mass(1, 2, "test_data/pair_constr_mass.txt", npair, pair_constr, pair_mass);
+  load_constr_mass(1, 2, "test_data/global_pair_constr_mass.txt", npair, pair_constr, pair_mass);
 
   double *trip_constr = (double *)malloc(ntrip*2*sizeof(double));
   double *trip_mass = (double *)malloc(ntrip*5*sizeof(double));
-  load_constr_mass(2, 5, "test_data/trip_constr_mass.txt", ntrip, trip_constr, trip_mass);
+  load_constr_mass(2, 5, "test_data/global_trip_constr_mass.txt", ntrip, trip_constr, trip_mass);
 
   double *quad_constr = (double *)malloc(nquad*3*sizeof(double));
   double *quad_mass = (double *)malloc(nquad*7*sizeof(double));
-  load_constr_mass(3, 7, "test_data/quad_constr_mass.txt", nquad, quad_constr, quad_mass);
+  load_constr_mass(3, 7, "test_data/global_quad_constr_mass.txt", nquad, quad_constr, quad_mass);
 
   HoloConst holoconst;
   holoconst.setup_solvent_parameters(mO, mH, rOHsq, rHHsq);
+  /*
   holoconst.setup_ind_mass_constr(npair, (int2 *)pair_ind, pair_constr, pair_mass,
 				  ntrip, (int3 *)trip_ind, trip_constr, trip_mass,
 				  nquad, (int4 *)quad_ind, quad_constr, quad_mass,
@@ -296,7 +296,11 @@ void test() {
   cudaStream_t integrator_stream;
   cudaCheck(cudaStreamCreate(&integrator_stream));
 
-  CudaLeapfrogIntegrator leapfrog(NULL /*&holoconst*/, 0);
+  CudaLeapfrogIntegrator leapfrog(&holoconst,
+				  npair, (int2 *)pair_ind, pair_constr, pair_mass,
+				  ntrip, (int3 *)trip_ind, trip_constr, trip_mass,
+				  nquad, (int4 *)quad_ind, quad_constr, quad_mass,
+				  nsolvent, (int3 *)solvent_ind, 0);
 
   // Neighborlist
   NeighborList<32> nlist(ncoord, iblo14, inb14);

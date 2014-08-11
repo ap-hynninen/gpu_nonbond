@@ -648,19 +648,39 @@ void HoloConst::setup_solvent_parameters(double mO, double mH, double rOHsq, dou
 //
 // Setups all ind, mass, and constr arrays
 //
-void HoloConst::setup_ind_mass_constr(int npair, int2 *h_pair_ind,
-				      double *h_pair_constr, double *h_pair_mass,
-				      int ntrip, int3 *h_trip_ind,
-				      double *h_trip_constr, double *h_trip_mass,
-				      int nquad, int4 *h_quad_ind,
-				      double *h_quad_constr, double *h_quad_mass,
-				      int nsolvent, int3 *h_solvent_ind) {
+void HoloConst::setup_ind_mass_constr(const int npair, const int2 *h_pair_ind,
+				      const double *h_pair_constr, const double *h_pair_mass,
+				      const int ntrip, const int3 *h_trip_ind,
+				      const double *h_trip_constr, const double *h_trip_mass,
+				      const int nquad, const int4 *h_quad_ind,
+				      const double *h_quad_constr, const double *h_quad_mass,
+				      const int nsolvent, const int3 *h_solvent_ind) {
 
   // Copy ind, mass, and constr from CPU to GPU
-  set_pair_ind(npair, h_pair_ind, h_pair_constr, h_pair_mass);
-  set_trip_ind(ntrip, h_trip_ind, h_trip_constr, h_trip_mass);
-  set_quad_ind(nquad, h_quad_ind, h_quad_constr, h_quad_mass);
-  set_solvent_ind(nsolvent, h_solvent_ind);
+  set_pair(npair, h_pair_ind, h_pair_constr, h_pair_mass);
+  set_trip(ntrip, h_trip_ind, h_trip_constr, h_trip_mass);
+  set_quad(nquad, h_quad_ind, h_quad_constr, h_quad_mass);
+  set_solvent(nsolvent, h_solvent_ind);
+
+}
+
+//
+// Setups all ind, mass, and constr arrays using local->global mapping
+//
+void HoloConst::setup_ind_mass_constr(const int npair, const int2 *global_pair_ind,
+				      const double *global_pair_constr, const double *global_pair_mass,
+				      const int ntrip, const int3 *global_trip_ind,
+				      const double *global_trip_constr, const double *global_trip_mass,
+				      const int nquad, const int4 *global_quad_ind,
+				      const double *global_quad_constr, const double *global_quad_mass,
+				      const int nsolvent, const int3 *global_solvent_ind,
+				      const int* loc2glo) {
+
+  // Copy ind, mass, and constr from CPU to GPU
+  set_pair(npair, global_pair_ind, global_pair_constr, global_pair_mass, loc2glo);
+  set_trip(ntrip, global_trip_ind, global_trip_constr, global_trip_mass, loc2glo);
+  set_quad(nquad, global_quad_ind, global_quad_constr, global_quad_mass, loc2glo);
+  set_solvent(nsolvent, global_solvent_ind, loc2glo);
 
 }
 
@@ -751,7 +771,7 @@ void HoloConst::update_setup(int stride, double *xyz0, double *xyz1, double *xyz
 //
 // Setups solvent_ind -table
 //
-void HoloConst::set_solvent_ind(int nsolvent, int3 *h_solvent_ind) {
+void HoloConst::set_solvent(const int nsolvent, const int3 *h_solvent_ind) {
 
   this->nsolvent = nsolvent;
 
@@ -761,10 +781,21 @@ void HoloConst::set_solvent_ind(int nsolvent, int3 *h_solvent_ind) {
 }
 
 //
+// Setups solvent_ind -table using local->global mapping
+//
+void HoloConst::set_solvent(const int nsolvent, const int3 *global_solvent_ind, const int *loc2glo) {
+
+  this->nsolvent = nsolvent;
+
+  reallocate<int3>(&solvent_ind, &solvent_ind_len, nsolvent, 1.5f);
+  map_to_local_array<int3>(nsolvent, loc2glo, global_solvent_ind, solvent_ind);
+}
+
+//
 // Setups pair_ind -table
 //
-void HoloConst::set_pair_ind(int npair, int2 *h_pair_ind,
-			     double *h_pair_constr, double *h_pair_mass) {
+void HoloConst::set_pair(const int npair, const int2 *h_pair_ind,
+			 const double *h_pair_constr, const double *h_pair_mass) {
 
   this->npair = npair;
 
@@ -780,10 +811,28 @@ void HoloConst::set_pair_ind(int npair, int2 *h_pair_ind,
 }
 
 //
+// Setups pair_ind -table using local->global mapping
+//
+void HoloConst::set_pair(const int npair, const int2 *global_pair_ind,
+			 const double *global_pair_constr, const double *global_pair_mass,
+			 const int *loc2glo) {
+
+  this->npair = npair;
+
+  reallocate<int2>(&pair_ind, &pair_ind_len, npair, 1.5f);
+  reallocate<double>(&pair_constr, &pair_constr_len, npair, 1.5f);
+  reallocate<double>(&pair_mass, &pair_mass_len, npair*2, 1.5f);
+
+  map_to_local_array<int2>(npair, loc2glo, global_pair_ind, pair_ind);
+  map_to_local_array<double>(npair, loc2glo, global_pair_constr, pair_constr);
+  map_to_local_array<double2>(npair, loc2glo, (double2 *)global_pair_mass, (double2 *)pair_mass);
+}
+
+//
 // Setups trip_ind -table
 //
-void HoloConst::set_trip_ind(int ntrip, int3 *h_trip_ind,
-			     double *h_trip_constr, double *h_trip_mass) {
+void HoloConst::set_trip(const int ntrip, const int3 *h_trip_ind,
+			 const double *h_trip_constr, const double *h_trip_mass) {
 
   this->ntrip = ntrip;
 
@@ -798,11 +847,33 @@ void HoloConst::set_trip_ind(int ntrip, int3 *h_trip_ind,
 
 }
 
+struct double5 {
+  double x1, x2, x3, x4, x5;
+};
+
+//
+// Setups trip_ind -table using local->global mapping
+//
+void HoloConst::set_trip(const int ntrip, const int3 *global_trip_ind,
+			 const double *global_trip_constr, const double *global_trip_mass,
+			 const int *loc2glo) {
+
+  this->ntrip = ntrip;
+
+  reallocate<int3>(&trip_ind, &trip_ind_len, ntrip, 1.5f);
+  reallocate<double>(&trip_constr, &trip_constr_len, ntrip*2, 1.5f);
+  reallocate<double>(&trip_mass, &trip_mass_len, ntrip*5, 1.5f);
+
+  map_to_local_array<int3>(ntrip, loc2glo, global_trip_ind, trip_ind);
+  map_to_local_array<double2>(ntrip, loc2glo, (double2 *)global_trip_constr, (double2 *)trip_constr);
+  map_to_local_array<double5>(ntrip, loc2glo, (double5 *)global_trip_mass, (double5 *)trip_mass);
+}
+
 //
 // Setups quad_ind -table
 //
-void HoloConst::set_quad_ind(int nquad, int4 *h_quad_ind,
-			     double *h_quad_constr, double *h_quad_mass) {
+void HoloConst::set_quad(const int nquad, const int4 *h_quad_ind,
+			 const double *h_quad_constr, const double *h_quad_mass) {
 
   this->nquad = nquad;
 
@@ -815,6 +886,28 @@ void HoloConst::set_quad_ind(int nquad, int4 *h_quad_ind,
   reallocate<double>(&quad_mass, &quad_mass_len, nquad*7, 1.5f);
   copy_HtoD<double>(h_quad_mass, quad_mass, nquad*7);
 
+}
+
+struct double7 {
+  double x1, x2, x3, x4, x5, x6, x7;
+};
+
+//
+// Setups quad_ind -table using local->global mapping
+//
+void HoloConst::set_quad(const int nquad, const int4 *global_quad_ind,
+			 const double *global_quad_constr, const double *global_quad_mass,
+			 const int *loc2glo) {
+
+  this->nquad = nquad;
+
+  reallocate<int4>(&quad_ind, &quad_ind_len, nquad, 1.5f);
+  reallocate<double>(&quad_constr, &quad_constr_len, nquad*3, 1.5f);
+  reallocate<double>(&quad_mass, &quad_mass_len, nquad*7, 1.5f);
+
+  map_to_local_array<int4>(nquad, loc2glo, global_quad_ind, quad_ind);
+  map_to_local_array<double3>(nquad, loc2glo, (double3 *)global_quad_constr, (double3 *)quad_constr);
+  map_to_local_array<double7>(nquad, loc2glo, (double7 *)global_quad_mass, (double7 *)quad_mass);
 }
 
 //

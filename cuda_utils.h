@@ -2,6 +2,17 @@
 #ifndef CUDA_UTILS_H
 #define CUDA_UTILS_H
 
+#include <stdio.h>
+
+#define cudaCheck(stmt) do {                                 \
+        cudaError_t err = stmt;                            \
+        if (err != cudaSuccess) {                          \
+	  printf("Error running %s in file %s, function %s\n", #stmt,__FILE__,__FUNCTION__); \
+	  printf("Error string: %s\n",cudaGetErrorString(err)); \
+	  exit(1);							\
+        }                                                  \
+    } while(0)
+
 // Returns stride that aligns with 256 byte boundaries
 template <typename T>
 inline int calc_stride(int ncoord) {
@@ -306,6 +317,30 @@ void copy3D_DtoH(T* src_data, T* dst_data,
 		width, height, depth,
 		dst_xsize, dst_ysize, sizeof(T));
 }
+#endif
+
+//----------------------------------------------------------------------------------------
+#ifdef __CUDACC__
+#ifdef __cplusplus
+template <class T>
+__global__ void map_to_local_array_kernel(const int narray, const int *loc2glo, const T* global_array,
+					  T* local_array) {
+  const int i = threadIdx.x + blockDim.x*blockIdx.x;
+  if (i < narray) {
+    local_array[i] = global_array[loc2glo[i]];
+  }
+}
+
+template <class T>
+void map_to_local_array(const int narray, const int *loc2glo, const T *global_array, T *local_array,
+			cudaStream_t stream=0) {
+  int nthread = 256;
+  int nblock = (narray-1)/nthread + 1;
+  map_to_local_array_kernel<T> <<< nblock, nthread, 0, stream >>>
+    (narray, loc2glo, global_array, local_array);
+  cudaCheck(cudaGetLastError());
+}
+#endif
 #endif
 
 //----------------------------------------------------------------------------------------

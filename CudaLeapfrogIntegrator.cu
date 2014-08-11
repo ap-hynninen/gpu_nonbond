@@ -108,8 +108,69 @@ __global__ void calc_kine_kernel(const int ncoord, const int stride,
 //
 // Class creator
 //
-CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_t stream) {
+CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst,
+					       const int npair, const int2 *h_pair_ind,
+					       const double *h_pair_constr, const double *h_pair_mass,
+					       const int ntrip, const int3 *h_trip_ind,
+					       const double *h_trip_constr, const double *h_trip_mass,
+					       const int nquad, const int4 *h_quad_ind,
+					       const double *h_quad_constr, const double *h_quad_mass,
+					       const int nsolvent, const int3 *h_solvent_ind,
+					       cudaStream_t stream) {
   this->holoconst = holoconst;
+
+  this->npair = 0;
+  this->pair_ind = NULL;
+  this->pair_constr = NULL;
+  this->pair_mass = NULL;
+  
+  this->ntrip = 0;
+  this->trip_ind = NULL;
+  this->trip_constr = NULL;
+  this->trip_mass = NULL;
+  
+  this->nquad = 0;
+  this->quad_ind = NULL;
+  this->quad_constr = NULL;
+  this->quad_mass = NULL;
+  
+  this->nsolvent = 0;
+  this->solvent_ind = NULL;
+  
+  if (holoconst != NULL) {
+    this->npair = npair;
+    if (npair > 0) {
+      allocate<int2>(&pair_ind, npair);
+      allocate<double>(&pair_constr, npair);
+      allocate<double>(&pair_mass, npair*2);
+      copy_HtoD<int2>(h_pair_ind, pair_ind, npair);
+      copy_HtoD<double>(h_pair_constr, pair_constr, npair);
+      copy_HtoD<double>(h_pair_mass, pair_mass, npair*2);
+    }
+    this->ntrip = ntrip;
+    if (ntrip > 0) {
+      allocate<int3>(&trip_ind, ntrip);
+      allocate<double>(&trip_constr, ntrip*2);
+      allocate<double>(&trip_mass, ntrip*5);
+      copy_HtoD<int3>(h_trip_ind, trip_ind, ntrip);
+      copy_HtoD<double>(h_trip_constr, trip_constr, ntrip*2);
+      copy_HtoD<double>(h_trip_mass, trip_mass, ntrip*5);
+    }
+    this->nquad = nquad;
+    if (nquad > 0) {
+      allocate<int4>(&quad_ind, nquad);
+      allocate<double>(&quad_constr, nquad*3);
+      allocate<double>(&quad_mass, nquad*7);
+      copy_HtoD<int4>(h_quad_ind, quad_ind, nquad);
+      copy_HtoD<double>(h_quad_constr, quad_constr, nquad*3);
+      copy_HtoD<double>(h_quad_mass, quad_mass, nquad*7);
+    }
+    this->nsolvent = nsolvent;
+    if (nsolvent > 0) {
+      allocate<int3>(&solvent_ind, nsolvent);
+      copy_HtoD<int3>(h_solvent_ind, solvent_ind, nsolvent);
+    }
+  }
   this->stream = stream;
   cudaCheck(cudaEventCreate(&copy_rms_work_done_event));
   cudaCheck(cudaEventCreate(&copy_temp_ekin_done_event));
@@ -123,6 +184,21 @@ CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_
 // Class destructor
 //
 CudaLeapfrogIntegrator::~CudaLeapfrogIntegrator() {
+
+  if (pair_ind != NULL) deallocate<int2>(&pair_ind);
+  if (pair_constr != NULL) deallocate<double>(&pair_constr);
+  if (pair_mass != NULL) deallocate<double>(&pair_mass);
+
+  if (trip_ind != NULL) deallocate<int3>(&trip_ind);
+  if (trip_constr != NULL) deallocate<double>(&trip_constr);
+  if (trip_mass != NULL) deallocate<double>(&trip_mass);
+
+  if (quad_ind != NULL) deallocate<int4>(&quad_ind);
+  if (quad_constr != NULL) deallocate<double>(&quad_constr);
+  if (quad_mass != NULL) deallocate<double>(&quad_mass);
+
+  if (solvent_ind != NULL) deallocate<int3>(&solvent_ind);
+
   cudaCheck(cudaEventDestroy(copy_rms_work_done_event));
   cudaCheck(cudaEventDestroy(copy_temp_ekin_done_event));
   cudaCheck(cudaEventDestroy(done_integrate_event));
@@ -238,15 +314,31 @@ void CudaLeapfrogIntegrator::calc_step() {
 //
 // Calculate forces
 //
-void CudaLeapfrogIntegrator::calc_force(const bool calc_energy, const bool calc_virial) {
 
+void CudaLeapfrogIntegrator::pre_calc_force() {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
     cudaCheck(cudaStreamWaitEvent(stream, done_integrate_event, 0));
-    p->calc(&coord, &prev_step, mass, calc_energy, calc_virial, &force);
+    p->pre_calc(&coord, &prev_step);
+  }
+}
+
+void CudaLeapfrogIntegrator::calc_force(const bool calc_energy, const bool calc_virial) {
+  if (forcefield != NULL) {
+    CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
+    p->calc(calc_energy, calc_virial, &force);
+  }
+}
+
+void CudaLeapfrogIntegrator::post_calc_force() {
+  if (forcefield != NULL) {
+    CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
+    if (holoconst != NULL) {
+      
+    }
+    p->post_calc(mass);
     p->wait_calc(stream);
   }
-
 }
 
 //

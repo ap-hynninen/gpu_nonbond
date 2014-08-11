@@ -18,7 +18,9 @@ private:
   virtual void swap_coord()=0;
   virtual void take_step()=0;
   virtual void calc_step()=0;
+  virtual void pre_calc_force()=0;
   virtual void calc_force(const bool calc_energy, const bool calc_virial)=0;
+  virtual void post_calc_force()=0;
   virtual void calc_temperature()=0;
   virtual void do_holoconst()=0;
   virtual void do_pressure()=0;
@@ -195,11 +197,21 @@ public:
 
       bool print_energy = (istep % print_freq) == 0;
 
-      // Calculate forces
-      // NOTE: If applicable, does neighbor list search
+      // Calculate forces:
+      //
+      // pre_calc_force = prepare for force calculation
+      // (neighborlist search done here, if applicable)
+      //
+      // calc_force = do the actual force calculation
+      //
+      // post_calc_force = post process force calculation
+      // (array re-orderings, if applicable)
+      //
+      pre_calc_force();
       bool calc_energy = print_energy;
       bool calc_virial = const_pressure() || print_energy;
       calc_force(calc_energy, calc_virial);
+      post_calc_force();
 
       // Calculate step vector: dx = dx_prev - fx*dt*dt/mass
       calc_step();

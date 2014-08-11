@@ -12,10 +12,9 @@ class CudaForcefield : public Forcefield {
 
 public:
 
-  virtual void calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
-		    float *mass,
-		    const bool calc_energy, const bool calc_virial,
-		    Force<long long int> *force)=0;
+  virtual void pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step)=0;
+  virtual void calc(const bool calc_energy, const bool calc_virial, Force<long long int> *force)=0;
+  virtual void post_calc(float *mass)=0;
 
   virtual void wait_calc(cudaStream_t stream)=0;
 

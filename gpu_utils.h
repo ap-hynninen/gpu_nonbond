@@ -13,15 +13,6 @@ static __constant__ const double INV_FORCE_SCALE = (double)1.0/(double)(1ll << 4
 static __constant__ const float FORCE_SCALE_I = (float)(1 << 31);
 static __constant__ const double INV_FORCE_SCALE_I = (double)1.0/(double)(1 << 31);
 
-#define cudaCheck(stmt) do {                                 \
-        cudaError_t err = stmt;                            \
-        if (err != cudaSuccess) {                          \
-	  printf("Error running %s in file %s, function %s\n", #stmt,__FILE__,__FUNCTION__); \
-	  printf("Error string: %s\n",cudaGetErrorString(err)); \
-	  exit(1);							\
-        }                                                  \
-    } while(0)
-
 #define cufftCheck(stmt) do {						\
     cufftResult err = stmt;						\
     if (err != CUFFT_SUCCESS) {						\

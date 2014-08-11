@@ -189,15 +189,14 @@ void CudaPMEForcefield::setup_recip_nonbonded(const double kappa,
 }
 
 //
-// Calculate forces
+// Pre-process force calculation
 //
-void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step, float *mass,
-			     const bool calc_energy, const bool calc_virial,
-			     Force<long long int> *force) {
-
+void CudaPMEForcefield::pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step) {
 
   // Check for neighborlist heuristic update
   if (heuristic_check(coord, direct_stream[0])) {
+    neighborlist_updated = true;
+
     std::cout << "  Building neighborlist" << std::endl;
 
     // Update homezone coordinates (coord) and step vector (prev_step)
@@ -222,10 +221,8 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
     nlist->build(domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), domdec->get_rnl(),
 		 xyzq.xyzq, domdec->get_loc2glo());
 
-    /*
-    nlist->test_build(domdec->get_zone_pcoord(), domdec->get_boxx(), domdec->get_boxy(),
-		      domdec->get_boxz(), domdec->get_rnl(), xyzq.xyzq, domdec->get_loc2glo());
-    */
+    //nlist->test_build(domdec->get_zone_pcoord(), domdec->get_boxx(), domdec->get_boxy(),
+    //domdec->get_boxz(), domdec->get_rnl(), xyzq.xyzq, domdec->get_loc2glo());
 
     // Build bonded tables
     domdec_bonded->build_tbl(domdec, domdec->get_zone_pcoord());
@@ -257,13 +254,7 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
 		    domdec_bonded->get_nex14_tbl(), domdec_bonded->get_ex14_tbl(),
 		    domdec_bonded->get_ex14());
 
-    // Re-order mass
-    domdec->reorder_mass(mass, nlist->get_ind_sorted());
-
-    // Re-order xyz_shift
-    domdec->reorder_xyz_shift(nlist->get_ind_sorted());
-
-    // Re-order step vector:
+    // Re-order prev_step vector:
     domdec->reorder_coord(prev_step, &ref_coord, nlist->get_ind_sorted());
     prev_step->set_data(ref_coord);
 
@@ -272,12 +263,20 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
     coord->set_data(ref_coord);
 
   } else {
+    neighborlist_updated = false;
     // Communicate coordinates
     domdec->comm_coord(coord, false);
     // Copy coordinates to xyzq -array
     xyzq.set_xyz(coord, domdec->get_xyz_shift(),
 		 domdec->get_boxx(), domdec->get_boxy(), domdec->get_boxz(), direct_stream[0]);
   }
+
+}
+
+//
+// Calculate forces
+//
+void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, Force<long long int> *force) {
 
   force->clear(direct_stream[0]);
 
@@ -349,6 +348,23 @@ void CudaPMEForcefield::calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step,
 
   // Communicate forces (After this all nodes have their correct total force)
   domdec->comm_force(force);
+
+}
+
+//
+// Post-process force calculation. Used for array re-ordering after neighborlist search
+//
+void CudaPMEForcefield::post_calc(float *mass) {
+
+  if (neighborlist_updated) {
+
+    // Re-order xyz_shift
+    domdec->reorder_xyz_shift(nlist->get_ind_sorted());
+
+    // Re-order mass
+    domdec->reorder_mass(mass, nlist->get_ind_sorted());
+
+  }
 
   cudaCheck(cudaEventRecord(done_calc_event, direct_stream[0]));
 }
