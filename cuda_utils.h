@@ -323,8 +323,9 @@ void copy3D_DtoH(T* src_data, T* dst_data,
 #ifdef __CUDACC__
 #ifdef __cplusplus
 template <class T>
-__global__ void map_to_local_array_kernel(const int narray, const int *loc2glo, const T* global_array,
-					  T* local_array) {
+__global__ void map_to_local_array_kernel(const int narray, const int* __restrict__ loc2glo,
+					  const T* __restrict__ global_array,
+					  T* __restrict__ local_array) {
   const int i = threadIdx.x + blockDim.x*blockIdx.x;
   if (i < narray) {
     local_array[i] = global_array[loc2glo[i]];

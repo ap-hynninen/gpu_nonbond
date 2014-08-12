@@ -175,6 +175,7 @@ CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst,
   cudaCheck(cudaEventCreate(&copy_rms_work_done_event));
   cudaCheck(cudaEventCreate(&copy_temp_ekin_done_event));
   cudaCheck(cudaEventCreate(&done_integrate_event));
+  global_mass = NULL;
   mass_len = 0;
   mass = NULL;
   allocate_host<CudaLeapfrogIntegrator_storage_t>(&h_CudaLeapfrogIntegrator_storage, 1);
@@ -202,6 +203,7 @@ CudaLeapfrogIntegrator::~CudaLeapfrogIntegrator() {
   cudaCheck(cudaEventDestroy(copy_rms_work_done_event));
   cudaCheck(cudaEventDestroy(copy_temp_ekin_done_event));
   cudaCheck(cudaEventDestroy(done_integrate_event));
+  if (global_mass != NULL) deallocate<float>(&global_mass);
   if (mass != NULL) deallocate<float>(&mass);
   deallocate_host<CudaLeapfrogIntegrator_storage_t>(&h_CudaLeapfrogIntegrator_storage);
 }
@@ -223,7 +225,7 @@ void CudaLeapfrogIntegrator::spec_init(const int ncoord,
 
   force.set_ncoord(ncoord);
 
-  reallocate<float>(&mass, &mass_len, ncoord);
+  allocate<float>(&global_mass, ncoord);
 
   // Copy array data
   prev_coord.set_data_sync(ncoord, x, y, z);
@@ -233,7 +235,7 @@ void CudaLeapfrogIntegrator::spec_init(const int ncoord,
   for (int i=0;i < ncoord;i++) {
     h_mass_f[i] = (float)h_mass[i];
   }
-  copy_HtoD<float>(h_mass_f, mass, ncoord);
+  copy_HtoD<float>(h_mass_f, global_mass, ncoord);
   delete [] h_mass_f;
 
   step.clear();
@@ -336,7 +338,8 @@ void CudaLeapfrogIntegrator::post_calc_force() {
     if (holoconst != NULL) {
       
     }
-    p->post_calc(mass);
+    reallocate<float>(&mass, &mass_len, coord.n);
+    p->post_calc(global_mass, mass);
     p->wait_calc(stream);
   }
 }

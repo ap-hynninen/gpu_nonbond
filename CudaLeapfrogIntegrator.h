@@ -31,6 +31,9 @@ private:
   cudaXYZ<double> prev_step;
 
   // Masses
+  //int global_mass_len;
+  float *global_mass;
+
   int mass_len;
   float *mass;
 

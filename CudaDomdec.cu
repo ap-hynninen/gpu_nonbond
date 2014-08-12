@@ -79,6 +79,32 @@ __global__ void reorder_mass_kernel(const int ncoord,
   }
 }
 
+//
+// Choose z coordinates
+//
+__global__ void choose_z_coord_kernel(const int ncoord, const float* __restrict__ zbound_f,
+				      const float rcut_f, const float invz, const float* __restrict__ shz,
+				      const double* __restrict__ coord,
+				      unsigned char* __restrict__ coord_tags) {
+  const int tid = threadIdx.x + blockDim.x*blockIdx.x;
+  const int izone = tid/ncoord;
+  const int i = tid - izone*ncoord;
+
+  float z = ((float)coord[i])*invz + 0.5f;
+  z -= floor(z);
+  z += shz[izone] - zbound_f[izone];
+  z = max(0.0f, z);
+  unsigned char tag;
+  if (z < rcut_f) {
+    // In the zone
+    tag = 1;
+  } else {
+    tag = 0;
+  }
+  coord_tags[i + izone*ncoord] = tag;
+}
+
+
 //#############################################################################################
 //#############################################################################################
 //#############################################################################################
@@ -175,6 +201,70 @@ void CudaDomdec::comm_coord(cudaXYZ<double> *coord, const bool update, cudaStrea
 
   // Calculate xyz_shift
   if (update) {
+    int nthread, nblock;
+
+    /*
+    // ---------------- Z -------------------
+    int nreq = 0;
+    for (int i=0;i < nz_comm;i++) {
+      if (z_recv_count[i] > 0) {
+	cuda_irecv(z_recv_buf[i], z_recv_count[i], z_recv_node[i], &reqbuf[nreq]);
+	nreq++;
+      }
+    }
+
+    for (int i=0;i < nz_comm;i++)
+      h_z_boundary[i] = get_fz_boundary(homeix, homeiy, homeiz-i, rnl, r_bonded);
+
+    nthread = 512;
+    nblock = (zone_ncoord[0] - 1)/nthread + 1;
+    choose_z_coord_kernel<<< nblock, nthread, 0, stream >>>
+      (zone_ncoord[0], z_boundary, rnl/boxz, coord->data, coord_tags);
+
+    if (mpi_cuda_aware) {
+      for (int i=0;i < nz_comm;i++) {
+	if (z_send_count[i] > 0) {
+	  cuda_isend(z_send_buf[i], z_send_count[i], z_send_node[i], &reqbuf[nreq]);
+	  nreq++;
+	}
+      }
+    } else {
+      for (int i=0;i < nz_comm;i++) {
+	if (z_send_count[i] > 0) {
+	}
+      }
+    }
+
+    cuda_waitall(nreq, reqbuf);
+
+    // ---------------- Y -------------------
+
+    for (int i=0;i < ny_comm;i++)
+      h_y_boundary[i] = get_fy_boundary(homeix, homeiy-i, homeiz, rnl, r_bonded);
+
+    for (int i=0;i < ny_comm;i++)
+      get_ex_boundary(homeix, homeiy-i, homeiz, yf, zf, &
+		      z_bonded, q_checkbonded, cut, rcut_bonded);
+
+    // ---------------- X -------------------
+
+    for (int i=0;i < nx_comm;i++)
+      get_fx_boundary(homeix-i, xf);
+
+    for (int i=0;i < nx_comm;i++)
+      get_ez_boundary(homeix-i, homeiy, xf, yf, y_bonded, q_checkbonded);
+
+    for (int i=0;i < nx_comm;i++)
+      get_ey_boundary(homeix-i, homeiy, homeiz, xf, zf, z_bonded, q_checkbonded, cut);
+
+    for (int i=0;i < nx_comm;i++) {
+      get_c_boundary(homeix-i, homeiy, homeiz, xf, yf, zf, &
+			  y_bonded, z_bonded, q_checkbonded);
+      get_z0_for_c(homeix-i, homeiy, homeiz, z0);
+    }
+    */
+
+    // Calculate xyz shift
     double x0 = 0.0;
     double y0 = 0.0;
     double z0 = 0.0;
@@ -186,8 +276,8 @@ void CudaDomdec::comm_coord(cudaXYZ<double> *coord, const bool update, cudaStrea
     reallocate<float3>(&xyz_shift0, &xyz_shift0_len, zone_pcoord[7], fac);
     reallocate<float3>(&xyz_shift1, &xyz_shift1_len, zone_pcoord[7], fac);
     
-    int nthread = 512;
-    int nblock = (zone_pcoord[7] - 1)/nthread + 1;
+    nthread = 512;
+    nblock = (zone_pcoord[7] - 1)/nthread + 1;
     calc_xyz_shift<<< nblock, nthread, 0, stream >>>
       (zone_pcoord[7], coord->stride, coord->data,
        x0, y0, z0, inv_boxx, inv_boxy, inv_boxz, xyz_shift0);

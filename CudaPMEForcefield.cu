@@ -354,7 +354,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
 //
 // Post-process force calculation. Used for array re-ordering after neighborlist search
 //
-void CudaPMEForcefield::post_calc(float *mass) {
+void CudaPMEForcefield::post_calc(const float *global_mass, float *mass) {
 
   if (neighborlist_updated) {
 
@@ -362,8 +362,8 @@ void CudaPMEForcefield::post_calc(float *mass) {
     domdec->reorder_xyz_shift(nlist->get_ind_sorted());
 
     // Re-order mass
-    domdec->reorder_mass(mass, nlist->get_ind_sorted());
-
+    //domdec->reorder_mass(mass, nlist->get_ind_sorted());
+    map_to_local_array<float>(domdec->get_ncoord(), domdec->get_loc2glo(), global_mass, mass);
   }
 
   cudaCheck(cudaEventRecord(done_calc_event, direct_stream[0]));

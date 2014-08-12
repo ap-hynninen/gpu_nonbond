@@ -155,7 +155,7 @@ public:
 
   void pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step);
   void calc(const bool calc_energy, const bool calc_virial, Force<long long int> *force);
-  void post_calc(float *mass);
+  void post_calc(const float *global_mass, float *mass);
 
   void wait_calc(cudaStream_t stream);
 
