@@ -177,15 +177,7 @@ public:
   //
   // Runs dynamics for nstep steps
   //
-  void run(const int nstep, const int print_freq, const int restart_freq) {
-
-    printf("DYNA DYN: Step         Time      TOTEner        TOTKe       ENERgy  TEMPerature\n");
-    printf("DYNA PROP:             GRMS      HFCTote        HFCKe       EHFCor        VIRKe\n");
-    printf("DYNA INTERN:          BONDs       ANGLes       UREY-b    DIHEdrals    IMPRopers\n");
-    printf("DYNA EXTERN:        VDWaals         ELEC       HBONds          ASP         USER\n");
-    printf("DYNA EWALD:          EWKSum       EWSElf       EWEXcl       EWQCor       EWUTil\n");
-    printf("DYNA PRESS:            VIRE         VIRI       PRESSE       PRESSI       VOLUme\n");
-    printf("----------       ---------    ---------    ---------    ---------    ---------\n");
+  void run(const int nstep) {
 
     for (int istep=0;istep < nstep;istep++) {
 
@@ -194,8 +186,6 @@ public:
       
       // Pressure scaling (if needed)
       do_pressure();
-
-      bool print_energy = (istep % print_freq) == 0;
 
       // Calculate forces:
       //
@@ -208,8 +198,9 @@ public:
       // (array re-orderings, if applicable)
       //
       pre_calc_force();
-      bool calc_energy = print_energy;
-      bool calc_virial = const_pressure() || print_energy;
+      bool last_step = (istep == nstep-1);
+      bool calc_energy = last_step;
+      bool calc_virial = const_pressure() || last_step;
       calc_force(calc_energy, calc_virial);
       post_calc_force();
 
@@ -226,7 +217,7 @@ public:
       do_temperature();
       
       // Calculate temperature
-      if (print_energy) {
+      if (last_step) {
 	calc_temperature();
       }
       
@@ -235,22 +226,21 @@ public:
       // Calculate pressure
 
       // Print energies & other values on screen
-      if (print_energy) {
-	do_print_energy(istep);
+      //if (print_energy) {
+      //do_print_energy(istep);
+      //}
+
+      if (!last_step) {
+	// Swap: dx <=> dx_prev
+	swap_step();
+	// Swap: x <=> x_prev
+	swap_coord();
       }
-
-      if ((istep % restart_freq) == 0) {
-	get_restart_data(x, y, z, dx, dy, dz, fx, fy, fz);
-	write_restart_data(istep, x, y, z, dx, dy, dz, fx, fy, fz);
-      }
-
-      // Swap: dx <=> dx_prev
-      swap_step();
-
-      // Swap: x <=> x_prev
-      swap_coord();
 
     }
+
+    // Results are now in (x, y, z), (dx, dy, dz), (fx, fy, fz)
+    get_restart_data(x, y, z, dx, dy, dz, fx, fy, fz);
 
   }
 

@@ -1,4 +1,10 @@
 *~
 *.o
+*.d
 gpu_recip
 gpu_direct
+gpu_const
+gpu_dyna
+gpu_bonded
+cpu_transpose
+
