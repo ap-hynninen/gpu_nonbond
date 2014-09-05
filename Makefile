@@ -2,20 +2,22 @@
 # Detect OS
 OS := $(shell uname -s)
 
+YES := $(shell which make | wc -l 2> /dev/null)
+
 # Detect Intel compiler
 INTEL_COMPILER := $(shell which icc | wc -l 2> /dev/null)
-
 MPI_FOUND := $(shell which mpicc | wc -l 2> /dev/null)
 
-DEFS := DONT_USE_MPI
-ifeq ($(MPI_FOUND),1)
+ifeq ($(MPI_FOUND), $(YES))
 DEFS := USE_MPI
+else
+DEFS := DONT_USE_MPI
 endif
 
 CCMPI = mpicc
 CLMPI = mpicc
 
-ifeq ($(INTEL_COMPILER),1)
+ifeq ($(INTEL_COMPILER), $(YES))
 CC = icc
 CL = icc
 else
@@ -23,7 +25,7 @@ CC = g++
 CL = g++
 endif
 
-ifeq ($(INTEL_COMPILER),1)
+ifeq ($(INTEL_COMPILER), $(YES))
 OPENMP_OPT = -openmp
 else
 OPENMP_OPT = -fopenmp
@@ -55,7 +57,7 @@ else
 LFLAGS = -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcufft -lcuda -lstdc++.6 -lnvToolsExt
 endif
 
-ifeq ($(INTEL_COMPILER),1)
+ifeq ($(INTEL_COMPILER), $(YES))
 CFLAGS = -O3 -std=c++0x
 else
 CFLAGS = -O3 -std=c++0x #-std=c++11
@@ -67,7 +69,7 @@ GENCODE_SM35  := -gencode arch=compute_35,code=sm_35
 GENCODE_FLAGS := $(GENCODE_SM20) $(GENCODE_SM30) $(GENCODE_SM35)
 
 exec_targets := gpu_direct gpu_bonded gpu_recip gpu_const gpu_dyna
-ifeq ($(MPI_FOUND),1)
+ifeq ($(MPI_FOUND), $(YES))
 exec_targets += cpu_transpose
 endif
 
