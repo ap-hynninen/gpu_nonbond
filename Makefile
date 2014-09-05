@@ -5,6 +5,7 @@ OS := $(shell uname -s)
 YES := $(shell which make | wc -l 2> /dev/null)
 
 # Detect Intel compiler
+CUDA_COMPILER := $(shell which nvcc | wc -l 2> /dev/null)
 INTEL_COMPILER := $(shell which icc | wc -l 2> /dev/null)
 MPI_FOUND := $(shell which mpicc | wc -l 2> /dev/null)
 
@@ -43,18 +44,31 @@ OBJS_DYNA = cuda_utils.o gpu_dyna.o Force.o reduce.o CudaLeapfrogIntegrator.o Cu
 
 OBJS_TRANSPOSE = cpu_transpose.o mpi_utils.o CpuMultiNodeMatrix3d.o CpuMatrix3d.o
 
+ifeq ($(CUDA_COMPILER), $(YES))
 OBJS = $(OBJS_RECIP)
 OBJS += $(OBJS_DIRECT)
 OBJS += $(OBJS_BONDED)
 OBJS += $(OBJS_CONST)
 OBJS += $(OBJS_DYNA)
+endif
+ifeq ($(MPI_FOUND), $(YES))
+OBJS += $(OBJS_TRANSPOSE)
+endif
 
+ifeq ($(CUDA_COMPILER), $(YES))
 CUDAROOT := $(subst /bin/,,$(dir $(shell which nvcc)))
+endif
 
 ifeq ($(OS),Linux)
-LFLAGS = -std=c++0x -L $(CUDAROOT)/lib64 -lcudart -lnvToolsExt -lcufft
+LFLAGS = -std=c++0x
+ifeq ($(CUDA_COMPILER), $(YES))
+LFLAGS += -L $(CUDAROOT)/lib64 -lcudart -lnvToolsExt -lcufft
+endif
 else
-LFLAGS = -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcufft -lcuda -lstdc++.6 -lnvToolsExt
+LFLAGS = -lstdc++.6
+ifeq ($(CUDA_COMPILER), $(YES))
+LFLAGS += -L /usr/local/cuda/lib -I /usr/local/cuda/include -lcudart -lcufft -lcuda -lnvToolsExt
+endif
 endif
 
 ifeq ($(INTEL_COMPILER), $(YES))
@@ -63,12 +77,16 @@ else
 CFLAGS = -O3 -std=c++0x #-std=c++11
 endif
 
+ifeq ($(CUDA_COMPILER), $(YES))
 GENCODE_SM20  := -gencode arch=compute_20,code=sm_20
 GENCODE_SM30  := -gencode arch=compute_30,code=sm_30
 GENCODE_SM35  := -gencode arch=compute_35,code=sm_35
 GENCODE_FLAGS := $(GENCODE_SM20) $(GENCODE_SM30) $(GENCODE_SM35)
+endif
 
+ifeq ($(CUDA_COMPILER), $(YES))
 exec_targets := gpu_direct gpu_bonded gpu_recip gpu_const gpu_dyna
+endif
 ifeq ($(MPI_FOUND), $(YES))
 exec_targets += cpu_transpose
 endif
