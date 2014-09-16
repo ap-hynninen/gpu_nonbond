@@ -169,7 +169,7 @@ public:
     spec_init(ncoord, x, y, z, dx, dy, dz, mass);
   }
 
-  virtual void spec_init(const int ncoord,
+  virtual void spec_init(const int ncoord_glo,
 			 const double *x, const double *y, const double *z,
 			 const double *dx, const double *dy, const double *dz,
 			 const double *mass)=0;

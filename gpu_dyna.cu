@@ -3,19 +3,29 @@
 #include <cuda.h>
 #include "cuda_utils.h"
 #include "gpu_utils.h"
+#include "mpi_utils.h"
 #include "CudaLeapfrogIntegrator.h"
 #include "CudaDomdec.h"
 #include "CudaDomdecBonded.h"
 #include "CudaPMEForcefield.h"
 
+int numnode=1, mynode=0;
+
 void test();
 
 int main(int argc, char *argv[]) {
 
-  start_gpu(1, 0);
-  
+  // Get the local rank within this node from environmental variables
+  int local_rank = get_env_local_rank();
+
+  std::cout << "local_rank = " << local_rank << std::endl;
+
+  start_gpu(1, local_rank);
+  start_mpi(argc, argv, numnode, mynode);
+
   test();
 
+  stop_mpi();
   stop_gpu();
 
   return 0;
@@ -309,7 +319,10 @@ void test() {
   CudaDomdecBonded domdec_bonded(nbond, bond, nureyb, ureyb, nangle, angle,
 				 ndihe, dihe, nimdihe, imdihe, ncmap, cmap,
 				 nin14, in14, nex14, ex14);
-  CudaDomdec domdec(ncoord, boxx, boxy, boxz, rnl, 1, 1, 1, 0);
+
+  CudaMPI cudaMPI(false, MPI_COMM_WORLD);
+
+  CudaDomdec domdec(ncoord, boxx, boxy, boxz, rnl, 1, 1, 1, mynode, cudaMPI);
 
   // Charges
   float *q = new float[ncoord];

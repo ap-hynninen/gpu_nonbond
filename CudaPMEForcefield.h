@@ -2,6 +2,7 @@
 #define CUDAPMEFORCEFIELD_H
 #include "CudaForcefield.h"
 #include "cudaXYZ.h"
+#include "hostXYZ.h"
 #include "XYZQ.h"
 #include "NeighborList.h"
 #include "CudaPMEDirectForce.h"
@@ -159,7 +160,7 @@ public:
 
   void wait_calc(cudaStream_t stream);
 
-  void init_coord(cudaXYZ<double> *coord);
+  int init_coord(hostXYZ<double>& coord);
 
   void get_restart_data(hostXYZ<double> *h_coord, hostXYZ<double> *h_step, hostXYZ<double> *h_force,
 			double *x, double *y, double *z, double *dx, double *dy, double *dz,

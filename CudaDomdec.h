@@ -1,35 +1,19 @@
 #ifndef CUDADOMDEC_H
 #define CUDADOMDEC_H
 
-#include "Decomp.h"
+#include "Domdec.h"
 #include "cudaXYZ.h"
 #include "Force.h"
+#include "CudaDomdecHomezone.h"
+#include "CudaMPI.h"
 
 class CudaDomdecBonded;
 
-class CudaDomdec : public Decomp {
+class CudaDomdec : public Domdec {
 
   friend class CudaDomdecBonded;
 
  private:
-
-  // Size of the box
-  double boxx, boxy, boxz;
-
-  // Size of the neighborlist cut-off radius
-  double rnl;
-
-  // Number of sub-boxes in each coordinate direction
-  int nx, ny, nz;
-
-  // Local -> global mapping
-  // NOTE: also serves as a list of atom on this node
-  int loc2glo_len;
-  int *loc2glo;
-
-  // Number of coordinates in each node
-  int zone_ncoord[8];
-  int zone_pcoord[8];
 
   // (x,y,z) shift
   // NOTE: we have two copies for mappings
@@ -43,10 +27,13 @@ class CudaDomdec : public Decomp {
   int mass_tmp_len;
   float *mass_tmp;
 
+  // Domain decomposition home zone
+  CudaDomdecHomezone homezone;
+
  public:
 
   CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,
-	     int nx, int ny, int nz, int mynode);
+	     int nx, int ny, int nz, int mynode, CudaMPI& cudaMPI);
   ~CudaDomdec();
 
   // Return box size
@@ -54,14 +41,8 @@ class CudaDomdec : public Decomp {
   double get_boxy() {return boxy;}
   double get_boxz() {return boxz;}
 
-  // Return the cumulative coordinate number
-  int* get_zone_pcoord() {return zone_pcoord;}
-
-  // Return the total number of coordinates in all zones
-  int get_ncoord_tot() {return zone_pcoord[7];};
-
   // Return pointer to local -> global mapping
-  int* get_loc2glo() {return loc2glo;}
+  int* get_loc2glo() {return homezone.get_loc2glo();}
 
   // Return pointer to (x, y, z) shift (=-1.0f, 0.0f, 1.0f)
   float3* get_xyz_shift() {return xyz_shift0;}
@@ -69,7 +50,7 @@ class CudaDomdec : public Decomp {
   // Return neighborlist cut-off
   double get_rnl() {return rnl;}
 
-  void build_homezone(cudaXYZ<double> *coord, cudaStream_t stream=0);
+  void build_homezone(hostXYZ<double>& coord);
   void update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, cudaStream_t stream=0);
 
   void comm_coord(cudaXYZ<double> *coord, const bool update, cudaStream_t stream=0);

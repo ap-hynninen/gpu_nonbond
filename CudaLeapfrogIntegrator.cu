@@ -211,35 +211,47 @@ CudaLeapfrogIntegrator::~CudaLeapfrogIntegrator() {
 //
 // Initialize integrator
 //
-void CudaLeapfrogIntegrator::spec_init(const int ncoord,
+void CudaLeapfrogIntegrator::spec_init(const int ncoord_glo,
 				       const double *x, const double *y, const double *z,
 				       const double *dx, const double *dy, const double *dz,
 				       const double *h_mass) {
+  if (forcefield == NULL) {
+    std::cerr << "CudaLeapfrogIntegrator::spec_init, no forcefield set!" << std::endl;
+    exit(1);
+  }
 
-  // Resize arrays
+  // Create host array for coordinates
+  hostXYZ<double> h_prev_coord(ncoord, NON_PINNED);
+  h_prev_coord.set_data_fromhost(x, y, z);
+
+  CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
+  int ncoord_loc = p->init_coord(h_prev_coord);
+
+  exit(1);
+
+  // Resize and set arrays
   step.resize(ncoord);
+  step.clear();
+
   prev_step.resize(ncoord);
+  prev_step.set_data_sync(ncoord, dx, dy, dz);
 
   coord.resize(ncoord);
+  coord.clear();
+
   prev_coord.resize(ncoord);
+  prev_coord.set_data_sync(ncoord, x, y, z);
 
   force.set_ncoord(ncoord);
 
-  allocate<float>(&global_mass, ncoord);
-
-  // Copy array data
-  prev_coord.set_data_sync(ncoord, x, y, z);
-  prev_step.set_data_sync(ncoord, dx, dy, dz);
-
+  // Make global mass array
   float *h_mass_f = new float[ncoord];
   for (int i=0;i < ncoord;i++) {
     h_mass_f[i] = (float)h_mass[i];
   }
+  allocate<float>(&global_mass, ncoord);
   copy_HtoD<float>(h_mass_f, global_mass, ncoord);
   delete [] h_mass_f;
-
-  step.clear();
-  coord.clear();
 
   // Host versions of coordinate, step, and force arrays
   // NOTE: These are used for copying coordinates
@@ -247,10 +259,6 @@ void CudaLeapfrogIntegrator::spec_init(const int ncoord,
   h_step.resize(ncoord);
   h_force.resize(ncoord);
 
-  if (forcefield != NULL) {
-    CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    p->init_coord(&prev_coord);
-  }
 }
 
 //

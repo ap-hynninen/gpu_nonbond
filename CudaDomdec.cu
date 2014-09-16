@@ -4,16 +4,6 @@
 #include "CudaDomdec.h"
 
 //
-// Builds homezone
-//
-__global__ void build_homezone_kernel(const int ncoord, int* __restrict__ loc2glo) {
-  const int i = threadIdx.x + blockIdx.x*blockDim.x;
-  if (i < ncoord) {
-    loc2glo[i] = i;
-  }
-}
-
-//
 // Calculates (x, y, z) shift
 // (x0, y0, z0) = fractional origin
 //
@@ -113,7 +103,9 @@ __global__ void choose_z_coord_kernel(const int ncoord, const float* __restrict_
 // Class creator
 //
 CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,
-		       int nx, int ny, int nz, int mynode) {
+		       int nx, int ny, int nz, int mynode,
+		       CudaMPI& cudaMPI) : homezone(*this, cudaMPI) {
+
   this->ncoord_glo = ncoord_glo;
   this->boxx = boxx;
   this->boxy = boxy;
@@ -125,9 +117,6 @@ CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, do
   this->numnode = nx*ny*nz;
   this->mynode = mynode;
   
-  loc2glo_len = 0;
-  loc2glo = NULL;
-
   xyz_shift0_len = 0;
   xyz_shift0 = NULL;
 
@@ -136,13 +125,13 @@ CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, do
 
   mass_tmp_len = 0;
   mass_tmp = NULL;
+
 }
 
 //
 // Class destructor
 //
 CudaDomdec::~CudaDomdec() {
-  if (loc2glo != NULL) deallocate<int>(&loc2glo);
   if (xyz_shift0 != NULL) deallocate<float3>(&xyz_shift0);
   if (xyz_shift1 != NULL) deallocate<float3>(&xyz_shift1);
   if (mass_tmp != NULL) deallocate<float>(&mass_tmp);
@@ -153,39 +142,23 @@ CudaDomdec::~CudaDomdec() {
 // NOTE: Here all nodes have all coordinates.
 // NOTE: Used only in the beginning of dynamics
 //
-void CudaDomdec::build_homezone(cudaXYZ<double> *coord, cudaStream_t stream) {
-  if (numnode == 1) {
-
-    ncoord = coord->n;
-    zone_ncoord[0] = coord->n;
-    for (int i=1;i < 8;i++) zone_ncoord[i] = 0;
-
-    reallocate<int>(&loc2glo, &loc2glo_len, coord->n);
-
-    int nthread = 512;
-    int nblock = (coord->n - 1)/nthread + 1;
-    int shmem_size = 0;
-    build_homezone_kernel<<< nblock, nthread, shmem_size, stream >>>
-      (coord->n, loc2glo);
-    cudaCheck(cudaGetLastError());
-  } else {
-    std::cerr << "CudaDomdec::build_homezone, numnode > 1 not implemented" << std::endl;
-    exit(1);
-  }
+void CudaDomdec::build_homezone(hostXYZ<double>& coord) {
+  this->zone_ncoord[0] = homezone.build(coord);
+  for (int i=1;i < 8;i++) zone_ncoord[i] = 0;
+  this->update_zone_pcoord();
 }
 
 //
 // Update coordinate distribution across all nodes
+// Update is done according to coord, coord2 is a hangaround
 // NOTE: Used during dynamics
 //
 void CudaDomdec::update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, cudaStream_t stream) {
-  /*
-  int *h_loc2glo = new int[23558];
-  copy_DtoH_sync<int>(loc2glo, h_loc2glo, 23558);
-  for (int i=0;i < 10;i++)
-    std::cerr << h_loc2glo[i] << std::endl;
-  delete [] h_loc2glo;
-  */
+  if (numnode > 1) {
+    this->zone_ncoord[0] = homezone.update(coord, coord2, stream);
+    for (int i=1;i < 8;i++) zone_ncoord[i] = 0;
+    this->update_zone_pcoord();
+  }
 }
 
 //
@@ -193,11 +166,6 @@ void CudaDomdec::update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2
 //
 void CudaDomdec::comm_coord(cudaXYZ<double> *coord, const bool update, cudaStream_t stream) {
 
-  // Calculate zone_pcoord
-  zone_pcoord[0] = zone_ncoord[0];
-  for (int i=1;i < 8;i++) {
-    zone_pcoord[i] = zone_pcoord[i-1] + zone_ncoord[i];
-  }
 
   // Calculate xyz_shift
   if (update) {
@@ -268,9 +236,6 @@ void CudaDomdec::comm_coord(cudaXYZ<double> *coord, const bool update, cudaStrea
     double x0 = 0.0;
     double y0 = 0.0;
     double z0 = 0.0;
-    double inv_boxx = 1.0/boxx;
-    double inv_boxy = 1.0/boxy;
-    double inv_boxz = 1.0/boxz;
 
     float fac = (numnode > 1) ? 1.2f : 1.0f;
     reallocate<float3>(&xyz_shift0, &xyz_shift0_len, zone_pcoord[7], fac);
@@ -280,7 +245,7 @@ void CudaDomdec::comm_coord(cudaXYZ<double> *coord, const bool update, cudaStrea
     nblock = (zone_pcoord[7] - 1)/nthread + 1;
     calc_xyz_shift<<< nblock, nthread, 0, stream >>>
       (zone_pcoord[7], coord->stride, coord->data,
-       x0, y0, z0, inv_boxx, inv_boxy, inv_boxz, xyz_shift0);
+       x0, y0, z0, this->get_inv_boxx(), this->get_inv_boxy(), this->get_inv_boxz(), xyz_shift0);
     cudaCheck(cudaGetLastError());
   }
 
@@ -293,7 +258,7 @@ void CudaDomdec::comm_force(Force<long long int> *force, cudaStream_t stream) {
 }
 
 //
-// Re-order coordinates using loc2glo: coord_src => coord_dst
+// Re-order coordinates using ind_sorted: coord_src => coord_dst
 //
 void CudaDomdec::reorder_coord(cudaXYZ<double> *coord_src, cudaXYZ<double> *coord_dst,
 			       const int* ind_sorted, cudaStream_t stream) {

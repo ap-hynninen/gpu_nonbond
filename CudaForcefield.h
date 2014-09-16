@@ -18,7 +18,7 @@ public:
 
   virtual void wait_calc(cudaStream_t stream)=0;
 
-  virtual void init_coord(cudaXYZ<double> *coord)=0;
+  virtual int init_coord(hostXYZ<double>& coord)=0;
 
   virtual void get_restart_data(hostXYZ<double> *h_coord, hostXYZ<double> *h_step, hostXYZ<double> *h_force,
 				double *x, double *y, double *z, double *dx, double *dy, double *dz,

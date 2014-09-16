@@ -378,14 +378,19 @@ void CudaPMEForcefield::wait_calc(cudaStream_t stream) {
 
 //
 // Initializes coordinates.
+// Returns the number of coordinates in the homezone
 // NOTE: All nodes receive all coordinates here. Domdec distributes them across the nodes
 //
-void CudaPMEForcefield::init_coord(cudaXYZ<double> *coord) {
+int CudaPMEForcefield::init_coord(hostXYZ<double>& coord) {
+  // Build loc2glo for the homezone, we now know the number of coordinates at the homezone
   domdec->build_homezone(coord);
-  ref_coord.resize(coord->n);
+  // Resize coordinate arrays to the new homezone size
+  ref_coord.resize(domdec->get_ncoord());
   ref_coord.clear();
-  xyzq.set_ncoord(coord->n);
-  xyzq_copy.set_ncoord(coord->n);
+  xyzq.set_ncoord(domdec->get_ncoord());
+  xyzq_copy.set_ncoord(domdec->get_ncoord());
+
+  return domdec->get_ncoord();
 }
 
 //

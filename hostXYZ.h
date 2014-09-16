@@ -101,6 +101,15 @@ public:
     copy_DtoH_sync<T>(d_z, &this->data[this->stride*2], this->n);
   }
 
+  // Sets data from host buffers
+  void set_data_fromhost(const T *h_x, const T *h_y, const T *h_z) {
+    for (int i=0;i < this->n;i++) {
+      this->data[i]                = h_x[i];
+      this->data[i+this->stride]   = h_y[i];
+      this->data[i+this->stride*2] = h_z[i];
+    }
+  }
+
 };
 
 
