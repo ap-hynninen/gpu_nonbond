@@ -6,6 +6,7 @@
 #include "Force.h"
 #include "CudaDomdecHomezone.h"
 #include "CudaMPI.h"
+#include "CudaDomdecD2DComm.h"
 
 class CudaDomdecBonded;
 
@@ -30,6 +31,9 @@ class CudaDomdec : public Domdec {
   // Domain decomposition home zone
   CudaDomdecHomezone homezone;
 
+  // Domain decomposition direct-direct communication
+  CudaDomdecD2DComm D2Dcomm;
+
  public:
 
   CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,
@@ -46,9 +50,6 @@ class CudaDomdec : public Domdec {
 
   // Return pointer to (x, y, z) shift (=-1.0f, 0.0f, 1.0f)
   float3* get_xyz_shift() {return xyz_shift0;}
-
-  // Return neighborlist cut-off
-  double get_rnl() {return rnl;}
 
   void build_homezone(hostXYZ<double>& coord);
   void update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, cudaStream_t stream=0);

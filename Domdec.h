@@ -2,7 +2,7 @@
 #define DOMDEC_H
 
 //
-// Abstract base class for atom decompositors
+// Base class for atom decompositors
 //
 class Domdec {
 
@@ -34,6 +34,12 @@ class Domdec {
   int nx, ny, nz;
 
  public:
+
+  Domdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,
+	 int nx, int ny, int nz, int mynode) : ncoord_glo(ncoord_glo),
+    boxx(boxx), boxy(boxy), boxz(boxz),
+    rnl(rnl), nx(nx), ny(ny), nz(nz), numnode(nx*ny*nz),
+    mynode(mynode) {}
 
   // Return the global total number of coordinates
   int get_ncoord_glo() {return ncoord_glo;}
@@ -68,6 +74,9 @@ class Domdec {
   double get_inv_boxx() {return 1.0/boxx;}
   double get_inv_boxy() {return 1.0/boxy;}
   double get_inv_boxz() {return 1.0/boxz;}
+
+  // Return neighborlist cut-off
+  double get_rnl() {return rnl;}
 
   int get_homeix() {return homeix;}
   int get_homeiy() {return homeiy;}

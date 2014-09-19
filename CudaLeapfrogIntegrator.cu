@@ -227,6 +227,7 @@ void CudaLeapfrogIntegrator::spec_init(const int ncoord_glo,
   CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
   int ncoord_loc = p->init_coord(h_prev_coord);
 
+  std::cerr << "CudaLeapfrogIntegrator::spec_init, exit(1)" << std::endl;
   exit(1);
 
   // Resize and set arrays

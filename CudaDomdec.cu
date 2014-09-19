@@ -103,20 +103,10 @@ __global__ void choose_z_coord_kernel(const int ncoord, const float* __restrict_
 // Class creator
 //
 CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,
-		       int nx, int ny, int nz, int mynode,
-		       CudaMPI& cudaMPI) : homezone(*this, cudaMPI) {
+		       int nx, int ny, int nz, int mynode, CudaMPI& cudaMPI) : 
+  Domdec(ncoord_glo, boxx, boxy, boxz, rnl, nx, ny, nz, mynode), homezone(*this, cudaMPI), 
+  D2Dcomm(*this, cudaMPI) {
 
-  this->ncoord_glo = ncoord_glo;
-  this->boxx = boxx;
-  this->boxy = boxy;
-  this->boxz = boxz;
-  this->rnl = rnl;
-  this->nx = nx;
-  this->ny = ny;
-  this->nz = nz;
-  this->numnode = nx*ny*nz;
-  this->mynode = mynode;
-  
   xyz_shift0_len = 0;
   xyz_shift0 = NULL;
 
@@ -125,7 +115,6 @@ CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, do
 
   mass_tmp_len = 0;
   mass_tmp = NULL;
-
 }
 
 //
@@ -166,6 +155,7 @@ void CudaDomdec::update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2
 //
 void CudaDomdec::comm_coord(cudaXYZ<double> *coord, const bool update, cudaStream_t stream) {
 
+  D2Dcomm.comm_coord(coord, homezone.get_loc2glo(), update);
 
   // Calculate xyz_shift
   if (update) {
