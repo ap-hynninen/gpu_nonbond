@@ -2114,6 +2114,7 @@ void Grid<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int
   data_size = (2*(xsize/2+1))*ysize*zsize;
 
   make_fft_plans();
+  set_stream(stream);
 
   // data1 is used for accumulation, make sure it has enough space
   allocate<CT>(&data1, data_size*sizeof(AT)/sizeof(CT));
@@ -2244,7 +2245,6 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_R2C, batch));
     cufftCheck(cufftSetCompatibilityMode(x_r2c_plan, CUFFT_COMPATIBILITY_NATIVE));
-    cufftCheck(cufftSetStream(x_r2c_plan, stream));
     
     batch = nfftz_local*(nfftx_local/2+1);
     cufftCheck(cufftPlanMany(&y_c2c_plan, 1, &nffty_local,
@@ -2252,7 +2252,6 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_C2C, batch));
     cufftCheck(cufftSetCompatibilityMode(y_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
-    cufftCheck(cufftSetStream(y_c2c_plan, stream));
 
     batch = (nfftx_local/2+1)*nffty_local;
     cufftCheck(cufftPlanMany(&z_c2c_plan, 1, &nfftz_local,
@@ -2260,7 +2259,6 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_C2C, batch));
     cufftCheck(cufftSetCompatibilityMode(z_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
-    cufftCheck(cufftSetStream(z_c2c_plan, stream));    
 
     batch = nffty_local*nfftz_local;
     cufftCheck(cufftPlanMany(&x_c2r_plan, 1, &nfftx_local,
@@ -2268,7 +2266,6 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_C2R, batch));
     cufftCheck(cufftSetCompatibilityMode(x_c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
-    cufftCheck(cufftSetStream(x_c2r_plan, stream));
   } else if (fft_type == SLAB) {
     int batch;
     int nfftx_local = x1 - x0 + 1;
@@ -2283,7 +2280,6 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_R2C, batch));
     cufftCheck(cufftSetCompatibilityMode(xy_r2c_plan, CUFFT_COMPATIBILITY_NATIVE));
-    cufftCheck(cufftSetStream(xy_r2c_plan, stream));
 
     batch = (nfftx_local/2+1)*nffty_local;
     cufftCheck(cufftPlanMany(&z_c2c_plan, 1, &nfftz_local,
@@ -2291,7 +2287,6 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_C2C, batch));
     cufftCheck(cufftSetCompatibilityMode(z_c2c_plan, CUFFT_COMPATIBILITY_NATIVE));
-    cufftCheck(cufftSetStream(z_c2c_plan, stream));
 
     batch = nfftz_local;
     cufftCheck(cufftPlanMany(&xy_c2r_plan, 2, n,
@@ -2299,7 +2294,6 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_C2R, batch));
     cufftCheck(cufftSetCompatibilityMode(xy_c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
-    cufftCheck(cufftSetStream(xy_c2r_plan, stream));
     
   } else if (fft_type == BOX) {
     if (multi_gpu) {
@@ -2324,11 +2318,32 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
       cufftCheck(cufftPlan3d(&c2r_plan, nfftz, nffty, nfftx, CUFFT_C2R));
       cufftCheck(cufftSetCompatibilityMode(c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
     }
+  }
+
+}
+
+//
+// Set stream
+//
+template <typename AT, typename CT, typename CT2>
+void Grid<AT, CT, CT2>::set_stream(cudaStream_t stream) {
+
+  if (fft_type == COLUMN) {
+    cufftCheck(cufftSetStream(x_r2c_plan, stream));
+    cufftCheck(cufftSetStream(y_c2c_plan, stream));
+    cufftCheck(cufftSetStream(z_c2c_plan, stream));    
+    cufftCheck(cufftSetStream(x_c2r_plan, stream));
+  } else if (fft_type == SLAB) {
+    cufftCheck(cufftSetStream(xy_r2c_plan, stream));
+    cufftCheck(cufftSetStream(z_c2c_plan, stream));
+    cufftCheck(cufftSetStream(xy_c2r_plan, stream));
+  } else if (fft_type == BOX) {
     cufftCheck(cufftSetStream(r2c_plan, stream));
     cufftCheck(cufftSetStream(c2r_plan, stream));
   }
 
 }
+
 
 //
 // Class destructor
@@ -2803,7 +2818,7 @@ void Grid<AT, CT, CT2>::clear_energy_virial() {
 template <typename AT, typename CT, typename CT2>
 void Grid<AT, CT, CT2>::get_energy_virial(const double kappa,
 					  const bool prev_calc_energy, const bool prev_calc_virial,
-					  double *energy, double *energy_self, double *virial) {
+					  double& energy, double& energy_self, double *virial) {
 
   bool prev_calc_energy_virial = (prev_calc_energy || prev_calc_virial);
 
@@ -2813,8 +2828,8 @@ void Grid<AT, CT, CT2>::get_energy_virial(const double kappa,
 
   double cfact = 0.5*ccelec;
 
-  *energy = h_energy_virial->energy*cfact;
-  *energy_self = -h_energy_virial->energy_self*kappa*ccelec/sqrt(pi);
+  energy = h_energy_virial->energy*cfact;
+  energy_self = -h_energy_virial->energy_self*kappa*ccelec/sqrt(pi);
 
   // add in pressure contributions
   virial[0] -= h_energy_virial->virial[0]*cfact;

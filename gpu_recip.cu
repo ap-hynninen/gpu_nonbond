@@ -134,7 +134,7 @@ void test4() {
   grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.xyz.stride, force.xyz.data);
 
   double energy, energy_self, virial[9];
-  grid.get_energy_virial(kappa, true, true, &energy, &energy_self, virial);
+  grid.get_energy_virial(kappa, true, true, energy, energy_self, virial);
   tol = 1.2e-3;
   max_diff = fabs(energy_comp - energy);
   if (isnan(energy) || max_diff > tol) {
@@ -353,7 +353,7 @@ void test6() {
   grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.xyz.stride, force.xyz.data);
 
   double energy, energy_self, virial[9];
-  grid.get_energy_virial(kappa, true, true, &energy, &energy_self, virial);
+  grid.get_energy_virial(kappa, true, true, energy, energy_self, virial);
   tol = 1.3e-3;
   max_diff = fabs(energy_comp - energy);
   if (isnan(energy) || max_diff > tol) {

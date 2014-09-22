@@ -3,6 +3,63 @@
 #include "DomdecD2DComm.h"
 
 //
+// Class creator
+//
+DomdecD2DComm::DomdecD2DComm(Domdec& domdec) : domdec(domdec) {
+
+  setup_subboxes();
+
+  setup_comm_nodes();
+
+  // Send
+  z_nsend.resize(nz_comm);
+  z_psend.resize(nz_comm+1);
+
+  // Recv
+  z_nrecv.resize(nz_comm);
+  z_precv.resize(nz_comm+1);
+
+}
+
+//
+// Setup communication node IDs
+//
+void DomdecD2DComm::setup_comm_nodes() {
+
+  int homeix = domdec.get_homeix();
+  int homeiy = domdec.get_homeiy();
+  int homeiz = domdec.get_homeiz();
+  int nx = domdec.get_nx();
+  int ny = domdec.get_ny();
+  int nz = domdec.get_nz();
+
+  x_send_node.resize(nx_comm);
+  x_recv_node.resize(nx_comm);
+
+  y_send_node.resize(ny_comm);
+  y_recv_node.resize(ny_comm);
+
+  z_send_node.resize(nz_comm);
+  z_recv_node.resize(nz_comm);
+
+  for (int i=0;i < nx_comm;i++) {
+    x_send_node[i] = domdec.get_nodeind_pbc(homeix-(i+1), homeiy, homeiz);
+    x_recv_node[i] = domdec.get_nodeind_pbc(homeix+(i+1), homeiy, homeiz);
+  }
+
+  for (int i=0;i < ny_comm;i++) {
+    y_send_node[i] = domdec.get_nodeind_pbc(homeix, homeiy-(i+1), homeiz);
+    y_recv_node[i] = domdec.get_nodeind_pbc(homeix, homeiy+(i+1), homeiz);
+  }
+
+  for (int i=0;i < nz_comm;i++) {
+    z_send_node[i] = domdec.get_nodeind_pbc(homeix, homeiy, homeiz-(i+1));
+    z_recv_node[i] = domdec.get_nodeind_pbc(homeix, homeiy, homeiz+(i+1));
+  }
+
+}
+
+//
 // Setup sub-box configuration
 //
 void DomdecD2DComm::setup_subboxes() {
@@ -24,6 +81,8 @@ void DomdecD2DComm::setup_subboxes() {
   if (nx == 1) nx_comm = 0;
   if (ny == 1) ny_comm = 0;
   if (nz == 1) nz_comm = 0;
+  
+  load_balance = false;
 
   if (load_balance) {
     std::cerr << "DomdecD2DComm::setup_subboxes(), load balancing not yet supported" << std::endl;
@@ -78,17 +137,17 @@ void DomdecD2DComm::setup_subboxes() {
   double fy_maxval = fy_init;
   double fz_maxval = fz_init;
 
-  if (nx > 1 || fx_maxval > max_fx) {
+  if (nx > 1 && fx_maxval > max_fx) {
     std::cout << "box size too small in x direction, try setting larger ndir value" << std::endl;
     exit(1);
   }
 
-  if (ny > 1 || fy_maxval > max_fy) {
+  if (ny > 1 && fy_maxval > max_fy) {
     std::cout << "box size too small in y direction, try setting larger ndir value" << std::endl;
     exit(1);
   }
 
-  if (nz > 1 || fz_maxval > max_fz) {
+  if (nz > 1 && fz_maxval > max_fz) {
     std::cout << "box size too small in z direction, try setting larger ndir value" << std::endl;
     exit(1);
   }

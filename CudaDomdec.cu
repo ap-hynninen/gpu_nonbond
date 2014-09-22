@@ -244,7 +244,7 @@ void CudaDomdec::comm_coord(cudaXYZ<double> *coord, const bool update, cudaStrea
 //
 // Communicate forces
 //
-void CudaDomdec::comm_force(Force<long long int> *force, cudaStream_t stream) {
+void CudaDomdec::comm_force(Force<long long int>& force, cudaStream_t stream) {
 }
 
 //

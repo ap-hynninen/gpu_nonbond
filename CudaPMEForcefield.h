@@ -10,6 +10,8 @@
 #include "Grid.h"
 #include "CudaDomdec.h"
 #include "CudaDomdecBonded.h"
+#include "CudaDomdecRecip.h"
+#include "CudaDomdecRecipComm.h"
 
 class CudaPMEForcefield : public CudaForcefield {
 
@@ -60,13 +62,15 @@ private:
   // Reciprocal force
   // -----------------
   double kappa;
-  Grid<int, float, float2> *grid;
-  Force<float> recip_force;
+  CudaDomdecRecip* recip;
+  CudaDomdecRecipComm& recipComm;
+  //Grid<int, float, float2> *grid;
+  //Force<float> recip_force;
 
   // ---------------------
   // Domain decomposition
   // ---------------------
-  CudaDomdec *domdec;
+  CudaDomdec& domdec;
   CudaDomdecBonded *domdec_bonded;
 
   // Host version of loc2glo
@@ -135,7 +139,7 @@ private:
 
 public:
 
-  CudaPMEForcefield(CudaDomdec *domdec, CudaDomdecBonded *domdec_bonded,
+  CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded *domdec_bonded,
 		    NeighborList<32> *nlist,
 		    const int nbondcoef, const float2 *h_bondcoef,
 		    const int nureybcoef, const float2 *h_ureybcoef,
@@ -149,13 +153,12 @@ public:
 		    const int nvdwparam, const float *h_vdwparam,
 		    const float *h_vdwparam14,
 		    const int* h_glo_vdwtype, const float *h_q,
-		    const int nfftx, const int nffty, const int nfftz,
-		    const int order);
+		    CudaDomdecRecip* recip, CudaDomdecRecipComm& recipComm);
   ~CudaPMEForcefield();
 
 
   void pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step);
-  void calc(const bool calc_energy, const bool calc_virial, Force<long long int> *force);
+  void calc(const bool calc_energy, const bool calc_virial, Force<long long int>& force);
   void post_calc(const float *global_mass, float *mass);
 
   void wait_calc(cudaStream_t stream);

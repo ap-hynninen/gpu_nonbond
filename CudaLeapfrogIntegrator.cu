@@ -227,8 +227,8 @@ void CudaLeapfrogIntegrator::spec_init(const int ncoord_glo,
   CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
   int ncoord_loc = p->init_coord(h_prev_coord);
 
-  std::cerr << "CudaLeapfrogIntegrator::spec_init, exit(1)" << std::endl;
-  exit(1);
+  //std::cerr << "CudaLeapfrogIntegrator::spec_init, exit(1)" << std::endl;
+  //exit(1);
 
   // Resize and set arrays
   step.resize(ncoord);
@@ -337,7 +337,7 @@ void CudaLeapfrogIntegrator::pre_calc_force() {
 void CudaLeapfrogIntegrator::calc_force(const bool calc_energy, const bool calc_virial) {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    p->calc(calc_energy, calc_virial, &force);
+    p->calc(calc_energy, calc_virial, force);
   }
 }
 

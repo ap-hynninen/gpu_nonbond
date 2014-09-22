@@ -35,7 +35,7 @@ public:
 		cudaStream_t stream=0);
 
   void set_xyz(const cudaXYZ<double> *coord, cudaStream_t stream=0);
-  void set_xyz(const cudaXYZ<double> *coord, const float3 *xyz_shift,
+  void set_xyz(const cudaXYZ<double> *coord, const int start, const int end, const float3 *xyz_shift,
 	       const double boxx, const double boxy, const double boxz, cudaStream_t stream=0);
 
   bool compare(XYZQ& xyzq_in, const double tol, double& max_diff);

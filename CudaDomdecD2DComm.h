@@ -18,15 +18,8 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
   thrust::device_vector<unsigned char> atom_pick;
   thrust::device_vector<int> atom_pos;
   
-  // Number of atoms to send in z-direction
-  std::vector<int> z_nsend;
-
-  // Local z indices
+  // Local indices
   std::vector< thrust::device_vector<int> > z_send_loc;
-
-  std::vector<int> z_send_node;
-
-  std::vector<MPI_Request> request;
 
   // Sending buffer
   int sendbuf_len;
@@ -36,12 +29,24 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
   int h_sendbuf_len;
   char *h_sendbuf;
 
+  // Receiving buffer
+  int recvbuf_len;
+  char *recvbuf;
+  
+  // Host receiving buffer, neccessary for non-Cuda Aware MPI setups
+  int h_recvbuf_len;
+  char *h_recvbuf;
+
+  //------------
+  std::vector<MPI_Request> request;
+
  public:
 
   CudaDomdecD2DComm(Domdec& domdec, CudaMPI& cudaMPI);
   ~CudaDomdecD2DComm();
 
-  void comm_coord(cudaXYZ<double> *coord, int *loc2glo, const bool update);
+  void comm_coord(cudaXYZ<double> *coord, thrust::device_vector<int>& loc2glo,
+		  const bool update);
 };
 
 #endif // CUDADOMDECD2DCOMM_H

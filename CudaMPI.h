@@ -18,6 +18,8 @@ class CudaMPI {
 
 #ifdef USE_MPI
   int Isend(void *buf, int count, int dest, int tag, MPI_Request *request, void *h_buf);
+  int Irecv(void *buf, int count, int source, int tag, MPI_Request *request, void *h_buf);
+  int Send(void *buf, int count, int dest, int tag, void *h_buf);
   int Recv(void *buf, int count, int source, int tag, MPI_Status *status, void *h_buf);
 #endif
 

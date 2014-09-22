@@ -39,7 +39,17 @@ class Domdec {
 	 int nx, int ny, int nz, int mynode) : ncoord_glo(ncoord_glo),
     boxx(boxx), boxy(boxy), boxz(boxz),
     rnl(rnl), nx(nx), ny(ny), nz(nz), numnode(nx*ny*nz),
-    mynode(mynode) {}
+    mynode(mynode) {
+      
+      // Setup (homeix, homeiy, homeiz)
+      int m = mynode;
+      homeiz = m/(nx*ny);
+      m -= homeiz*(nx*ny);
+      homeiy = m/nx;
+      m -= homeiy*nx;
+      homeix = m;
+
+    }
 
   // Return the global total number of coordinates
   int get_ncoord_glo() {return ncoord_glo;}
@@ -82,11 +92,6 @@ class Domdec {
   int get_homeiy() {return homeiy;}
   int get_homeiz() {return homeiz;}
 
-  // Returns the node index for box (ix, iy, iz),  must have ix=0..nx-1
-  int get_nodeind(const int ix, const int iy, const int iz) {
-    return ix + iy*nx + iz*nx*ny;
-  }
-
   // Returns the node index for box (ix, iy, iz)
   // NOTE: deals correctly with periodic boundary conditions
   int get_nodeind_pbc(const int ix, const int iy, const int iz) {
@@ -94,7 +99,7 @@ class Domdec {
     int ixt = (ix + (abs(ix)/nx)*nx) % nx;
     int iyt = (iy + (abs(iy)/ny)*ny) % ny;
     int izt = (iz + (abs(iz)/nz)*nz) % nz;
-    return get_nodeind(ixt, iyt, izt);
+    return ix + iy*nx + iz*nx*ny;
   }
 
 };

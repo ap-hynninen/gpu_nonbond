@@ -46,7 +46,7 @@ class CudaDomdec : public Domdec {
   double get_boxz() {return boxz;}
 
   // Return pointer to local -> global mapping
-  int* get_loc2glo() {return homezone.get_loc2glo();}
+  int* get_loc2glo_ptr() {return homezone.get_loc2glo_ptr();}
 
   // Return pointer to (x, y, z) shift (=-1.0f, 0.0f, 1.0f)
   float3* get_xyz_shift() {return xyz_shift0;}
@@ -55,7 +55,7 @@ class CudaDomdec : public Domdec {
   void update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, cudaStream_t stream=0);
 
   void comm_coord(cudaXYZ<double> *coord, const bool update, cudaStream_t stream=0);
-  void comm_force(Force<long long int> *force, cudaStream_t stream=0);
+  void comm_force(Force<long long int>& force, cudaStream_t stream=0);
 
   void reorder_coord(cudaXYZ<double> *coord_src, cudaXYZ<double> *coord_dst,
 		     const int* ind_sorted, cudaStream_t stream=0);

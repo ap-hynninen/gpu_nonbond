@@ -152,9 +152,6 @@ CudaDomdecHomezone::CudaDomdecHomezone(Domdec& domdec, CudaMPI& cudaMPI) :
   allocate<int>(&pos_neighind, nneigh+1);
   allocate_host<int>(&h_pos_neighind, nneigh+1);
 
-  loc2glo_len = 0;
-  loc2glo = NULL;
-
   destind_len = 0;
   destind = NULL;
 
@@ -208,7 +205,6 @@ CudaDomdecHomezone::~CudaDomdecHomezone() {
   deallocate_host<int>(&h_pos_neighind);
   delete [] neighnode;
   delete [] send_request;
-  if (loc2glo != NULL) deallocate<int>(&loc2glo);
   if (destind != NULL) deallocate<int>(&destind);
   if (neighsend != NULL) deallocate<neighcomm_t>(&neighsend);
   if (neighrecv != NULL) deallocate<neighcomm_t>(&neighrecv);
@@ -256,8 +252,9 @@ int CudaDomdecHomezone::build(hostXYZ<double>& coord) {
     }
   }
 
-  reallocate<int>(&loc2glo, &loc2glo_len, nloc, 1.2f);
-  copy_HtoD<int>(h_loc2glo, loc2glo, nloc);
+  loc2glo.reserve(nloc);
+
+  copy_HtoD<int>(h_loc2glo, get_loc2glo_ptr(), nloc);
   delete [] h_loc2glo;
 
   return nloc;
@@ -299,7 +296,7 @@ int CudaDomdecHomezone::update(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, 
 
   // Pack coordinate data into send buffer
   pack_neighsend_kernel<<< nblock, nthread, 0, stream >>>
-    (coord->n, coord->stride, coord->data, coord2->data, destind, loc2glo,
+    (coord->n, coord->stride, coord->data, coord2->data, destind, get_loc2glo_ptr(),
      pos_neighind, neighsend);
   cudaCheck(cudaGetLastError());
 
@@ -335,7 +332,7 @@ int CudaDomdecHomezone::update(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, 
 
   // Re-allocate memory as needed
   reallocate<neighcomm_t>(&neighrecv, &neighrecv_len, count_tot, 1.2f);
-  reallocate<int>(&loc2glo, &loc2glo_len, count_tot, 1.2f);
+  loc2glo.reserve(count_tot);
   if (!cudaMPI.isCudaAware()) {
     reallocate_host<neighcomm_t>(&h_neighrecv, &h_neighrecv_len, count_tot, 1.2f);
   }
@@ -357,7 +354,7 @@ int CudaDomdecHomezone::update(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, 
 
   // Unpack data on GPU
   unpack_neighrecv_kernel<<< nblock, nthread, 0, stream >>>
-    (coord->stride, nneigh, pos_neighind, neighrecv, coord->data, coord2->data, loc2glo);
+    (coord->stride, nneigh, pos_neighind, neighrecv, coord->data, coord2->data, get_loc2glo_ptr());
   cudaCheck(cudaGetLastError());
 
   return count_tot;

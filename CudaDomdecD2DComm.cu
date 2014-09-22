@@ -14,18 +14,33 @@
 CudaDomdecD2DComm::CudaDomdecD2DComm(Domdec& domdec, CudaMPI& cudaMPI) : 
   DomdecD2DComm(domdec), cudaMPI(cudaMPI) {
 
+  // Send
   sendbuf_len = 0;
   sendbuf = NULL;
 
   h_sendbuf_len = 0;
   h_sendbuf = NULL;
+
+  z_send_loc.resize(nz_comm);
   
-  z_nsend.resize(get_nz_comm());
-  z_send_loc.resize(get_nz_comm());
+  // Recv
+  recvbuf_len = 0;
+  recvbuf = NULL;
+
+  h_recvbuf_len = 0;
+  h_recvbuf = NULL;
+
+  // MPI requests
+  int max_n_comm = std::max(std::max(nx_comm,ny_comm), nz_comm);
+  request.reserve(2*max_n_comm);
+
 }
 
 CudaDomdecD2DComm::~CudaDomdecD2DComm() {
   if (sendbuf != NULL) deallocate<char>(&sendbuf);
+  if (h_sendbuf != NULL) deallocate_host<char>(&h_sendbuf);
+  if (recvbuf != NULL) deallocate<char>(&recvbuf);
+  if (h_recvbuf != NULL) deallocate_host<char>(&h_recvbuf);
 }
 
 struct z_pick_functor {
@@ -48,7 +63,8 @@ struct z_pick_functor {
 //
 // Communicate coordinates
 //
-void CudaDomdecD2DComm::comm_coord(cudaXYZ<double> *coord, int *loc2glo, const bool update) {
+void CudaDomdecD2DComm::comm_coord(cudaXYZ<double> *coord, thrust::device_vector<int>& loc2glo,
+				   const bool update) {
 
   double rnl = domdec.get_rnl();
   double inv_boxx = domdec.get_inv_boxx();
@@ -58,33 +74,22 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double> *coord, int *loc2glo, const b
   int homeiy = domdec.get_homeiy();
   int homeiz = domdec.get_homeiz();
 
-  const int TAG = 1;
+  const int COUNT_TAG = 1, DATA_TAG = 2;
+  
+  // Size of each buffer elements
+  const int buf_elem_size = update ? (sizeof(int) + 3*sizeof(double)) : (3*sizeof(double));
 
-  // Get pointer to local -> global mapping
-  thrust::device_ptr<int> loc2glo_ptr(loc2glo);
-
-  int nrequest = 0;
-
-  if (get_nz_comm() > 0) {
-
-    // Start receiving
-    if (!update) {
-      for (int i=1;i <= get_nz_comm();i++) {
-	nrequest++;
-      }
-    }
+  if (nz_comm > 0) {
 
     double rnl_grouped = rnl;
     int pos = 0;
-    for (int i=1;i <= get_nz_comm();i++) {
+    for (int i=0;i < nz_comm;i++) {
       
-      int pos_start = pos;
-
       if (update) {
 	// Neighborlist has been updated => update communicated atoms
 	double zf;
-	get_fz_boundary(homeix, homeiy, homeiz-i, rnl, rnl_grouped, zf);
-	if (homeiz-i < 0) zf -= 1.0;
+	get_fz_boundary(homeix, homeiy, homeiz-(i+1), rnl, rnl_grouped, zf);
+	if (homeiz-(i+1) < 0) zf -= 1.0;
 
 	// Get pointer to z coordinates
 	thrust::device_ptr<double> z_ptr(&coord->data[coord->stride*2]);
@@ -99,7 +104,8 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double> *coord, int *loc2glo, const b
 	
 	// Count the number of atoms we are adding to the buffer
 	z_nsend[i] = atom_pos[coord->n] + atom_pick[coord->n];
-	
+	z_psend[i] = (i == 0) ? 0 : (z_psend[i-1] + z_nsend[i-1]);
+
 	// atom_pos[] now contains position to store each atom
 	// Scatter to produce packed atom index table
 	thrust::scatter_if(thrust::make_counting_iterator(0),
@@ -110,17 +116,14 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double> *coord, int *loc2glo, const b
 	// z_send_loc[i][] now contains the local indices of atoms
 
 	// Re-allocate sendbuf if needed
-	int req_sendbuf_len = pos + z_nsend[i]*(sizeof(int) + 3*sizeof(double));
+	int req_sendbuf_len = (z_psend[i] + z_nsend[i])*buf_elem_size;
 	reallocate<char>(&sendbuf, &sendbuf_len, req_sendbuf_len, 1.5f);
-	if (!cudaMPI.isCudaAware()) {
-	  reallocate_host<char>(&h_sendbuf, &h_sendbuf_len, req_sendbuf_len, 1.5f);
-	}
 
 	// Get int pointer to sendbuf
 	thrust::device_ptr<int> sendbuf_ind_ptr((int *)&sendbuf[pos]);
 	
 	// Pack in atom global indices to sendbuf_ind_ptr
-	thrust::gather(z_send_loc[i].begin(), z_send_loc[i].end(), loc2glo_ptr, sendbuf_ind_ptr);
+	thrust::gather(z_send_loc[i].begin(), z_send_loc[i].end(), loc2glo.begin(), sendbuf_ind_ptr);
 
 	// Advance sendbuf position
 	pos += z_nsend[i]*sizeof(int);
@@ -143,41 +146,66 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double> *coord, int *loc2glo, const b
 		     sendbuf_xyz_ptr + 2*z_nsend[i]);
 
       pos += z_nsend[i]*3*sizeof(double);
-      
-      int send_len = pos - pos_start;
-
-      MPICheck(cudaMPI.Isend(&sendbuf[pos_start], send_len, z_send_node[i], TAG,
-			     &request[nrequest], &h_sendbuf[pos_start]));
-      nrequest++;
-
+    } // for (int i=1;i < nz_comm;i++)
+    
+    if (update) {
+      // Total send size
+      z_psend[nz_comm] = z_psend[nz_comm-1] + z_nsend[nz_comm-1];
+      // Re-allocate h_sendbuf if needed
+      if (!cudaMPI.isCudaAware()) {
+	reallocate_host<char>(&h_sendbuf, &h_sendbuf_len, z_psend[nz_comm]*buf_elem_size, 1.2f);
+      }
+      // Send & receive data counts
+      int nrequest = 0;
+      for (int i=0;i < nz_comm;i++) {
+	MPICheck(MPI_Isend(&z_nsend[i], 1, MPI_INT, z_send_node[i], COUNT_TAG, cudaMPI.get_comm(),
+			   &request[nrequest++]));
+	MPICheck(MPI_Irecv(&z_nrecv[i], 1, MPI_INT, z_recv_node[i], COUNT_TAG, cudaMPI.get_comm(),
+			   &request[nrequest++]));
+      }
+      MPICheck(MPI_Waitall(nrequest, request.data(), MPI_STATUSES_IGNORE));
+      for (int i=0;i <= nz_comm;i++) z_precv[i] = (i == 0) ? 0 : (z_precv[i-1] + z_nrecv[i-1]);
+      // Re-allocate receive buffers
+      reallocate<char>(&sendbuf, &sendbuf_len, z_precv[nz_comm]*buf_elem_size, 1.2f);
+      if (!cudaMPI.isCudaAware()) {
+	reallocate_host<char>(&h_recvbuf, &h_recvbuf_len, z_precv[nz_comm]*buf_elem_size, 1.2f);
+      }
     }
 
-  } // if (get_nz_comm() > 0)
-  
-  /*
-  // For update=true, special receive that allows us to re-size arrays before receiving the data
-  if (update) {
-    for (int i=1;i <= get_nz_comm();i++) {
-      MPICheck(MPI_Probe(z_send_node[i], TAG, cudaMPI.get_comm(), &status[i]));
-      MPICheck(MPI_Get_count(&status[i], MPI_BYTE, &count[i]));
+    int nrequest = 0;
+    // Receive data
+    for (int i=0;i < nz_comm;i++) {
+      if (z_nrecv[i] > 0) {
+	MPICheck(cudaMPI.Irecv(&recvbuf[z_precv[i]], z_nrecv[i]*buf_elem_size, z_recv_node[i], DATA_TAG,
+			       &request[nrequest++], &h_recvbuf[z_precv[i]]));
+      }
     }
-    for (int i=1;i <= get_nz_comm();i++) {
-      MPICheck(MPI_);
-    }
-  }
-  */
 
-  // Wait for communication to stop
-  if (nrequest > 0) {
+    // Send data
+    for (int i=0;i < nz_comm;i++) {
+      if (z_nsend[i] > 0) {
+	MPICheck(cudaMPI.Isend(&sendbuf[z_psend[i]], z_nsend[i]*buf_elem_size, z_send_node[i], DATA_TAG,
+			       &request[nrequest++], &h_sendbuf[z_psend[i]]));
+      }
+    }
+
+    // For for send and receive to finish
     MPICheck(MPI_Waitall(nrequest, request.data(), MPI_STATUSES_IGNORE));
-  }
 
-  if (get_ny_comm() > 0) {
+    // Unpack data from +z-direction into correct arrays
+    for (int i=0;i < nz_comm;i++) {
+      if (update) {
+      }
+    }
+
+  } // if (nz_comm > 0)
+  
+  if (ny_comm > 0) {
     std::cout << "CudaDomdecD2DComm::comm_coord, y-communication not yet implemented" << std::endl;
     exit(1);
   }
 
-  if (get_nx_comm() > 0) {
+  if (nx_comm > 0) {
     std::cout << "CudaDomdecD2DComm::comm_coord, x-communication not yet implemented" << std::endl;
     exit(1);
   }

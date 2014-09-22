@@ -1,0 +1,7 @@
+#ifndef DOMDECRECIPLOOPER_H
+#define DOMDECRECIPLOOPER_H
+
+class DomdecRecipLooper {
+};
+
+#endif // CUDADOMDECRECIPLOOPER_H

@@ -8,9 +8,6 @@ class DomdecD2DComm {
 
  private:
 
-  // Number of sub-boxes we need to communicate with in each direction
-  int nx_comm, ny_comm, nz_comm;
-
   // True for load balancing runs
   bool load_balance;
   // Load balancing for each coordinate direction
@@ -35,8 +32,9 @@ class DomdecD2DComm {
   // Maximum fractional sub-box sizes allowed by the domain decomposition
   double max_fx, max_fy, max_fz;
 
-  void fill_bx_by_bz();
+  void setup_comm_nodes();
   void setup_subboxes();
+  void fill_bx_by_bz();
 
   double get_bz(const int iz, const int iy, const int ix);
   double get_by(const int iy, const int ix);
@@ -47,10 +45,61 @@ class DomdecD2DComm {
   // Domdec definition
   Domdec& domdec;
 
-  int get_nx_comm() {return nx_comm;}
-  int get_ny_comm() {return ny_comm;}
-  int get_nz_comm() {return nz_comm;}
+  // Number of sub-boxes we need to communicate with in each direction
+  int nx_comm, ny_comm, nz_comm;
 
+  //-------------
+  // x-direction
+  //-------------
+  // Number of atoms to send
+  std::vector<int> x_nsend;
+  // Position of atoms in the send buffer
+  std::vector<int> x_psend;
+
+  // Number of atoms to recv
+  std::vector<int> x_nrecv;
+  // Position of atoms in the recv buffer
+  std::vector<int> x_precv;
+
+  // MPI node IDs
+  std::vector<int> x_send_node;
+  std::vector<int> x_recv_node;
+
+  //-------------
+  // y-direction
+  //-------------
+  // Number of atoms to send
+  std::vector<int> y_nsend;
+  // Position of atoms in the send buffer
+  std::vector<int> y_psend;
+
+  // Number of atoms to recv
+  std::vector<int> y_nrecv;
+  // Position of atoms in the recv buffer
+  std::vector<int> y_precv;
+
+  // MPI node IDs
+  std::vector<int> y_send_node;
+  std::vector<int> y_recv_node;
+
+  //-------------
+  // z-direction
+  //-------------
+  // Number of atoms to send
+  std::vector<int> z_nsend;
+  // Position of atoms in the send buffer
+  std::vector<int> z_psend;
+
+  // Number of atoms to recv
+  std::vector<int> z_nrecv;
+  // Position of atoms in the recv buffer
+  std::vector<int> z_precv;
+
+  // MPI node IDs
+  std::vector<int> z_send_node;
+  std::vector<int> z_recv_node;
+
+  // Methods
   void get_fz_boundary(const int ix, const int iy, const int iz,
 		       const double cut, const double cut_grouped, double& fz_z);
   void get_fy_boundary(const int ix, const int iy, const int iz,
@@ -72,7 +121,7 @@ class DomdecD2DComm {
 
  public:
   
- DomdecD2DComm(Domdec& domdec) : domdec(domdec) {setup_subboxes();}
+  DomdecD2DComm(Domdec& domdec);
   ~DomdecD2DComm() {}
 
 };

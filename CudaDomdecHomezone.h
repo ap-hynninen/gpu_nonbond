@@ -1,6 +1,7 @@
 #ifndef CUDADOMDECHOMEZONE_H
 #define CUDADOMDECHOMEZONE_H
 
+#include <thrust/device_vector.h>
 #include "cudaXYZ.h"
 #include "hostXYZ.h"
 #include "Domdec.h"
@@ -34,8 +35,7 @@ class CudaDomdecHomezone {
 
   // Local -> global mapping
   // NOTE: also serves as a list of atom on this node
-  int loc2glo_len;
-  int *loc2glo;
+  thrust::device_vector<int> loc2glo;
 
   // num_neighind[nneigh] = number of atoms that are going to each box
   int *num_neighind;
@@ -81,7 +81,8 @@ class CudaDomdecHomezone {
   int build(hostXYZ<double>& coord);
   int update(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, cudaStream_t stream=0);
 
-  int* get_loc2glo() {return loc2glo;}
+  int* get_loc2glo_ptr() {return thrust::raw_pointer_cast(loc2glo.data());}
+  thrust::device_vector<int>& get_loc2glo() {return loc2glo;}
 };
 
 #endif // CUDADOMDECHOMEZONE_H

@@ -11,8 +11,6 @@
 
 const double ccelec = 332.0716;
 
-enum FFTtype {COLUMN, SLAB, BOX};
-
 struct RecipEnergyVirial_t {
   // Energy
   double energy;
@@ -22,6 +20,7 @@ struct RecipEnergyVirial_t {
   double virial[6];
 };
 
+enum FFTtype {COLUMN, SLAB, BOX};
 
 //
 // AT  = Accumulation Type
@@ -146,6 +145,8 @@ private:
 
   void print_info();
 
+  void set_stream(cudaStream_t stream);
+
   void spread_charge(const int ncoord, const Bspline<CT> &bspline);
   void spread_charge(const float4 *xyzq, const int ncoord, const double *recip);
 
@@ -164,7 +165,7 @@ private:
   void clear_energy_virial();
   void get_energy_virial(const double kappa,
 			 const bool prev_calc_energy, const bool prev_calc_virial,
-			 double *energy, double *energy_self, double *virial);
+			 double& energy, double& energy_self, double *virial);
 
   void x_fft_r2c(CT2 *data);
   void x_fft_c2r(CT2 *data);
