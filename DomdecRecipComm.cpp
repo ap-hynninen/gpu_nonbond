@@ -1,4 +1,7 @@
-
+#undef SEEK_SET
+#undef SEEK_CUR
+#undef SEEK_END
+#include <mpi.h>
 #include <iostream>
 #include "DomdecRecipComm.h"
 #include "mpi_utils.h"
@@ -49,7 +52,7 @@ void DomdecRecipComm::comm_ncoord(const int ncoord_in) {
     //------------------------------------------------
     // Pure Direct node => Send #coordinates to Recip
     //------------------------------------------------
-    MPICheck(MPI_Send(&ncoord_in, 1, MPI_INT, recip_nodes.at(0), TAG, comm_direct_recip));
+    MPICheck(MPI_Send((void *)&ncoord_in, 1, MPI_INT, recip_nodes.at(0), TAG, comm_direct_recip));
     ncomm.at(0) = ncoord_in;
   }
 

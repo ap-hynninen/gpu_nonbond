@@ -2328,6 +2328,8 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 template <typename AT, typename CT, typename CT2>
 void Grid<AT, CT, CT2>::set_stream(cudaStream_t stream) {
 
+  this->stream = stream;
+
   if (fft_type == COLUMN) {
     cufftCheck(cufftSetStream(x_r2c_plan, stream));
     cufftCheck(cufftSetStream(y_c2c_plan, stream));
@@ -2462,9 +2464,9 @@ void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspli
   nblock.x = (nfftx*nffty*nfftz - 1)/nthread.x + 1;
   nblock.y = 1;
   nblock.z = 1;
-  reduce_force<AT, CT> <<< nblock, nthread >>>(xsize*ysize*zsize,
-					       (AT *)accum_grid->data,
-					       charge_grid->data);
+  reduce_force<AT, CT> <<< nblock, nthread, 0, stream >>>(xsize*ysize*zsize,
+							  (AT *)accum_grid->data,
+							  charge_grid->data);
   cudaCheck(cudaGetLastError());
 
 }

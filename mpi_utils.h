@@ -1,4 +1,7 @@
-
+#undef SEEK_SET
+#undef SEEK_CUR
+#undef SEEK_END
+#include <mpi.h>
 #include <stdlib.h>
 
 #define MPICheck(stmt) do {						\

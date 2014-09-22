@@ -1,3 +1,7 @@
+#undef SEEK_SET
+#undef SEEK_CUR
+#undef SEEK_END
+#include <mpi.h>
 #include <iostream>
 #include <fstream>
 #include <cuda.h>
@@ -20,9 +24,13 @@ int main(int argc, char *argv[]) {
   int local_rank = get_env_local_rank();
 
   std::cout << "local_rank = " << local_rank << std::endl;
-
-  start_gpu(1, local_rank);
-  start_mpi(argc, argv, numnode, mynode);
+  if (local_rank >= 0) {
+    start_gpu(1, local_rank);
+    start_mpi(argc, argv, numnode, mynode);
+  } else {
+    start_mpi(argc, argv, numnode, mynode);
+    start_gpu(1, mynode);
+  }
 
   test();
 

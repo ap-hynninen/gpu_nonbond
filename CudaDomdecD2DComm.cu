@@ -1,3 +1,7 @@
+#undef SEEK_SET
+#undef SEEK_CUR
+#undef SEEK_END
+#include <mpi.h>
 #include <iostream>
 #include <thrust/transform.h>
 #include <thrust/scan.h>

@@ -1,3 +1,7 @@
+#undef SEEK_SET
+#undef SEEK_CUR
+#undef SEEK_END
+#include <mpi.h>
 #include <iostream>
 #include "mpi_utils.h"
 #include "cuda_utils.h"

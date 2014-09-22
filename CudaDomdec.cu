@@ -1,4 +1,7 @@
-
+#undef SEEK_SET
+#undef SEEK_CUR
+#undef SEEK_END
+#include <mpi.h>
 #include <cassert>
 #include "gpu_utils.h"
 #include "CudaDomdec.h"
