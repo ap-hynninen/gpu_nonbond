@@ -3,6 +3,9 @@
 #include <cuda.h>
 #include "cuda_utils.h"
 #include "gpu_utils.h"
+#ifdef SEEK_SET
+#undef SEEK_SET
+#endif
 #include "mpi_utils.h"
 #include "CudaLeapfrogIntegrator.h"
 #include "CudaDomdec.h"
