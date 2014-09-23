@@ -298,9 +298,10 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   // Reciprocal force (Only reciprocal nodes calculate this)
   if (recip != NULL) {
     if (recipComm.get_num_recip() == 1) {
+      recip_force.set_ncoord(recipComm.get_ncoord());
       recip->calc(domdec.get_inv_boxx(), domdec.get_inv_boxy(), domdec.get_inv_boxz(),
 		  recipComm.get_coord(), recipComm.get_ncoord(),
-		  calc_energy, calc_virial, force);
+		  calc_energy, calc_virial, recip_force);
     } else {
       // For #recip > 1, we need another force buffer (force_recip) and then need to combine results
       // to the total force
@@ -335,10 +336,15 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
     recip->get_energy_virial(calc_energy, calc_virial, energy_ewksum, energy_ewself, vir);
   }
 
-  // Communicate forces (After these all nodes have their correct total force)
+  // Communicate Direct-Direct
   domdec.comm_force(force);
 
-  recipComm.recv_force(force);
+  // Communicate Direct-Recip
+  recipComm.recv_force(recip_force);
+
+  // Add Recip force to the total force
+  force.add<double>(&recip_force, direct_stream[0]);
+
 }
 
 //

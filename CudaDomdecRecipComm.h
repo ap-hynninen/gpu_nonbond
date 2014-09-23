@@ -29,7 +29,7 @@ class CudaDomdecRecipComm : public DomdecRecipComm {
   ~CudaDomdecRecipComm();
 
   void comm_coord(float4* coord_in);
-  void recv_force(Force<long long int>& force_in);
+  void recv_force(Force<float>& force_in);
 
   float4* get_coord() {
     assert(isRecip);

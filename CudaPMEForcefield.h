@@ -64,8 +64,7 @@ private:
   double kappa;
   CudaDomdecRecip* recip;
   CudaDomdecRecipComm& recipComm;
-  //Grid<int, float, float2> *grid;
-  //Force<float> recip_force;
+  Force<float> recip_force;
 
   // ---------------------
   // Domain decomposition

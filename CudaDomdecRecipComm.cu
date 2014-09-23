@@ -84,7 +84,7 @@ void CudaDomdecRecipComm::comm_coord(float4* coord_in) {
 //
 // Communicate forces Recip -> Direct
 //
-void CudaDomdecRecipComm::recv_force(Force<long long int>& force_in) {
+void CudaDomdecRecipComm::recv_force(Force<float>& force_in) {
 
   const int TAG = 1;
   /*

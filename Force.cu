@@ -222,6 +222,25 @@ void Force<T>::convert_add(Force<T3> *force, cudaStream_t stream) {
 }
 
 //
+// Converts one type of force array to another and adds force to the result.
+// Result is in "this"
+// NOTE: Only works when the size of the types T and T2 match
+//
+template <typename T>
+template <typename T2, typename T3>
+void Force<T>::add(Force<T3>* force, cudaStream_t stream) {
+
+  assert(force->xyz.stride == xyz.stride);
+  assert(sizeof(T) == sizeof(T2));
+
+  int nthread = 512;
+  int nblock = (3*xyz.stride - 1)/nthread + 1;
+
+  add_force<T2, T3>
+    <<< nblock, nthread, 0, stream >>>(3*xyz.stride, force->xyz.data, (double *)xyz.data);
+}
+
+//
 // Explicit instances of Force class
 //
 template class Force<long long int>;
@@ -233,3 +252,4 @@ template void Force<long long int>::convert<float>(Force<float>* force, cudaStre
 template void Force<long long int>::convert<double>(Force<double>* force, cudaStream_t stream);
 template void Force<float>::convert_to<double>(Force<long long int> *force, cudaStream_t stream);
 
+template void Force<long long int>::add<double>(Force<float> *force, cudaStream_t stream);

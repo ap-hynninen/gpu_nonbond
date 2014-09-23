@@ -33,4 +33,11 @@ template <typename AT, typename CT1, typename CT2>
 
 //----------------------------------------------------------------------------------------
 
+template <typename T1, typename T2>
+  __global__ void add_force(const int nfft_tot,
+			    const T2* __restrict__ data_add,
+			    T1* __restrict__ data_inout);
+
+//----------------------------------------------------------------------------------------
+
 #endif // REDUCE_H
