@@ -40,4 +40,8 @@ template <typename T1, typename T2>
 
 //----------------------------------------------------------------------------------------
 
+__global__ void add_nonstrided_force(const int n,
+				     const float3* __restrict__ data_add,
+				     const int stride,
+				     double* __restrict__ data_inout);
 #endif // REDUCE_H

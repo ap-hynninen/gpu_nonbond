@@ -158,12 +158,14 @@ void Force<T>::convert(Force<T2>* force, cudaStream_t stream) {
     int nblock = (3*xyz.stride - 1)/nthread + 1;
     reduce_force<T, T2>
       <<< nblock, nthread, 0, stream >>>(3*xyz.stride, xyz.data, force->xyz.data);
+    cudaCheck(cudaGetLastError());
   } else {
     int nthread = 512;
     int nblock = (xyz.n - 1)/nthread + 1;
     reduce_force<T, T2>
       <<< nblock, nthread, 0, stream >>>(xyz.n, xyz.stride, xyz.data,
 					 force->xyz.stride, force->xyz.data);
+    cudaCheck(cudaGetLastError());
   }
 }
 
@@ -183,6 +185,7 @@ void Force<T>::convert_to(Force<T3>* force, cudaStream_t stream) {
 
   reduce_force<T, T2>
     <<< nblock, nthread, 0, stream >>>(3*xyz.stride, xyz.data, (T2 *)force->xyz.data);
+  cudaCheck(cudaGetLastError());
 }
 
 //
@@ -200,6 +203,7 @@ void Force<T>::convert(cudaStream_t stream) {
 
   reduce_force<T, T2>
     <<< nblock, nthread, 0, stream >>>(3*xyz.stride, xyz.data);
+  cudaCheck(cudaGetLastError());
 }
 
 //
@@ -219,25 +223,25 @@ void Force<T>::convert_add(Force<T3> *force, cudaStream_t stream) {
 
   reduce_add_force<T, T2, T3>
     <<< nblock, nthread, 0, stream >>>(3*xyz.stride, force->xyz.data, xyz.data);
+  cudaCheck(cudaGetLastError());
 }
 
 //
-// Converts one type of force array to another and adds force to the result.
-// Result is in "this"
-// NOTE: Only works when the size of the types T and T2 match
+// Adds non-strided force_data
 //
 template <typename T>
-template <typename T2, typename T3>
-void Force<T>::add(Force<T3>* force, cudaStream_t stream) {
+template <typename T2>
+void Force<T>::add(float3 *force_data, int force_n, cudaStream_t stream) {
 
-  assert(force->xyz.stride == xyz.stride);
+  assert(force_n <= xyz.n);
   assert(sizeof(T) == sizeof(T2));
 
   int nthread = 512;
-  int nblock = (3*xyz.stride - 1)/nthread + 1;
+  int nblock = (force_n - 1)/nthread + 1;
 
-  add_force<T2, T3>
-    <<< nblock, nthread, 0, stream >>>(3*xyz.stride, force->xyz.data, (double *)xyz.data);
+  add_nonstrided_force<<< nblock, nthread, 0, stream >>>
+    (force_n, force_data, xyz.stride, (double *)xyz.data);
+  cudaCheck(cudaGetLastError());
 }
 
 //
@@ -251,5 +255,4 @@ template void Force<long long int>::convert_add<double>(Force<float> *force, cud
 template void Force<long long int>::convert<float>(Force<float>* force, cudaStream_t stream);
 template void Force<long long int>::convert<double>(Force<double>* force, cudaStream_t stream);
 template void Force<float>::convert_to<double>(Force<long long int> *force, cudaStream_t stream);
-
-template void Force<long long int>::add<double>(Force<float> *force, cudaStream_t stream);
+template void Force<long long int>::add<double>(float3 *force_data, int force_n, cudaStream_t stream);

@@ -353,6 +353,13 @@ void CudaLeapfrogIntegrator::post_calc_force() {
   }
 }
 
+void CudaLeapfrogIntegrator::stop_calc_force() {
+  if (forcefield != NULL) {
+    CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
+    p->stop_calc();
+  }
+}
+
 //
 // Calculate temperature
 //

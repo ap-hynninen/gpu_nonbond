@@ -71,7 +71,7 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded *domde
 				     const float *h_vdwparam14,
 				     const int *h_glo_vdwtype, const float *h_q,
 				     CudaDomdecRecip* recip, CudaDomdecRecipComm& recipComm) : 
-  domdec(domdec), recip(recip), recipComm(recipComm), kappa(kappa) {
+  domdec(domdec), recip(recip), recipComm(recipComm), kappa(kappa), recip_force_len(0), recip_force(NULL) {
 
   // Create streams
   cudaCheck(cudaStreamCreate(&direct_stream[0]));
@@ -131,6 +131,7 @@ CudaPMEForcefield::~CudaPMEForcefield() {
   deallocate<int>(&d_heuristic_flag);
   deallocate_host<int>(&h_heuristic_flag);
   deallocate<float>(&q);
+  if (recip_force != NULL) deallocate<float3>(&recip_force);
   if (h_loc2glo != NULL) delete [] h_loc2glo;
   // Destroy streams
   cudaCheck(cudaStreamDestroy(direct_stream[0]));
@@ -202,11 +203,6 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_s
     nlist->build(domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), domdec.get_rnl(),
 		 xyzq.xyzq, domdec.get_loc2glo_ptr());
 
-
-    // Send coordinates to Recip nodes
-    recipComm.comm_ncoord(xyzq.ncoord);
-    recipComm.comm_coord(xyzq.xyzq);
-
     //nlist->test_build(domdec.get_zone_pcoord(), domdec.get_boxx(), domdec.get_boxy(),
     //domdec.get_boxz(), domdec.get_rnl(), xyzq.xyzq, domdec.get_loc2glo());
 
@@ -253,8 +249,6 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_s
     // Copy local coordinates to xyzq -array
     xyzq.set_xyz(coord, 0, domdec.get_ncoord()-1, domdec.get_xyz_shift(),
 		 domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), direct_stream[0]);
-    // Send coordinates to recip nodes
-    recipComm.comm_coord(xyzq.xyzq);
     // Communicate coordinates between direct nodes
     domdec.comm_coord(coord, false);
     // Copy import volume coordinates to xyzq -array
@@ -269,13 +263,44 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_s
 //
 void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, Force<long long int>& force) {
 
+  if (recipComm.get_num_recip() > 0  && recipComm.get_num_direct() > 1) {
+    if (recipComm.get_isRecip() && recip == NULL) {
+      std::cout << "CudaPMEForcefield::calc, missing recip object" << std::endl;
+      exit(1);
+    }
+    //-------------------------------------
+    // Send coordinates to recip node(s)
+    //-------------------------------------
+    // Send header
+    if (recipComm.get_hasPureRecip()) {
+      recipComm.send_header(domdec.get_ncoord(), domdec.get_inv_boxx(), domdec.get_inv_boxy(),
+			    domdec.get_inv_boxz(), calc_energy, calc_virial);
+    } else if (neighborlist_updated) {
+      if (recipComm.get_isRecip()) {
+	recipComm.recv_ncoord(domdec.get_ncoord());
+      } else {
+	recipComm.send_ncoord(domdec.get_ncoord());
+      }
+    }
+    // Resize recip_xyzq and recip_force if needed
+    if (recipComm.get_isRecip() && recipComm.get_num_direct() > 1) {
+      recip_xyzq.set_ncoord(recipComm.get_ncoord());
+    }
+    reallocate<float3>(&recip_force, &recip_force_len, recipComm.get_ncoord(), 1.0f);
+    // Send coordinates
+    recipComm.send_coord(xyzq.xyzq);
+    // Receive coordinates
+    if (recipComm.get_isRecip()) recipComm.recv_coord(recip_xyzq.xyzq);
+    //-------------------------------------
+  }
+
   force.clear(direct_stream[0]);
 
   // Clear energy and virial variables
   if (calc_energy || calc_virial) {
     dir.clear_energy_virial();
     bonded.clear_energy_virial();
-    if (recip != NULL) recip->clear_energy_virial();
+    if (recipComm.get_isRecip()) recip->clear_energy_virial();
   }
 
   // Direct non-bonded force
@@ -296,16 +321,26 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   cudaCheck(cudaEventRecord(done_bonded_event, bonded_stream));
 
   // Reciprocal force (Only reciprocal nodes calculate this)
-  if (recip != NULL) {
+  if (recipComm.get_isRecip()) {
     if (recipComm.get_num_recip() == 1) {
-      recip_force.set_ncoord(recipComm.get_ncoord());
-      recip->calc(domdec.get_inv_boxx(), domdec.get_inv_boxy(), domdec.get_inv_boxz(),
-		  recipComm.get_coord(), recipComm.get_ncoord(),
-		  calc_energy, calc_virial, recip_force);
-    } else {
+      if (recipComm.get_num_direct() == 1) {
+	// Single Direct+Recip node => add to total force and be done
+	recip->calc(domdec.get_inv_boxx(), domdec.get_inv_boxy(), domdec.get_inv_boxz(),
+		    xyzq.xyzq, xyzq.ncoord,
+		    calc_energy, calc_virial, force);
+      } else {
+	recip->calc(domdec.get_inv_boxx(), domdec.get_inv_boxy(), domdec.get_inv_boxz(),
+		    recipComm.get_coord_ptr(), recipComm.get_ncoord(),
+		    calc_energy, calc_virial, recip_force);
+      }
+    } else if (recipComm.get_num_recip() > 1) {
       // For #recip > 1, we need another force buffer (force_recip) and then need to combine results
       // to the total force
       std::cout << "CudaPMEForcefield::calc, #recip > 1 not implemented yet" << std::endl;
+      exit(1);
+    } else {
+      std::cout << "CudaPMEForcefield::calc, #nrecip = 0, but recip defined should not end up here"
+		<< std::endl;
       exit(1);
     }
   }
@@ -332,18 +367,20 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
 			&energy_vdw, &energy_elec,
 			&energy_excl, vir);
 
-  if (recip != NULL) {
+  if (recipComm.get_isRecip()) {
     recip->get_energy_virial(calc_energy, calc_virial, energy_ewksum, energy_ewself, vir);
   }
 
   // Communicate Direct-Direct
   domdec.comm_force(force);
 
-  // Communicate Direct-Recip
-  recipComm.recv_force(recip_force);
-
-  // Add Recip force to the total force
-  force.add<double>(&recip_force, direct_stream[0]);
+  if (recipComm.get_num_recip() > 0 && recipComm.get_num_direct() > 1) {
+    // Communicate Direct-Recip forces
+    if (recipComm.get_isRecip()) recipComm.send_force(recip_force);
+    recipComm.recv_force(recip_force);
+    // Add Recip force to the total force
+    force.add<double>(recipComm.get_force_ptr(), domdec.get_ncoord(), direct_stream[0]);
+  }
 
 }
 

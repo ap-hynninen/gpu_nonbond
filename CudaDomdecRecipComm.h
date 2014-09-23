@@ -11,16 +11,17 @@ class CudaDomdecRecipComm : public DomdecRecipComm {
  private:
   CudaMPI cudaMPI;
 
-  // Coordinate buffer
-  int coord_len;
-  float4 *coord;
+  // Host communication buffer (only used when MPI implementation is not CUDA Aware)
+  int h_commbuf_len;
+  char *h_commbuf;
 
-  // Host send buffer (only used when MPI implementation is not CUDA Aware)
-  int h_sendbuf_len;
-  char *h_sendbuf;
-
-  int h_recvbuf_len;
-  char *h_recvbuf;
+  // Pure storage pointers, these are not allocated or deallocated by this class
+  // pointer for copy_DtoD()
+  float4 *coord_copy_ptr;
+  // pointer for where coordinates are found after recv_coord() -call
+  float4 *coord_ptr;
+  // pointer to where recip forces are
+  float3 *force_ptr;
 
  public:
   CudaDomdecRecipComm(MPI_Comm comm_recip, MPI_Comm comm_direct_recip,
@@ -28,18 +29,13 @@ class CudaDomdecRecipComm : public DomdecRecipComm {
 		      const bool cudaAware);
   ~CudaDomdecRecipComm();
 
-  void comm_coord(float4* coord_in);
-  void recv_force(Force<float>& force_in);
+  float4 *get_coord_ptr() {assert(coord_ptr != NULL);return coord_ptr;}
+  float3 *get_force_ptr() {assert(force_ptr != NULL);return force_ptr;}
 
-  float4* get_coord() {
-    assert(isRecip);
-    return coord;
-  }
-
-  int get_ncoord() {
-    assert(isRecip);
-    return ncoord;
-  }
+  void send_coord(float4* coord);
+  void recv_coord(float4* coord);
+  void send_force(float3* force);
+  void recv_force(float3* force);
 
 };
 

@@ -21,6 +21,7 @@ private:
   virtual void pre_calc_force()=0;
   virtual void calc_force(const bool calc_energy, const bool calc_virial)=0;
   virtual void post_calc_force()=0;
+  virtual void stop_calc_force()=0;
   virtual void calc_temperature()=0;
   virtual void do_holoconst()=0;
   virtual void do_pressure()=0;
@@ -238,6 +239,10 @@ public:
       }
 
     }
+
+    // Stops force calculation
+    // NOTE: This is typically used to send a STOP signal to Recip nodes
+    stop_calc_force();
 
     // Results are now in (x, y, z), (dx, dy, dz), (fx, fy, fz)
     get_restart_data(x, y, z, dx, dy, dz, fx, fy, fz);

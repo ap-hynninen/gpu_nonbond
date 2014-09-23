@@ -46,7 +46,7 @@ public:
   template <typename T2> void convert(cudaStream_t stream=0);
   template <typename T2, typename T3> void convert_to(Force<T3> *force, cudaStream_t stream=0);
   template <typename T2, typename T3> void convert_add(Force<T3> *force, cudaStream_t stream=0);
-  template <typename T2, typename T3> void add(Force<T3> *force, cudaStream_t stream=0);
+  template <typename T2> void add(float3 *force_data, int force_n, cudaStream_t stream=0);
 };
 
 

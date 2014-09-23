@@ -171,22 +171,18 @@ __global__ void reduce_add_force<long long int, double, float>(const int nfft_to
 }
 //----------------------------------------------------------------------------------------
 
-// Generic version
-template <typename T1, typename T2>
-__global__ void add_force(const int nfft_tot,
-			  const T2* __restrict__ data_add,
-			  T1* __restrict__ data_inout) {}
-
-// Adds: "double" -> "double" + "float"
-template <>
-__global__ void add_force<double, float>(const int nfft_tot,
-					 const float* __restrict__ data_add,
-					 double* __restrict__ data_inout) {
-
+// Adds: "double" -> "double" + "float3"
+__global__ void add_nonstrided_force(const int n,
+				     const float3* __restrict__ data_add,
+				     const int stride,
+				     double* __restrict__ data_inout) {
+  
   unsigned int pos = blockIdx.x*blockDim.x + threadIdx.x;
   
-  while (pos < nfft_tot) {
-    data_inout[pos] += (double)data_add[pos];
+  while (pos < n) {
+    data_inout[pos]          += (double)data_add[pos].x;
+    data_inout[pos+stride]   += (double)data_add[pos].y;
+    data_inout[pos+stride*2] += (double)data_add[pos].z;
     pos += blockDim.x*gridDim.x;
   }
 

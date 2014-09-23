@@ -102,6 +102,7 @@ private:
   void pre_calc_force();
   void calc_force(const bool calc_energy, const bool calc_virial);
   void post_calc_force();
+  void stop_calc_force();
   void calc_temperature();
   void do_holoconst();
   void do_pressure();

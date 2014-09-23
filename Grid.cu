@@ -1197,6 +1197,50 @@ __forceinline__ __device__ void write_force <long long int> (const float fx,
   force_ulli[ind + stride2] += fz_ulli;
 }
 
+
+//-----------------------------------------------------------------------------------------
+// Generic version can not be used
+template <typename T> __forceinline__ __device__
+void gather_force_store(const float fx, const float fy, const float fz,
+			const int stride, const int pos,
+			T* force) {
+}
+
+// Template specialization for "long long int"
+template <> __forceinline__ __device__
+void gather_force_store<long long int>(const float fx, const float fy, const float fz, 
+				       const int stride, const int pos, 
+				       long long int* force) {
+  // Add into strided "long long int" array
+  long long int fx_lli = lliroundf(fx*FORCE_SCALE);
+  long long int fy_lli = lliroundf(fy*FORCE_SCALE);
+  long long int fz_lli = lliroundf(fz*FORCE_SCALE);
+  write_force<long long int>(fx_lli, fy_lli, fz_lli, pos, stride, force);
+}
+
+// Template specialization for "float"
+template <> __forceinline__ __device__
+void gather_force_store<float>(const float fx, const float fy, const float fz, 
+			       const int stride, const int pos, 
+			       float* force) {
+  // Store into non-strided float XYZ array
+  force[pos]          = fx;
+  force[pos+stride]   = fy;
+  force[pos+stride*2] = fz;
+}
+
+// Template specialization for "float3"
+template <> __forceinline__ __device__
+void gather_force_store<float3>(const float fx, const float fy, const float fz, 
+				const int stride, const int pos, 
+				float3* force) {
+  // Store into non-strided "float3" array
+  force[pos].x = fx;
+  force[pos].y = fy;
+  force[pos].z = fz;
+}
+//-----------------------------------------------------------------------------------------
+
 //
 // Gathers forces from the grid
 // blockDim.x            = Number of atoms each block loads
@@ -1671,7 +1715,6 @@ __global__ void gather_force_4_ortho_kernel(const float4 *xyzq, const int ncoord
   }
 
   // Write forces
-  const int stride2 = 2*stride;
   __syncthreads();
   if (pos < pos_end && threadIdx.y == 0) {
     float f1 = shmem[threadIdx.x].f1;
@@ -1681,19 +1724,7 @@ __global__ void gather_force_4_ortho_kernel(const float4 *xyzq, const int ncoord
     float fx = q*recip1*f1*nfftx;
     float fy = q*recip2*f2*nffty;
     float fz = q*recip3*f3*nfftz;
-    if (sizeof(FT) == sizeof(long long int)) {
-      fx *= FORCE_SCALE;
-      fy *= FORCE_SCALE;
-      fz *= FORCE_SCALE;
-      long long int fx_lli = lliroundf(fx);
-      long long int fy_lli = lliroundf(fy);
-      long long int fz_lli = lliroundf(fz);
-      write_force<FT>(fx_lli, fy_lli, fz_lli, pos, stride, force);
-    } else {
-      force[pos]         = fx;
-      force[pos+stride]  = fy;
-      force[pos+stride2] = fz;
-    }
+    gather_force_store<FT>(fx, fy, fz, stride, pos, force);
   }
 
 }
@@ -2004,7 +2035,6 @@ __global__ void gather_force_6_ortho_kernel(const float4 *xyzq, const int ncoord
   }
 
   // Write forces
-  const int stride2 = 2*stride;
   __syncthreads();
   if (pos < pos_end && threadIdx.y == 0) {
     float f1 = shmem[threadIdx.x].f1;
@@ -2014,9 +2044,7 @@ __global__ void gather_force_6_ortho_kernel(const float4 *xyzq, const int ncoord
     float fx = q*recip1*f1*nfftx;
     float fy = q*recip2*f2*nffty;
     float fz = q*recip3*f3*nfftz;
-    force[pos]         = fx;
-    force[pos+stride]  = fy;
-    force[pos+stride2] = fz;
+    gather_force_store<FT>(fx, fy, fz, stride, pos, force);
   }
 
 }
@@ -3135,3 +3163,7 @@ template void Grid<int, float, float2>::gather_force<float>(const float4 *xyzq, 
 template void Grid<int, float, float2>::gather_force<long long int>(const float4 *xyzq, const int ncoord,
 								    const double* recip,
 								    const int stride, long long int* force);
+template void Grid<int, float, float2>::gather_force<float3>(const float4 *xyzq, const int ncoord,
+							     const double* recip,
+							     const int stride, float3* force);
+
