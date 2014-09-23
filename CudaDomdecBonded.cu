@@ -1,7 +1,3 @@
-#undef SEEK_SET
-#undef SEEK_CUR
-#undef SEEK_END
-#include <mpi.h>
 #include <cassert>
 #include "cuda_utils.h"
 #include "gpu_utils.h"

@@ -1,6 +1,5 @@
-#include <mpi.h>
-#include <iostream>
 #include "mpi_utils.h"
+#include <iostream>
 
 void start_mpi(int argc, char *argv[], int &numnode, int &mynode) {
 
