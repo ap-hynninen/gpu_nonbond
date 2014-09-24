@@ -264,7 +264,10 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_s
 //
 void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, Force<long long int>& force) {
 
-  if (recipComm.get_num_recip() > 0  && recipComm.get_num_direct() > 1) {
+  bool do_recipcomm = recipComm.get_hasPureRecip() || 
+    (recipComm.get_num_recip() > 0  && recipComm.get_num_direct() > 1);
+
+  if (do_recipcomm) {
     if (recipComm.get_isRecip() && recip == NULL) {
       std::cout << "CudaPMEForcefield::calc, missing recip object" << std::endl;
       exit(1);
@@ -375,7 +378,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   // Communicate Direct-Direct
   domdec.comm_force(force);
 
-  if (recipComm.get_num_recip() > 0 && recipComm.get_num_direct() > 1) {
+  if (do_recipcomm) {
     // Communicate Direct-Recip forces
     if (recipComm.get_isRecip()) recipComm.send_force(recip_force);
     recipComm.recv_force(recip_force);

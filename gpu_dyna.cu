@@ -128,15 +128,40 @@ void test() {
   const bool cudaAware = false;
 
   // Very simple node setup
-  int nx = 1;
-  int ny = 1;
-  int nz = numnode;
-  bool isDirect = true;
-  bool isRecip = (mynode == numnode-1) ? true : false;
-  std::vector<int> direct_nodes(numnode);
-  std::vector<int> recip_nodes(1);
-  for (int i=0;i < numnode;i++) direct_nodes[i] = i;
-  recip_nodes[0] = numnode-1;
+  bool pure_recip = true;
+  int nx;
+  int ny;
+  int nz;
+  bool isDirect;
+  bool isRecip;
+  std::vector<int> direct_nodes;
+  std::vector<int> recip_nodes;
+  if (pure_recip && numnode > 1) {
+    direct_nodes.resize(numnode-1);
+    recip_nodes.resize(1);
+    nx = 1;
+    ny = 1;
+    nz = numnode-1;
+    for (int i=0;i < numnode-1;i++) direct_nodes.at(i) = i;
+    recip_nodes.at(0) = numnode-1;
+    isDirect = false;
+    isRecip = false;
+    if (mynode == recip_nodes.at(0)) {
+      isRecip = true;
+    } else {
+      isDirect = true;
+    }
+  } else {
+    direct_nodes.resize(numnode);
+    recip_nodes.resize(1);
+    nx = 1;
+    ny = 1;
+    nz = numnode;
+    isDirect = true;
+    isRecip = (mynode == numnode-1) ? true : false;
+    for (int i=0;i < numnode;i++) direct_nodes.at(i) = i;
+    recip_nodes.at(0) = numnode-1;
+  }
 
   // MPI communicators
   MPI_Comm comm_direct;
@@ -151,12 +176,12 @@ void test() {
   MPICheck(MPI_Comm_group(MPI_COMM_WORLD, &group_world));
   
   if (isDirect) {
-    MPICheck(MPI_Group_incl(group_world, numnode, direct_nodes.data(), &group_direct));
+    MPICheck(MPI_Group_incl(group_world, direct_nodes.size(), direct_nodes.data(), &group_direct));
     MPICheck(MPI_Comm_create(MPI_COMM_WORLD, group_direct, &comm_direct));
   }
   
   if (isRecip) {
-    MPICheck(MPI_Group_incl(group_world, 1, recip_nodes.data(), &group_recip));
+    MPICheck(MPI_Group_incl(group_world, recip_nodes.size(), recip_nodes.data(), &group_recip));
     MPICheck(MPI_Comm_create(MPI_COMM_WORLD, group_recip, &comm_recip));
   }
 
@@ -447,8 +472,13 @@ void test() {
 
   if (recip != NULL) delete recip;
 
-  MPICheck(MPI_Group_free(&group_direct));
-  MPICheck(MPI_Group_free(&group_recip));
+  if (isDirect) {
+    MPICheck(MPI_Group_free(&group_direct));
+  }
+
+  if (isRecip) {
+    MPICheck(MPI_Group_free(&group_recip));
+  }
 
   return;
 }

@@ -87,6 +87,8 @@ void DomdecRecipComm::send_header(const int ncoord_in, const double inv_boxx, co
   header.calc_virial = calc_virial;
   MPICheck(MPI_Send((void *)&header, sizeof(Header_t), MPI_BYTE, recip_nodes.at(0), TAG,
 		    comm_direct_recip));
+  ncomm.at(0) = ncoord_in;
+  ncoord = ncoord_in;
 
 }
 
