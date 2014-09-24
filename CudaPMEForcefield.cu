@@ -131,6 +131,7 @@ CudaPMEForcefield::~CudaPMEForcefield() {
   deallocate<int>(&d_heuristic_flag);
   deallocate_host<int>(&h_heuristic_flag);
   deallocate<float>(&q);
+  deallocate<int>(&glo_vdwtype);
   if (recip_force != NULL) deallocate<float3>(&recip_force);
   if (h_loc2glo != NULL) delete [] h_loc2glo;
   // Destroy streams

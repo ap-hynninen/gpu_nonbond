@@ -3,9 +3,6 @@
 #include <cuda.h>
 #include "cuda_utils.h"
 #include "gpu_utils.h"
-#ifdef SEEK_SET
-#undef SEEK_SET
-#endif
 #include "mpi_utils.h"
 #include "CudaLeapfrogIntegrator.h"
 #include "CudaDomdec.h"
@@ -367,8 +364,6 @@ void test() {
     leapfrog.set_force_buffers(fx, fy, fz);
     leapfrog.set_timestep(2.0);
     int nstep = 100;
-    //int print_freq = 1000;
-    //int restart_freq = 10000;
     leapfrog.run(nstep);
 
     write_xyz(ncoord, x, y, z, "coord.txt");

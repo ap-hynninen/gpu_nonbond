@@ -4,18 +4,22 @@ OS := $(shell uname -s)
 
 YES := $(shell which make | wc -l 2> /dev/null)
 
-# Detect Intel compiler
+# Set optimization level
+OPTLEV = -O3
+
+# Detect CUDA, Intel compiler, and MPI
 CUDA_COMPILER := $(shell which nvcc | wc -l 2> /dev/null)
 INTEL_COMPILER := $(shell which icc | wc -l 2> /dev/null)
 MPI_FOUND := $(shell which mpicc | wc -l 2> /dev/null)
 
 ifeq ($(MPI_FOUND), $(YES))
 
-DEFS = USE_MPI
+DEFS = -D USE_MPI
 
 ifeq ($(INTEL_COMPILER), $(YES))
 CC = mpicc
 CL = mpicc
+DEFS += -D MPICH_IGNORE_CXX_SEEK
 else
 CC = mpic++
 CL = mpic++
@@ -23,11 +27,15 @@ endif
 
 else
 
-DEFS = DONT_USE_MPI
+DEFS = -D DONT_USE_MPI
+
+echo $(YES)
+echo $(INTEL_COMPILER)
 
 ifeq ($(INTEL_COMPILER), $(YES))
 CC = icc
 CL = icc
+DEFS += -D MPICH_IGNORE_CXX_SEEK
 else
 CC = g++
 CL = g++
@@ -83,8 +91,8 @@ endif
 # NVCC_CFLAGS = flags for nvcc compiler
 # CUDA_LFLAGS = flags for linking with CUDA
 
-CUDA_CFLAGS = -I${CUDAROOT}/include -O3 -std=c++0x
-NVCC_CFLAGS = -O3 -lineinfo -fmad=true -use_fast_math $(GENCODE_FLAGS)
+CUDA_CFLAGS = -I${CUDAROOT}/include $(OPTLEV) -std=c++0x
+NVCC_CFLAGS = $(OPTLEV) -lineinfo -fmad=true -use_fast_math $(GENCODE_FLAGS)
 MPI_CFLAGS = -I${MPIROOT}/include
 
 ifeq ($(OS),Linux)
@@ -116,7 +124,7 @@ gpu_const : $(OBJS_CONST)
 	$(CL) $(CUDA_LFLAGS) -o gpu_const $(OBJS_CONST)
 
 gpu_dyna : $(OBJS_DYNA)
-	$(CL) $(CUDA_LFLAGS) -o gpu_dyna $(OBJS_DYNA)
+	$(CL) $(OPTLEV) $(CUDA_LFLAGS) -o gpu_dyna $(OBJS_DYNA)
 
 cpu_transpose : $(OBJS_TRANSPOSE)
 	$(CL) $(CUDA_LFLAGS) -o cpu_transpose $(OBJS_TRANSPOSE)
@@ -131,25 +139,9 @@ clean:
 -include $(OBJS:.o=.d)
 
 %.o : %.cu
-	nvcc -c $(MPI_CFLAGS) $(NVCC_CFLAGS) -D$(DEFS) $<
-	nvcc -M $(MPI_CFLAGS) $(NVCC_CFLAGS) -D$(DEFS) $*.cu > $*.d
-
-#CpuMultiNodeMatrix3d.o : CpuMultiNodeMatrix3d.cpp
-#	$(CCMPI) -c $(CFLAGS) $(OPENMP_OPT) -D$(DEFS) $<
-#	$(CCMPI) -MM $(CFLAGS) $(OPENMP_OPT) -D$(DEFS) $*.cpp > $*.d
-
-#MultiNodeMatrix3d.o : MultiNodeMatrix3d.cpp
-#	$(CCMPI) -c $(CFLAGS) $(OPENMP_OPT) -D$(DEFS) $<
-#	$(CCMPI) -MM $(CFLAGS) $(OPENMP_OPT) -D$(DEFS) $*.cpp > $*.d
-
-#cpu_transpose.o : cpu_transpose.cpp
-#	$(CCMPI) -c $(CFLAGS) $(OPENMP_OPT) -D$(DEFS) $<
-#	$(CCMPI) -MM $(CFLAGS) $(OPENMP_OPT) -D$(DEFS) $*.cpp > $*.d
-
-#mpi_utils.o : mpi_utils.cpp
-#	$(CCMPI) -c $(CFLAGS) -D$(DEFS) $<
-#	$(CCMPI) -MM $(CFLAGS) -D$(DEFS) $*.cpp > $*.d
+	nvcc -c $(MPI_CFLAGS) $(NVCC_CFLAGS) $(DEFS) $<
+	nvcc -M $(MPI_CFLAGS) $(NVCC_CFLAGS) $(DEFS) $*.cu > $*.d
 
 %.o : %.cpp
-	$(CC) -c $(CUDA_CFLAGS) -D$(DEFS) $<
-	$(CC) -MM $(CUDA_CFLAGS) -D$(DEFS) $*.cpp > $*.d
+	$(CC) -c $(CUDA_CFLAGS) $(DEFS) $<
+	$(CC) -MM $(CUDA_CFLAGS) $(DEFS) $*.cpp > $*.d
