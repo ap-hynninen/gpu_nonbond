@@ -2,6 +2,7 @@
 #define CUDAXYZ_H
 #include <cassert>
 #include <iostream>
+#include <vector>
 #include "cuda_utils.h"
 #include "XYZ.h"
 
@@ -99,6 +100,23 @@ public:
     copy_HtoD_sync<T>(h_x, this->data, this->n);
     copy_HtoD_sync<T>(h_y, &this->data[this->stride], this->n);
     copy_HtoD_sync<T>(h_z, &this->data[this->stride*2], this->n);
+  }
+
+  // Sets data from host arrays with indexing
+  void set_data_sync(const std::vector<int>& h_loc2glo, const T *h_x, const T *h_y, const T *h_z) {
+    assert(this->n == h_loc2glo.size());
+
+    T *h_data = new T[this->stride*3];
+    for (int i=0;i < h_loc2glo.size();i++) {
+      int j = h_loc2glo[i];
+      h_data[i]                = h_x[j];
+      h_data[i+this->stride]   = h_y[j];
+      h_data[i+this->stride*2] = h_z[j];
+    }
+
+    copy_HtoD_sync<T>(h_data, this->data, this->stride*3);
+
+    delete [] h_data;
   }
 
   //--------------------------------------------------------------------------

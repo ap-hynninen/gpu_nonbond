@@ -63,7 +63,7 @@ struct z_pick_functor {
 //
 // Communicate coordinates
 //
-void CudaDomdecD2DComm::comm_coord(cudaXYZ<double> *coord, thrust::device_vector<int>& loc2glo,
+void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector<int>& loc2glo,
 				   const bool update) {
 
   double rnl = domdec.get_rnl();
@@ -92,10 +92,10 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double> *coord, thrust::device_vector
 	if (homeiz-(i+1) < 0) zf -= 1.0;
 
 	// Get pointer to z coordinates
-	thrust::device_ptr<double> z_ptr(&coord->data[coord->stride*2]);
+	thrust::device_ptr<double> z_ptr(&coord.data[coord.stride*2]);
 
 	// Pick atoms that are in the communication region
-	thrust::transform(z_ptr, z_ptr + coord->n, atom_pick.begin(),
+	thrust::transform(z_ptr, z_ptr + coord.n, atom_pick.begin(),
 			  z_pick_functor(zf + rnl*inv_boxz, inv_boxz));
 
 	// atom_pick[] now contains atoms that are picked for z-communication
@@ -103,13 +103,13 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double> *coord, thrust::device_vector
 	thrust::exclusive_scan(atom_pick.begin(), atom_pick.end(), atom_pos.begin());
 	
 	// Count the number of atoms we are adding to the buffer
-	z_nsend[i] = atom_pos[coord->n] + atom_pick[coord->n];
+	z_nsend[i] = atom_pos[coord.n] + atom_pick[coord.n];
 	z_psend[i] = (i == 0) ? 0 : (z_psend[i-1] + z_nsend[i-1]);
 
 	// atom_pos[] now contains position to store each atom
 	// Scatter to produce packed atom index table
 	thrust::scatter_if(thrust::make_counting_iterator(0),
-			   thrust::make_counting_iterator(coord->n),
+			   thrust::make_counting_iterator(coord.n),
 			   atom_pos.begin(), atom_pick.begin(),
 			   z_send_loc[i].begin());
 
@@ -133,16 +133,16 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double> *coord, thrust::device_vector
       thrust::device_ptr<double> sendbuf_xyz_ptr((double *)&sendbuf[pos]);
 
       // Get pointer to coordinates
-      thrust::device_ptr<double> xyz_ptr(&coord->data[0]);
+      thrust::device_ptr<double> xyz_ptr(&coord.data[0]);
       
       // Pack in coordinates
       thrust::gather(z_send_loc[i].begin(), z_send_loc[i].end(), xyz_ptr,
 		     sendbuf_xyz_ptr);
 
-      thrust::gather(z_send_loc[i].begin(), z_send_loc[i].end(), xyz_ptr + coord->stride,
+      thrust::gather(z_send_loc[i].begin(), z_send_loc[i].end(), xyz_ptr + coord.stride,
 		     sendbuf_xyz_ptr + z_nsend[i]);
 
-      thrust::gather(z_send_loc[i].begin(), z_send_loc[i].end(), xyz_ptr + coord->stride*2,
+      thrust::gather(z_send_loc[i].begin(), z_send_loc[i].end(), xyz_ptr + coord.stride*2,
 		     sendbuf_xyz_ptr + 2*z_nsend[i]);
 
       pos += z_nsend[i]*3*sizeof(double);

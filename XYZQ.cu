@@ -190,11 +190,11 @@ void XYZQ::set_xyzq(int ncopy, float4 *h_xyzq, size_t offset, cudaStream_t strea
 //
 // Copies x,y,z,q (on device) into the coordinate slots
 //
-void XYZQ::set_xyzq(const cudaXYZ<double> *coord, const float *q, cudaStream_t stream) {
+void XYZQ::set_xyzq(const cudaXYZ<double>& coord, const float *q, cudaStream_t stream) {
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
-  set_xyzq_kernel<<< nblock, nthread, 0, stream >>>(coord->n, coord->stride, coord->data, q, xyzq);
+  set_xyzq_kernel<<< nblock, nthread, 0, stream >>>(coord.n, coord.stride, coord.data, q, xyzq);
 
   cudaCheck(cudaGetLastError());
 }
@@ -202,13 +202,13 @@ void XYZQ::set_xyzq(const cudaXYZ<double> *coord, const float *q, cudaStream_t s
 //
 // Copies x,y,z,q (on device) into the coordinate slots
 //
-void XYZQ::set_xyzq(const cudaXYZ<double> *coord, const float *q, const int *loc2glo,
+void XYZQ::set_xyzq(const cudaXYZ<double>& coord, const float *q, const int *loc2glo,
 		    const float3 *xyz_shift,
 		    const double boxx, const double boxy, const double boxz, cudaStream_t stream) {
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
-  set_xyzq_shift_kernel<<< nblock, nthread, 0, stream >>>(coord->n, coord->stride, coord->data, q,
+  set_xyzq_shift_kernel<<< nblock, nthread, 0, stream >>>(coord.n, coord.stride, coord.data, q,
 							  loc2glo, xyz_shift, boxx, boxy, boxz, xyzq);
 
   cudaCheck(cudaGetLastError());
@@ -217,11 +217,11 @@ void XYZQ::set_xyzq(const cudaXYZ<double> *coord, const float *q, const int *loc
 //
 // Copies x,y,z (on device) into the coordinate slots
 //
-void XYZQ::set_xyz(const cudaXYZ<double> *coord, cudaStream_t stream) {
+void XYZQ::set_xyz(const cudaXYZ<double>& coord, cudaStream_t stream) {
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
-  set_xyz_kernel<<< nblock, nthread, 0, stream >>>(coord->n, coord->stride, coord->data, xyzq);
+  set_xyz_kernel<<< nblock, nthread, 0, stream >>>(coord.n, coord.stride, coord.data, xyzq);
 
   cudaCheck(cudaGetLastError());
 }
@@ -229,11 +229,11 @@ void XYZQ::set_xyz(const cudaXYZ<double> *coord, cudaStream_t stream) {
 //
 // Copies x,y,z,q (on device) into the coordinate slots
 //
-void XYZQ::set_xyz(const cudaXYZ<double> *coord, const int start, const int end, const float3 *xyz_shift,
+void XYZQ::set_xyz(const cudaXYZ<double>& coord, const int start, const int end, const float3 *xyz_shift,
 		   const double boxx, const double boxy, const double boxz, cudaStream_t stream) {
   assert(start >= 0);
   assert(end < ncoord);
-  assert(end < coord->n);
+  assert(end < coord.n);
   int nset = end-start+1;
   assert(nset >= 0);
 
@@ -242,7 +242,7 @@ void XYZQ::set_xyz(const cudaXYZ<double> *coord, const int start, const int end,
   int nthread = 512;
   int nblock = (nset-1)/nthread+1;
 
-  set_xyz_shift_kernel<<< nblock, nthread, 0, stream >>>(nset, coord->stride, &coord->data[start],
+  set_xyz_shift_kernel<<< nblock, nthread, 0, stream >>>(nset, coord.stride, &coord.data[start],
 							 &xyz_shift[start], boxx, boxy, boxz, &xyzq[start]);
 
   cudaCheck(cudaGetLastError());

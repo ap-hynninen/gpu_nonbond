@@ -56,8 +56,8 @@ __global__ void heuristic_check_kernel(const int ncoord, const int stride,
 //
 // Class creator
 //
-CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded *domdec_bonded,
-				     NeighborList<32> *nlist,
+CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded& domdec_bonded,
+				     NeighborList<32>& nlist,
 				     const int nbondcoef, const float2 *h_bondcoef,
 				     const int nureybcoef, const float2 *h_ureybcoef,
 				     const int nanglecoef, const float2 *h_anglecoef,
@@ -71,7 +71,8 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded *domde
 				     const float *h_vdwparam14,
 				     const int *h_glo_vdwtype, const float *h_q,
 				     CudaDomdecRecip* recip, CudaDomdecRecipComm& recipComm) : 
-  domdec(domdec), recip(recip), recipComm(recipComm), kappa(kappa), recip_force_len(0), recip_force(NULL) {
+  domdec(domdec), recip(recip), domdec_bonded(domdec_bonded), nlist(nlist), recipComm(recipComm), kappa(kappa),
+  recip_force_len(0), recip_force(NULL) {
 
   // Create streams
   cudaCheck(cudaStreamCreate(&direct_stream[0]));
@@ -94,12 +95,6 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded *domde
   calc_dihe = true;
   calc_imdihe = true;
   calc_cmap = true;
-
-  // Domain decomposition
-  this->domdec_bonded = domdec_bonded;
-
-  // Neighborlist
-  this->nlist = nlist;
 
   // Bonded coefficients
   bonded.setup_coef(nbondcoef, h_bondcoef, nureybcoef, h_ureybcoef,
@@ -174,7 +169,7 @@ void CudaPMEForcefield::setup_direct_nonbonded(const double roff, const double r
 //
 // Pre-process force calculation
 //
-void CudaPMEForcefield::pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step) {
+void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_step) {
 
   // Check for neighborlist heuristic update
   if (heuristic_check(coord, direct_stream[0])) {
@@ -198,52 +193,52 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_s
 
     // Sort coordinates
     // NOTE: Builds domdec.loc2glo and nlist->glo2loc
-    nlist->sort(domdec.get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec.get_loc2glo_ptr());
+    nlist.sort(domdec.get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec.get_loc2glo_ptr());
 
     // Build neighborlist
-    nlist->build(domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), domdec.get_rnl(),
-		 xyzq.xyzq, domdec.get_loc2glo_ptr());
+    nlist.build(domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), domdec.get_rnl(),
+		xyzq.xyzq, domdec.get_loc2glo_ptr());
 
-    //nlist->test_build(domdec.get_zone_pcoord(), domdec.get_boxx(), domdec.get_boxy(),
+    //nlist.test_build(domdec.get_zone_pcoord(), domdec.get_boxx(), domdec.get_boxy(),
     //domdec.get_boxz(), domdec.get_rnl(), xyzq.xyzq, domdec.get_loc2glo());
 
     // Build bonded tables
-    domdec_bonded->build_tbl(&domdec, domdec.get_zone_pcoord());
+    domdec_bonded.build_tbl(&domdec, domdec.get_zone_pcoord());
 
     // Setup bonded interaction lists
     bonded.setup_list(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
-		      nlist->get_glo2loc(),
-		      domdec_bonded->get_nbond_tbl(), domdec_bonded->get_bond_tbl(),
-		      domdec_bonded->get_bond(),
-		      domdec_bonded->get_nureyb_tbl(), domdec_bonded->get_ureyb_tbl(),
-		      domdec_bonded->get_ureyb(),
-		      domdec_bonded->get_nangle_tbl(), domdec_bonded->get_angle_tbl(),
-		      domdec_bonded->get_angle(),
-		      domdec_bonded->get_ndihe_tbl(), domdec_bonded->get_dihe_tbl(),
-		      domdec_bonded->get_dihe(),
-		      domdec_bonded->get_nimdihe_tbl(), domdec_bonded->get_imdihe_tbl(),
-		      domdec_bonded->get_imdihe(),
-		      domdec_bonded->get_ncmap_tbl(), domdec_bonded->get_cmap_tbl(),
-		      domdec_bonded->get_cmap());
+		      nlist.get_glo2loc(),
+		      domdec_bonded.get_nbond_tbl(), domdec_bonded.get_bond_tbl(),
+		      domdec_bonded.get_bond(),
+		      domdec_bonded.get_nureyb_tbl(), domdec_bonded.get_ureyb_tbl(),
+		      domdec_bonded.get_ureyb(),
+		      domdec_bonded.get_nangle_tbl(), domdec_bonded.get_angle_tbl(),
+		      domdec_bonded.get_angle(),
+		      domdec_bonded.get_ndihe_tbl(), domdec_bonded.get_dihe_tbl(),
+		      domdec_bonded.get_dihe(),
+		      domdec_bonded.get_nimdihe_tbl(), domdec_bonded.get_imdihe_tbl(),
+		      domdec_bonded.get_imdihe(),
+		      domdec_bonded.get_ncmap_tbl(), domdec_bonded.get_cmap_tbl(),
+		      domdec_bonded.get_cmap());
 
     // Set vdwtype for Direct non-bonded interactions
     dir.set_vdwtype(domdec.get_ncoord_tot(), glo_vdwtype, domdec.get_loc2glo_ptr());
 
     // Setup 1-4 interaction lists
     dir.set_14_list(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
-		    nlist->get_glo2loc(),
-		    domdec_bonded->get_nin14_tbl(), domdec_bonded->get_in14_tbl(),
-		    domdec_bonded->get_in14(),
-		    domdec_bonded->get_nex14_tbl(), domdec_bonded->get_ex14_tbl(),
-		    domdec_bonded->get_ex14());
+		    nlist.get_glo2loc(),
+		    domdec_bonded.get_nin14_tbl(), domdec_bonded.get_in14_tbl(),
+		    domdec_bonded.get_in14(),
+		    domdec_bonded.get_nex14_tbl(), domdec_bonded.get_ex14_tbl(),
+		    domdec_bonded.get_ex14());
 
     // Re-order prev_step vector:
-    domdec.reorder_coord(prev_step, &ref_coord, nlist->get_ind_sorted());
-    prev_step->set_data(ref_coord);
+    domdec.reorder_coord(prev_step, ref_coord, nlist.get_ind_sorted());
+    prev_step.set_data(ref_coord);
 
     // Re-order coordinates (coord) and copy to reference coordinates (ref_coord)
-    domdec.reorder_coord(coord, &ref_coord, nlist->get_ind_sorted());
-    coord->set_data(ref_coord);
+    domdec.reorder_coord(coord, ref_coord, nlist.get_ind_sorted());
+    coord.set_data(ref_coord);
 
   } else {
     neighborlist_updated = false;
@@ -396,10 +391,10 @@ void CudaPMEForcefield::post_calc(const float *global_mass, float *mass) {
   if (neighborlist_updated) {
 
     // Re-order xyz_shift
-    domdec.reorder_xyz_shift(nlist->get_ind_sorted());
+    domdec.reorder_xyz_shift(nlist.get_ind_sorted());
 
     // Re-order mass
-    //domdec.reorder_mass(mass, nlist->get_ind_sorted());
+    //domdec.reorder_mass(mass, nlist.get_ind_sorted());
     map_to_local_array<float>(domdec.get_ncoord(), domdec.get_loc2glo_ptr(), global_mass, mass);
   }
 
@@ -414,28 +409,28 @@ void CudaPMEForcefield::wait_calc(cudaStream_t stream) {
 }
 
 //
-// Initializes coordinates.
-// Returns the number of coordinates in the homezone
+// Assigns coordinates to nodes
 // NOTE: All nodes receive all coordinates here. Domdec distributes them across the nodes
 //
-int CudaPMEForcefield::init_coord(hostXYZ<double>& coord) {
+void CudaPMEForcefield::assignCoordToNodes(hostXYZ<double>& coord, std::vector<int>& h_loc2glo) {
   // Build loc2glo for the homezone, we now know the number of coordinates at the homezone
   domdec.build_homezone(coord);
+  // Copy loc2glo to h_loc2glo
+  h_loc2glo.resize(domdec.get_ncoord());
+  copy_DtoH<int>(domdec.get_loc2glo_ptr(), h_loc2glo.data(), domdec.get_ncoord());
   // Resize coordinate arrays to the new homezone size
   ref_coord.resize(domdec.get_ncoord());
   ref_coord.clear();
   xyzq.set_ncoord(domdec.get_ncoord());
   xyzq_copy.set_ncoord(domdec.get_ncoord());
-
-  return domdec.get_ncoord();
 }
 
 //
 // Checks if non-bonded list needs to be updated
 // Returns true if update is needed
 //
-bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double> *coord, cudaStream_t stream) {
-  assert(ref_coord.match(coord));
+bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double>& coord, cudaStream_t stream) {
+  assert(ref_coord.match(&coord));
   assert(warpsize <= 32);
 
   double rsq_limit_dbl = fabs(domdec.get_rnl() - roff)/2.0;
@@ -453,7 +448,7 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double> *coord, cudaStream
   copy_HtoD<int>(h_heuristic_flag, d_heuristic_flag, 1, stream);
 
   heuristic_check_kernel<<< nblock, nthread, shmem_size, stream >>>
-    (ncoord, stride, coord->data, ref_coord.data, rsq_limit, d_heuristic_flag);
+    (ncoord, stride, coord.data, ref_coord.data, rsq_limit, d_heuristic_flag);
 
   cudaCheck(cudaGetLastError());
 

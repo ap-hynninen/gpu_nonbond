@@ -12,14 +12,14 @@ class CudaForcefield : public Forcefield {
 
 public:
 
-  virtual void pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step)=0;
+  virtual void pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_step)=0;
   virtual void calc(const bool calc_energy, const bool calc_virial, Force<long long int>& force)=0;
   virtual void post_calc(const float *global_mass, float *mass)=0;
   virtual void stop_calc()=0;
 
   virtual void wait_calc(cudaStream_t stream)=0;
 
-  virtual int init_coord(hostXYZ<double>& coord)=0;
+  virtual void assignCoordToNodes(hostXYZ<double>& coord, std::vector<int>& h_loc2glo)=0;
 
   virtual void get_restart_data(hostXYZ<double> *h_coord, hostXYZ<double> *h_step, hostXYZ<double> *h_force,
 				double *x, double *y, double *z, double *dx, double *dy, double *dz,

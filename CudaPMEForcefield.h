@@ -42,7 +42,7 @@ private:
   // --------------
   // Neighbor list
   // --------------
-  NeighborList<32> *nlist;
+  NeighborList<32>& nlist;
 
   // ------------------------
   // Direct non-bonded force
@@ -72,7 +72,7 @@ private:
   // Domain decomposition
   // ---------------------
   CudaDomdec& domdec;
-  CudaDomdecBonded *domdec_bonded;
+  CudaDomdecBonded& domdec_bonded;
 
   // Host version of loc2glo
   int h_loc2glo_len;
@@ -126,7 +126,7 @@ private:
   bool calc_imdihe;
   bool calc_cmap;
 
-  bool heuristic_check(const cudaXYZ<double> *coord, cudaStream_t stream=0);
+  bool heuristic_check(const cudaXYZ<double>& coord, cudaStream_t stream=0);
 
   void setup_direct_nonbonded(const double roff, const double ron,
 			      const double kappa, const double e14fac,
@@ -140,8 +140,8 @@ private:
 
 public:
 
-  CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded *domdec_bonded,
-		    NeighborList<32> *nlist,
+  CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded& domdec_bonded,
+		    NeighborList<32>& nlist,
 		    const int nbondcoef, const float2 *h_bondcoef,
 		    const int nureybcoef, const float2 *h_ureybcoef,
 		    const int nanglecoef, const float2 *h_anglecoef,
@@ -158,14 +158,14 @@ public:
   ~CudaPMEForcefield();
 
 
-  void pre_calc(cudaXYZ<double> *coord, cudaXYZ<double> *prev_step);
+  void pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_step);
   void calc(const bool calc_energy, const bool calc_virial, Force<long long int>& force);
   void post_calc(const float *global_mass, float *mass);
   void stop_calc() {recipComm.send_stop();}
 
   void wait_calc(cudaStream_t stream);
 
-  int init_coord(hostXYZ<double>& coord);
+  void assignCoordToNodes(hostXYZ<double>& coord, std::vector<int>& h_loc2glo);
 
   void get_restart_data(hostXYZ<double> *h_coord, hostXYZ<double> *h_step, hostXYZ<double> *h_force,
 			double *x, double *y, double *z, double *dx, double *dy, double *dz,

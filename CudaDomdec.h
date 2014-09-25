@@ -52,12 +52,12 @@ class CudaDomdec : public Domdec {
   float3* get_xyz_shift() {return xyz_shift0;}
 
   void build_homezone(hostXYZ<double>& coord);
-  void update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, cudaStream_t stream=0);
+  void update_homezone(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream=0);
 
-  void comm_coord(cudaXYZ<double> *coord, const bool update, cudaStream_t stream=0);
+  void comm_coord(cudaXYZ<double>& coord, const bool update, cudaStream_t stream=0);
   void comm_force(Force<long long int>& force, cudaStream_t stream=0);
 
-  void reorder_coord(cudaXYZ<double> *coord_src, cudaXYZ<double> *coord_dst,
+  void reorder_coord(cudaXYZ<double>& coord_src, cudaXYZ<double>& coord_dst,
 		     const int* ind_sorted, cudaStream_t stream=0);
 
   void reorder_xyz_shift(const int* ind_sorted, cudaStream_t stream=0);

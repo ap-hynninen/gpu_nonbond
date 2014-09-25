@@ -211,8 +211,7 @@ CudaLeapfrogIntegrator::~CudaLeapfrogIntegrator() {
 //
 // Initialize integrator
 //
-void CudaLeapfrogIntegrator::spec_init(const int ncoord_glo,
-				       const double *x, const double *y, const double *z,
+void CudaLeapfrogIntegrator::spec_init(const double *x, const double *y, const double *z,
 				       const double *dx, const double *dy, const double *dz,
 				       const double *h_mass) {
   if (forcefield == NULL) {
@@ -221,45 +220,47 @@ void CudaLeapfrogIntegrator::spec_init(const int ncoord_glo,
   }
 
   // Create host array for coordinates
-  hostXYZ<double> h_prev_coord(ncoord, NON_PINNED);
+  hostXYZ<double> h_prev_coord(ncoord_glo, NON_PINNED);
   h_prev_coord.set_data_fromhost(x, y, z);
 
+  // Initialize force field coordinate arrays and divide atoms to nodes
+  std::vector<int> h_loc2glo;
   CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-  int ncoord_loc = p->init_coord(h_prev_coord);
+  p->assignCoordToNodes(h_prev_coord, h_loc2glo);
 
-  //std::cerr << "CudaLeapfrogIntegrator::spec_init, exit(1)" << std::endl;
-  //exit(1);
+  //fprintf(stderr,"h_loc2glo.size()=%d\n",h_loc2glo.size());
 
   // Resize and set arrays
-  step.resize(ncoord);
+  step.resize(h_loc2glo.size());
   step.clear();
 
-  prev_step.resize(ncoord);
-  prev_step.set_data_sync(ncoord, dx, dy, dz);
+  prev_step.resize(h_loc2glo.size());
+  prev_step.set_data_sync(h_loc2glo, dx, dy, dz);
 
-  coord.resize(ncoord);
+  coord.resize(h_loc2glo.size());
   coord.clear();
 
-  prev_coord.resize(ncoord);
-  prev_coord.set_data_sync(ncoord, x, y, z);
+  prev_coord.resize(h_loc2glo.size());
+  prev_coord.set_data_sync(h_loc2glo, x, y, z);
 
-  force.set_ncoord(ncoord);
+  force.set_ncoord(h_loc2glo.size());
 
   // Make global mass array
-  float *h_mass_f = new float[ncoord];
-  for (int i=0;i < ncoord;i++) {
+  float *h_mass_f = new float[ncoord_glo];
+  for (int i=0;i < ncoord_glo;i++) {
     h_mass_f[i] = (float)h_mass[i];
   }
-  allocate<float>(&global_mass, ncoord);
-  copy_HtoD<float>(h_mass_f, global_mass, ncoord);
+  allocate<float>(&global_mass, ncoord_glo);
+  copy_HtoD<float>(h_mass_f, global_mass, ncoord_glo);
   delete [] h_mass_f;
 
   // Host versions of coordinate, step, and force arrays
-  // NOTE: These are used for copying coordinates
-  h_coord.resize(ncoord);
-  h_step.resize(ncoord);
-  h_force.resize(ncoord);
+  // NOTE: These are used for copying coordinates, so they must be global size
+  h_coord.resize(ncoord_glo);
+  h_step.resize(ncoord_glo);
+  h_force.resize(ncoord_glo);
 
+  //exit(1);
 }
 
 //
@@ -330,7 +331,7 @@ void CudaLeapfrogIntegrator::pre_calc_force() {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
     cudaCheck(cudaStreamWaitEvent(stream, done_integrate_event, 0));
-    p->pre_calc(&coord, &prev_step);
+    p->pre_calc(coord, prev_step);
   }
 }
 

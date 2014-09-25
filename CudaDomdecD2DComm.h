@@ -45,7 +45,7 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
   CudaDomdecD2DComm(Domdec& domdec, CudaMPI& cudaMPI);
   ~CudaDomdecD2DComm();
 
-  void comm_coord(cudaXYZ<double> *coord, thrust::device_vector<int>& loc2glo,
+  void comm_coord(cudaXYZ<double>& coord, thrust::device_vector<int>& loc2glo,
 		  const bool update);
 };
 

@@ -126,8 +126,7 @@ public:
 			 cudaStream_t stream=0);
   ~CudaLeapfrogIntegrator();
 
-  void spec_init(const int ncoord_glo,
-		 const double *x, const double *y, const double *z,
+  void spec_init(const double *x, const double *y, const double *z,
 		 const double *dx, const double *dy, const double *dz,
 		 const double *h_mass);
 

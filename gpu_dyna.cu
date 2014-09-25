@@ -343,9 +343,9 @@ void test() {
 
     // Setup PME force field
     CudaPMEForcefield forcefield(// Domain decomposition
-				 domdec, &domdec_bonded,
+				 domdec, domdec_bonded,
 				 // Neighborlist
-				 &nlist,
+				 nlist,
 				 // Bonded
 				 nbondcoef, bondcoef, nureybcoef, ureybcoef, nanglecoef, anglecoef,
 				 ndihecoef, dihecoef, nimdihecoef, imdihecoef, ncmapcoef, cmapcoef,

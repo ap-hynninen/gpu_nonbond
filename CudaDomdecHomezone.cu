@@ -264,23 +264,23 @@ int CudaDomdecHomezone::build(hostXYZ<double>& coord) {
 // Update Homezone
 // Returns the number of coordinates in the homezone
 //
-int CudaDomdecHomezone::update(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, cudaStream_t stream) {
+int CudaDomdecHomezone::update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream) {
 
-  assert(coord->n == coord2->n);
-  assert(coord->stride == coord2->stride);
+  assert(coord.n == coord2.n);
+  assert(coord.stride == coord2.stride);
 
-  reallocate<int>(&destind, &destind_len, coord->n, 1.2f);
-  reallocate<neighcomm_t>(&neighsend, &neighsend_len, coord->n, 1.2f);
+  reallocate<int>(&destind, &destind_len, coord.n, 1.2f);
+  reallocate<neighcomm_t>(&neighsend, &neighsend_len, coord.n, 1.2f);
   if (!cudaMPI.isCudaAware()) {
-    reallocate_host<neighcomm_t>(&h_neighsend, &h_neighsend_len, coord->n, 1.2f);
+    reallocate_host<neighcomm_t>(&h_neighsend, &h_neighsend_len, coord.n, 1.2f);
   }
 
   int nthread = 1024;
-  int nblock = (coord->n - 1)/nthread + 1;
+  int nblock = (coord.n - 1)/nthread + 1;
 
   // Assign coordinates into neighboring, or home, sub-boxes
   fill_neighsend_kernel<<< nblock, nthread, 0, stream >>>
-    (coord->n, coord->stride, coord->data,
+    (coord.n, coord.stride, coord.data,
      domdec.get_inv_boxx(), domdec.get_inv_boxy(), domdec.get_inv_boxz(),
      domdec.get_nx(), domdec.get_ny(), domdec.get_nz(), nneigh,
      domdec.get_homeix(), domdec.get_homeiy(), domdec.get_homeiz(),
@@ -296,7 +296,7 @@ int CudaDomdecHomezone::update(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, 
 
   // Pack coordinate data into send buffer
   pack_neighsend_kernel<<< nblock, nthread, 0, stream >>>
-    (coord->n, coord->stride, coord->data, coord2->data, destind, get_loc2glo_ptr(),
+    (coord.n, coord.stride, coord.data, coord2.data, destind, get_loc2glo_ptr(),
      pos_neighind, neighsend);
   cudaCheck(cudaGetLastError());
 
@@ -354,7 +354,7 @@ int CudaDomdecHomezone::update(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, 
 
   // Unpack data on GPU
   unpack_neighrecv_kernel<<< nblock, nthread, 0, stream >>>
-    (coord->stride, nneigh, pos_neighind, neighrecv, coord->data, coord2->data, get_loc2glo_ptr());
+    (coord.stride, nneigh, pos_neighind, neighrecv, coord.data, coord2.data, get_loc2glo_ptr());
   cudaCheck(cudaGetLastError());
 
   return count_tot;

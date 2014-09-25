@@ -141,7 +141,7 @@ void CudaDomdec::build_homezone(hostXYZ<double>& coord) {
 // Update is done according to coord, coord2 is a hangaround
 // NOTE: Used during dynamics
 //
-void CudaDomdec::update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2, cudaStream_t stream) {
+void CudaDomdec::update_homezone(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream) {
   if (numnode > 1) {
     this->zone_ncoord[0] = homezone.update(coord, coord2, stream);
     for (int i=1;i < 8;i++) zone_ncoord[i] = 0;
@@ -152,7 +152,7 @@ void CudaDomdec::update_homezone(cudaXYZ<double> *coord, cudaXYZ<double> *coord2
 //
 // Communicate coordinates
 //
-void CudaDomdec::comm_coord(cudaXYZ<double> *coord, const bool update, cudaStream_t stream) {
+void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStream_t stream) {
 
   D2Dcomm.comm_coord(coord, homezone.get_loc2glo(), update);
 
@@ -233,7 +233,7 @@ void CudaDomdec::comm_coord(cudaXYZ<double> *coord, const bool update, cudaStrea
     nthread = 512;
     nblock = (zone_pcoord[7] - 1)/nthread + 1;
     calc_xyz_shift<<< nblock, nthread, 0, stream >>>
-      (zone_pcoord[7], coord->stride, coord->data,
+      (zone_pcoord[7], coord.stride, coord.data,
        x0, y0, z0, this->get_inv_boxx(), this->get_inv_boxy(), this->get_inv_boxz(), xyz_shift0);
     cudaCheck(cudaGetLastError());
   }
@@ -249,16 +249,16 @@ void CudaDomdec::comm_force(Force<long long int>& force, cudaStream_t stream) {
 //
 // Re-order coordinates using ind_sorted: coord_src => coord_dst
 //
-void CudaDomdec::reorder_coord(cudaXYZ<double> *coord_src, cudaXYZ<double> *coord_dst,
+void CudaDomdec::reorder_coord(cudaXYZ<double>& coord_src, cudaXYZ<double>& coord_dst,
 			       const int* ind_sorted, cudaStream_t stream) {
-  assert(coord_src->match(coord_dst));
-  assert(zone_pcoord[7] == coord_src->n);
+  assert(coord_src.match(&coord_dst));
+  assert(zone_pcoord[7] == coord_src.n);
 
   if (numnode == 1) {
     int nthread = 512;
     int nblock = (zone_pcoord[7] - 1)/nthread + 1;
     reorder_coord_kernel<<< nblock, nthread, 0, stream >>>
-      (zone_pcoord[7], coord_src->stride, ind_sorted, coord_src->data, coord_dst->data);
+      (zone_pcoord[7], coord_src.stride, ind_sorted, coord_src.data, coord_dst.data);
     cudaCheck(cudaGetLastError());
   } else {
     std::cerr << "CudaDomdec::reorder_coord, not ready for numnode > 1" << std::endl;

@@ -40,7 +40,7 @@ protected:
   static const double TIMFAC = 4.88882129E-02;
 
   // Total number of coordinates in the system
-  int ncoord;
+  int ncoord_glo;
 
   // timestep in ps (10e-12 s)
   double timestep_ps;
@@ -71,7 +71,7 @@ public:
   // Class creator
   //
   LeapfrogIntegrator() {
-    ncoord = 0;
+    ncoord_glo = 0;
     forcefield = NULL;
     x = NULL;
     y = NULL;
@@ -140,7 +140,7 @@ public:
     char filename[256];
     sprintf(filename,"%s%d.txt",base,istep);
     FILE *handle = fopen(filename,"wt");
-    for (int i=0;i < ncoord;i++) {
+    for (int i=0;i < ncoord_glo;i++) {
       fprintf(handle,"%lf %lf %lf\n",x[i],y[i],z[i]);
     }
     fclose(handle);
@@ -162,16 +162,15 @@ public:
   //
   // Initialize
   //
-  void init(const int ncoord,
+  void init(const int ncoord_glo,
 	    const double *x, const double *y, const double *z,
 	    const double *dx, const double *dy, const double *dz,
 	    const double *mass) {
-    this->ncoord = ncoord;
-    spec_init(ncoord, x, y, z, dx, dy, dz, mass);
+    this->ncoord_glo = ncoord_glo;
+    spec_init(x, y, z, dx, dy, dz, mass);
   }
 
-  virtual void spec_init(const int ncoord_glo,
-			 const double *x, const double *y, const double *z,
+  virtual void spec_init(const double *x, const double *y, const double *z,
 			 const double *dx, const double *dy, const double *dz,
 			 const double *mass)=0;
   
