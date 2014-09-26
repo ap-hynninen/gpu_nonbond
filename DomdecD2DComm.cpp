@@ -43,18 +43,18 @@ void DomdecD2DComm::setup_comm_nodes() {
   z_recv_node.resize(nz_comm);
 
   for (int i=0;i < nx_comm;i++) {
-    x_send_node[i] = domdec.get_nodeind_pbc(homeix-(i+1), homeiy, homeiz);
-    x_recv_node[i] = domdec.get_nodeind_pbc(homeix+(i+1), homeiy, homeiz);
+    x_send_node.at(i) = domdec.get_nodeind_pbc(homeix-(i+1), homeiy, homeiz);
+    x_recv_node.at(i) = domdec.get_nodeind_pbc(homeix+(i+1), homeiy, homeiz);
   }
 
   for (int i=0;i < ny_comm;i++) {
-    y_send_node[i] = domdec.get_nodeind_pbc(homeix, homeiy-(i+1), homeiz);
-    y_recv_node[i] = domdec.get_nodeind_pbc(homeix, homeiy+(i+1), homeiz);
+    y_send_node.at(i) = domdec.get_nodeind_pbc(homeix, homeiy-(i+1), homeiz);
+    y_recv_node.at(i) = domdec.get_nodeind_pbc(homeix, homeiy+(i+1), homeiz);
   }
 
   for (int i=0;i < nz_comm;i++) {
-    z_send_node[i] = domdec.get_nodeind_pbc(homeix, homeiy, homeiz-(i+1));
-    z_recv_node[i] = domdec.get_nodeind_pbc(homeix, homeiy, homeiz+(i+1));
+    z_send_node.at(i) = domdec.get_nodeind_pbc(homeix, homeiy, homeiz-(i+1));
+    z_recv_node.at(i) = domdec.get_nodeind_pbc(homeix, homeiy, homeiz+(i+1));
   }
 
 }

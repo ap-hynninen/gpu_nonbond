@@ -37,48 +37,56 @@ class CudaDomdecHomezone {
   // NOTE: also serves as a list of atom on this node
   thrust::device_vector<int> loc2glo;
 
-  // num_neighind[nneigh] = number of atoms that are going to each box
-  int *num_neighind;
+  // num_send[nneigh] = number of atoms that are going to send each box
+  int *num_send;
 
-  // Exclusive cumulative sum of num_neighind
-  int *pos_neighind;
+  // Exclusive cumulative sum of num_send
+  int *pos_send;
 
   // destind[ncoord] = destination node index for each coordinate
   int destind_len;
   int *destind;
 
   // Neighbor communication buffers
-  int neighsend_len;
-  neighcomm_t *neighsend;
+  int send_len;
+  neighcomm_t *send;
 
-  int neighrecv_len;
-  neighcomm_t *neighrecv;
+  int recv_len;
+  neighcomm_t *recv;
 
   // ------------
   // Host memory
   // ------------
   // Neighbor node list (i.e. these are the MPI node numbers)
   // neighnode[nneigh]
-  int *neighnode;
+  std::vector<int> neighnode;
 
-  // Host version of pos_neighind
-  int *h_pos_neighind;
+  // Index of mynode in neighnode (i.e. neighnode[imynode] = domdec.get_mynode())
+  int imynode;
+
+  // Host version of num_send and pos_send
+  int *h_num_send;
+  int *h_pos_send;
 
   // Host version, only used when no cuda-aware MPI is available
-  int h_neighsend_len;
-  neighcomm_t *h_neighsend;
+  int h_send_len;
+  neighcomm_t *h_send;
 
-  int h_neighrecv_len;
-  neighcomm_t *h_neighrecv;
+  int h_recv_len;
+  neighcomm_t *h_recv;
+
+  // Number of coordinates we receive from each neighbor node
+  std::vector<int> num_recv;
+  std::vector<int> pos_recv;
 
   // MPI requests
-  MPI_Request *send_request;
+  std::vector<MPI_Request> request;
 
  public:
   CudaDomdecHomezone(Domdec& domdec, CudaMPI& cudaMPI);
   ~CudaDomdecHomezone();
 
-  int build(hostXYZ<double>& coord);
+  int build(hostXYZ<double>& h_coord);
   int update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream=0);
 
   int* get_loc2glo_ptr() {return thrust::raw_pointer_cast(loc2glo.data());}

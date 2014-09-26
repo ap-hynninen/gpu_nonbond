@@ -40,6 +40,13 @@ public:
     this->type = type;
   }
 
+  template <typename P>
+  hostXYZ(cudaXYZ<P> &xyz, int type=PINNED) {
+    this->type = type;
+    this->resize(xyz.n);
+    this->set_data_sync(xyz);
+  }
+
   ~hostXYZ() {
     this->n = 0;
     this->stride = 0;

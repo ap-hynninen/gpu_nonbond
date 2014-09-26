@@ -69,10 +69,10 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded& domde
 				     const int vdw_model, const int elec_model,
 				     const int nvdwparam, const float *h_vdwparam,
 				     const float *h_vdwparam14,
-				     const int *h_glo_vdwtype, const float *h_q,
+				     const int *h_glo_vdwtype, const float *h_glo_q,
 				     CudaDomdecRecip* recip, CudaDomdecRecipComm& recipComm) : 
-  domdec(domdec), recip(recip), domdec_bonded(domdec_bonded), nlist(nlist), recipComm(recipComm), kappa(kappa),
-  recip_force_len(0), recip_force(NULL) {
+  domdec(domdec), recip(recip), domdec_bonded(domdec_bonded), nlist(nlist), recipComm(recipComm),
+  kappa(kappa), recip_force_len(0), recip_force(NULL) {
 
   // Create streams
   cudaCheck(cudaStreamCreate(&direct_stream[0]));
@@ -109,8 +109,8 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded& domde
   if (recip != NULL) recip->set_stream(recip_stream);
 
   // Copy charges
-  allocate<float>(&q, domdec.get_ncoord_glo());
-  copy_HtoD<float>(h_q, q, domdec.get_ncoord_glo());
+  allocate<float>(&glo_q, domdec.get_ncoord_glo());
+  copy_HtoD<float>(h_glo_q, glo_q, domdec.get_ncoord_glo());
 
   allocate<int>(&d_heuristic_flag, 1);
   allocate_host<int>(&h_heuristic_flag, 1);
@@ -125,7 +125,7 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded& domde
 CudaPMEForcefield::~CudaPMEForcefield() {
   deallocate<int>(&d_heuristic_flag);
   deallocate_host<int>(&h_heuristic_flag);
-  deallocate<float>(&q);
+  deallocate<float>(&glo_q);
   deallocate<int>(&glo_vdwtype);
   if (recip_force != NULL) deallocate<float3>(&recip_force);
   if (h_loc2glo != NULL) delete [] h_loc2glo;
@@ -181,14 +181,18 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // NOTE: Builds domdec.loc2glo
     domdec.update_homezone(coord, prev_step);
 
+    fprintf(stderr,"%d: domdec.get_ncoord()=%d\n",domdec.get_mynode(),domdec.get_ncoord());
+
     // Communicate coordinates
     // NOTE: Builds rest of domdec.loc2glo and domdec.xyz_shift
     domdec.comm_coord(coord, true);
 
+    return;
+
     // Copy: coord => xyzq_copy
     // NOTE: coord and xyz_shift are already in the order determined by domdec.loc2glo,
-    //       however, q is in the original global order.
-    xyzq_copy.set_xyzq(coord, q, domdec.get_loc2glo_ptr(), domdec.get_xyz_shift(),
+    //       however, glo_q is in the original global order.
+    xyzq_copy.set_xyzq(coord, glo_q, domdec.get_loc2glo_ptr(), domdec.get_xyz_shift(),
 		       domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz());
 
     // Sort coordinates

@@ -38,7 +38,19 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
   char *h_recvbuf;
 
   //------------
-  std::vector<MPI_Request> request;
+  //std::vector<MPI_Request> request;
+
+  // Number of items to send and position in bytes
+  std::vector<int> nsend;
+  std::vector<int> psend;
+
+  // Number of items to recv and position in bytes
+  std::vector<int> nrecv;
+  std::vector<int> precv;
+
+  void computeByteNumPos(const int nc_comm, std::vector<int>& c_nsend,
+			 std::vector<int>& nsend, std::vector<int>& psend,
+			 const bool update);
 
  public:
 

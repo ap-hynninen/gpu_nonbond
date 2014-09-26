@@ -32,6 +32,12 @@ public:
     this->data = data;
   }
 
+  template <typename P>
+  cudaXYZ(hostXYZ<P> &xyz) {
+    this->resize(xyz.n);
+    this->set_data(xyz);
+  }
+
   ~cudaXYZ() {
     this->n = 0;
     this->stride = 0;

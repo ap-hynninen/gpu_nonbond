@@ -31,7 +31,7 @@ private:
   double roff, ron;
   
   // Global charge table
-  float *q;
+  float *glo_q;
 
   // Coordinates in XYZQ format
   XYZQ xyzq;
@@ -153,7 +153,7 @@ public:
 		    const int vdw_model, const int elec_model,
 		    const int nvdwparam, const float *h_vdwparam,
 		    const float *h_vdwparam14,
-		    const int* h_glo_vdwtype, const float *h_q,
+		    const int* h_glo_vdwtype, const float *h_glo_q,
 		    CudaDomdecRecip* recip, CudaDomdecRecipComm& recipComm);
   ~CudaPMEForcefield();
 

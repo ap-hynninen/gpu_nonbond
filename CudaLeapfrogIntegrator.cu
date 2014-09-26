@@ -219,7 +219,7 @@ void CudaLeapfrogIntegrator::spec_init(const double *x, const double *y, const d
     exit(1);
   }
 
-  // Create host array for coordinates
+  // Create temporary host array for coordinates
   hostXYZ<double> h_prev_coord(ncoord_glo, NON_PINNED);
   h_prev_coord.set_data_fromhost(x, y, z);
 
@@ -227,8 +227,6 @@ void CudaLeapfrogIntegrator::spec_init(const double *x, const double *y, const d
   std::vector<int> h_loc2glo;
   CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
   p->assignCoordToNodes(h_prev_coord, h_loc2glo);
-
-  //fprintf(stderr,"h_loc2glo.size()=%d\n",h_loc2glo.size());
 
   // Resize and set arrays
   step.resize(h_loc2glo.size());
@@ -260,7 +258,6 @@ void CudaLeapfrogIntegrator::spec_init(const double *x, const double *y, const d
   h_step.resize(ncoord_glo);
   h_force.resize(ncoord_glo);
 
-  //exit(1);
 }
 
 //
@@ -330,7 +327,8 @@ void CudaLeapfrogIntegrator::calc_step() {
 void CudaLeapfrogIntegrator::pre_calc_force() {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    cudaCheck(cudaStreamWaitEvent(stream, done_integrate_event, 0));
+    //cudaCheck(cudaStreamWaitEvent(stream, done_integrate_event, 0));
+    cudaCheck(cudaStreamSynchronize(stream));
     p->pre_calc(coord, prev_step);
   }
 }

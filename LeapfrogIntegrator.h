@@ -198,6 +198,7 @@ public:
       // (array re-orderings, if applicable)
       //
       pre_calc_force();
+      return;
       bool last_step = (istep == nstep-1);
       bool calc_energy = last_step;
       bool calc_virial = const_pressure() || last_step;

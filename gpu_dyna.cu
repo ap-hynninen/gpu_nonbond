@@ -128,7 +128,7 @@ void test() {
   const bool cudaAware = false;
 
   // Very simple node setup
-  bool pure_recip = true;
+  bool pure_recip = false;
   int nx;
   int ny;
   int nz;
@@ -175,15 +175,15 @@ void test() {
   // Get handle to the entire domain
   MPICheck(MPI_Comm_group(MPI_COMM_WORLD, &group_world));
   
-  if (isDirect) {
-    MPICheck(MPI_Group_incl(group_world, direct_nodes.size(), direct_nodes.data(), &group_direct));
-    MPICheck(MPI_Comm_create(MPI_COMM_WORLD, group_direct, &comm_direct));
-  }
+  //if (isDirect) {
+  MPICheck(MPI_Group_incl(group_world, direct_nodes.size(), direct_nodes.data(), &group_direct));
+  MPICheck(MPI_Comm_create(MPI_COMM_WORLD, group_direct, &comm_direct));
+  //}
   
-  if (isRecip) {
-    MPICheck(MPI_Group_incl(group_world, recip_nodes.size(), recip_nodes.data(), &group_recip));
-    MPICheck(MPI_Comm_create(MPI_COMM_WORLD, group_recip, &comm_recip));
-  }
+  //if (isRecip) {
+  MPICheck(MPI_Group_incl(group_world, recip_nodes.size(), recip_nodes.data(), &group_recip));
+  MPICheck(MPI_Comm_create(MPI_COMM_WORLD, group_recip, &comm_recip));
+  //}
 
   CudaDomdecRecip *recip = NULL;
   CudaDomdecRecipComm recipComm(comm_recip, comm_direct_recip,

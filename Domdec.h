@@ -96,10 +96,20 @@ class Domdec {
   // NOTE: deals correctly with periodic boundary conditions
   int get_nodeind_pbc(const int ix, const int iy, const int iz) {
     // ixt = 0...nx-1
-    int ixt = (ix + (abs(ix)/nx)*nx) % nx;
-    int iyt = (iy + (abs(iy)/ny)*ny) % ny;
-    int izt = (iz + (abs(iz)/nz)*nz) % nz;
-    return ix + iy*nx + iz*nx*ny;
+    //int ixt = (ix + (abs(ix)/nx)*nx) % nx;
+    //int iyt = (iy + (abs(iy)/ny)*ny) % ny;
+    //int izt = (iz + (abs(iz)/nz)*nz) % nz;
+    int ixt = ix;
+    while (ixt < 0) ixt += nx;
+    while (ixt >= nx) ixt -= nx;
+    int iyt = iy;
+    while (iyt < 0) iyt += ny;
+    while (iyt >= ny) iyt -= ny;
+    int izt = iz;
+    while (izt < 0) izt += nz;
+    while (izt >= nz) izt -= nz;
+
+    return ixt + iyt*nx + izt*nx*ny;
   }
 
 };
