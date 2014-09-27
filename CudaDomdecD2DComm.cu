@@ -6,7 +6,6 @@
 #include <thrust/gather.h>
 #include "CudaDomdecD2DComm.h"
 #include "mpi_utils.h"
-#include "hostXYZ.h"
 
 //################################################################################
 //################################################################################
@@ -90,18 +89,6 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
     atom_pos.resize(coord.n+1);
   }
 
-  /*
-  if (domdec.get_mynode() == 0) {
-    hostXYZ<double> h_coord(coord);
-    for (int i=0;i < 20;i++) {
-      double z = h_coord.data[i+h_coord.stride*2];
-      double zf = z*inv_boxz + 0.5;
-      zf -= floor(zf);
-      fprintf(stderr,"%d %lf %lf\n",i,z,zf);
-    }
-  }
-  */
-
   if (nz_comm > 0) {
 
     double rnl_grouped = rnl;
@@ -132,8 +119,6 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	z_nsend.at(i) = atom_pos[coord.n];
 	z_psend.at(i+1) = z_psend.at(i) + z_nsend.at(i);
 
-	fprintf(stderr,"%d: z_nsend=%d\n",domdec.get_mynode(),z_nsend.at(i));
-
 	z_send_loc.at(i).resize(z_nsend.at(i));
 
 	// atom_pos[] now contains position to store each atom
@@ -149,9 +134,6 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	int req_sendbuf_len = pos + alignInt(z_nsend.at(i),2)*sizeof(int) + 
 	  z_nsend.at(i)*3*sizeof(double);
 	reallocate<char>(&sendbuf, &sendbuf_len, req_sendbuf_len, 1.5f);
-
-	//	fprintf(stderr,"%d: pos=%d size=%d buflen=%d\n",domdec.get_mynode(),
-	//	pos,z_send_loc.at(i).size()*sizeof(int),sendbuf_len);
 
 	// Get int pointer to sendbuf
 	thrust::device_ptr<int> sendbuf_ind_ptr((int *)&sendbuf[pos]);
@@ -170,9 +152,6 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       // Get pointer to coordinates
       thrust::device_ptr<double> xyz_ptr(&coord.data[0]);
 
-      fprintf(stderr,"%d: pos=%d size=%d buflen=%d\n",domdec.get_mynode(),
-	      pos,z_send_loc.at(i).size()*3*sizeof(double),sendbuf_len);
-      
       // Pack in coordinates to sendbuf[]
       thrust::gather(z_send_loc.at(i).begin(), z_send_loc.at(i).end(),
 		     xyz_ptr, sendbuf_xyz_ptr);
@@ -200,8 +179,6 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       }
       // Send & receive data counts
       for (int i=0;i < nz_comm;i++) {
-	fprintf(stderr,"%d: nsend=%d send_node=%d recv_node=%d\n",domdec.get_mynode(),z_nsend.at(i),
-		z_send_node.at(i),z_recv_node.at(i));
 	MPICheck(MPI_Sendrecv(&z_nsend.at(i), 1, MPI_INT, z_send_node.at(i), COUNT_TAG,
 			      &z_nrecv.at(i), 1, MPI_INT, z_recv_node.at(i), COUNT_TAG,
 			      cudaMPI.get_comm(), MPI_STATUS_IGNORE));
@@ -220,6 +197,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       if (!cudaMPI.isCudaAware()) {
 	reallocate_host<char>(&h_recvbuf, &h_recvbuf_len, precv.at(nz_comm), 1.2f);
       }
+      z_recv_ind.resize(precv.at(nz_comm));
     }
 
     // Send & Recv data
@@ -241,34 +219,36 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       }
     }    
 
-    /*
-    int nrequest = 0;
-    // Receive data
-    for (int i=0;i < nz_comm;i++) {
-      if (z_nrecv[i] > 0) {
-	MPICheck(cudaMPI.Irecv(&recvbuf[z_precv[i]], z_nrecv[i]*buf_elem_size, z_recv_node[i], DATA_TAG,
-			       &request[nrequest++], &h_recvbuf[z_precv[i]]));
-      }
-    }
-
-    // Send data
-    for (int i=0;i < nz_comm;i++) {
-      if (z_nsend[i] > 0) {
-	MPICheck(cudaMPI.Isend(&sendbuf[z_psend[i]], z_nsend[i]*buf_elem_size, z_send_node[i], DATA_TAG,
-			       &request[nrequest++], &h_sendbuf[z_psend[i]]));
-      }
-    }
-
-    // For for send and receive to finish
-    MPICheck(MPI_Waitall(nrequest, request.data(), MPI_STATUSES_IGNORE));
-    */
-
     // Unpack data from +z-direction into correct arrays
     for (int i=0;i < nz_comm;i++) {
+      int pos = 0;
+      int src_pos = precv.at(i);
       if (update) {
+	// Copy coordinates indices to z_recv_ind
+	// format = indices[alignInt(nrecv.at(i),2) x int]
+	thrust::device_ptr<double> ind_ptr((double *)&recvbuf[src_pos]);
+	thrust::copy(ind_ptr, ind_ptr+z_nrecv.at(i), z_recv_ind.begin()+pos);
+	pos += z_nrecv.at(i);
+	src_pos += alignInt(z_nrecv.at(i),2)*sizeof(int);
       }
-    }
+      // Unpack coordinates
+      // format = X[nrecv.at(i) x double] | Y[nrecv.at(i) x double] | Z[nrecv.at(i) x double]
+      
+      thrust::device_ptr<double> x_src_ptr((double *)&recvbuf[src_pos]);
+      thrust::device_ptr<double> x_dst_ptr(&coord.data[0]);
+      thrust::copy(x_src_ptr, x_src_ptr+z_nrecv.at(i), x_dst_ptr);
+      src_pos += z_nrecv.at(i)*sizeof(double);
 
+      thrust::device_ptr<double> y_src_ptr((double *)&recvbuf[src_pos]);
+      thrust::device_ptr<double> y_dst_ptr(&coord.data[coord.stride]);
+      thrust::copy(y_src_ptr, y_src_ptr+z_nrecv.at(i), y_dst_ptr);
+      src_pos += z_nrecv.at(i)*sizeof(double);
+
+      thrust::device_ptr<double> z_src_ptr((double *)&recvbuf[src_pos]);
+      thrust::device_ptr<double> z_dst_ptr(&coord.data[coord.stride*2]);
+      thrust::copy(z_src_ptr, z_src_ptr+z_nrecv.at(i), z_dst_ptr);
+      src_pos += z_nrecv.at(i)*sizeof(double);
+    }
   } // if (nz_comm > 0)
   
   if (ny_comm > 0) {
