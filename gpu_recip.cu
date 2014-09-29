@@ -130,8 +130,7 @@ void test4() {
   grid.r2c_fft();
   grid.scalar_sum(recip, kappa, true, true);
   grid.c2r_fft();
-  //grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.xyz.stride, force.xyz.data);
+  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
 
   double energy, energy_self, virial[9];
   grid.get_energy_virial(kappa, true, true, energy, energy_self, virial);
@@ -275,10 +274,10 @@ void test4() {
 
   // Calculate forces
   //  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.xyz.stride, force.xyz.data);
+  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
 
   tol = 3.3e-4;
-  if (!force_comp.compare(&force, tol, max_diff)) {
+  if (!force_comp.compare(force, tol, max_diff)) {
     std::cout<<"force comparison FAILED"<<std::endl;
   } else {
     std::cout<<"force comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
@@ -350,7 +349,7 @@ void test6() {
   grid.scalar_sum(recip, kappa, true, true);
   grid.c2r_fft();
   //grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.xyz.stride, force.xyz.data);
+  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
 
   double energy, energy_self, virial[9];
   grid.get_energy_virial(kappa, true, true, energy, energy_self, virial);
@@ -494,10 +493,10 @@ void test6() {
 
   // Calculate forces
   //  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.xyz.stride, force.xyz.data);
+  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
 
   tol = 3.6e-4;
-  if (!force_comp.compare(&force, tol, max_diff)) {
+  if (!force_comp.compare(force, tol, max_diff)) {
     std::cout<<"force comparison FAILED"<<std::endl;
   } else {
     std::cout<<"force comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;

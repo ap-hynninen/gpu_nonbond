@@ -137,6 +137,7 @@ void test() {
   std::vector<int> direct_nodes;
   std::vector<int> recip_nodes;
   if (pure_recip && numnode > 1) {
+    // Separate Recip node
     direct_nodes.resize(numnode-1);
     recip_nodes.resize(1);
     nx = 1;
@@ -161,6 +162,14 @@ void test() {
     isRecip = (mynode == numnode-1) ? true : false;
     for (int i=0;i < numnode;i++) direct_nodes.at(i) = i;
     recip_nodes.at(0) = numnode-1;
+  }
+
+  if (isDirect && isRecip) {
+    std::cout << "Node " << mynode << " is Direct+Recip" << std::endl;
+  } else if (isDirect) {
+    std::cout << "Node " << mynode << " is Direct" << std::endl;
+  } else if (isRecip) {
+    std::cout << "Node " << mynode << " is Recip" << std::endl;
   }
 
   // MPI communicators

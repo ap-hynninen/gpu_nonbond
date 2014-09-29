@@ -85,8 +85,8 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 
   // Resize arrays
   if (nx_comm + ny_comm + nz_comm > 0 && update) {
-    atom_pick.resize(coord.n+1);
-    atom_pos.resize(coord.n+1);
+    atom_pick.resize(coord.size()+1);
+    atom_pos.resize(coord.size()+1);
   }
 
   if (nz_comm > 0) {
@@ -105,10 +105,10 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	fprintf(stderr,"%d: homeiz=%d zf=%lf\n",domdec.get_mynode(),homeiz,zf);
 
 	// Get pointer to z coordinates
-	thrust::device_ptr<double> z_ptr(&coord.data[coord.stride*2]);
+	thrust::device_ptr<double> z_ptr(coord.z());
 
 	// Pick atoms that are in the communication region
-	thrust::transform(z_ptr, z_ptr + coord.n, atom_pick.begin(),
+	thrust::transform(z_ptr, z_ptr + coord.size(), atom_pick.begin(),
 			  z_pick_functor(zf + rnl*inv_boxz, inv_boxz));
 
 	// atom_pick[] now contains atoms that are picked for z-communication
@@ -116,7 +116,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	thrust::exclusive_scan(atom_pick.begin(), atom_pick.end(), atom_pos.begin());
 	
 	// Count the number of atoms we are adding to the buffer
-	z_nsend.at(i) = atom_pos[coord.n];
+	z_nsend.at(i) = atom_pos[coord.size()];
 	z_psend.at(i+1) = z_psend.at(i) + z_nsend.at(i);
 
 	z_send_loc.at(i).resize(z_nsend.at(i));
@@ -124,7 +124,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	// atom_pos[] now contains position to store each atom
 	// Scatter to produce packed atom index table
 	thrust::scatter_if(thrust::make_counting_iterator(0),
-			   thrust::make_counting_iterator(coord.n),
+			   thrust::make_counting_iterator(coord.size()),
 			   atom_pos.begin(), atom_pick.begin(),
 			   z_send_loc.at(i).begin());
 	
@@ -149,18 +149,18 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       // Get double pointer to send buffer
       thrust::device_ptr<double> sendbuf_xyz_ptr((double *)&sendbuf[pos]);
 
-      // Get pointer to coordinates
-      thrust::device_ptr<double> xyz_ptr(&coord.data[0]);
-
       // Pack in coordinates to sendbuf[]
+      thrust::device_ptr<double> x_ptr(coord.x());
       thrust::gather(z_send_loc.at(i).begin(), z_send_loc.at(i).end(),
-		     xyz_ptr, sendbuf_xyz_ptr);
+		     x_ptr, sendbuf_xyz_ptr);
 
-      thrust::gather(z_send_loc.at(i).begin(), z_send_loc.at(i).end(), xyz_ptr + coord.stride,
-		     sendbuf_xyz_ptr + z_nsend.at(i));
+      thrust::device_ptr<double> y_ptr(coord.y());
+      thrust::gather(z_send_loc.at(i).begin(), z_send_loc.at(i).end(),
+		     y_ptr, sendbuf_xyz_ptr + z_nsend.at(i));
 
-      thrust::gather(z_send_loc.at(i).begin(), z_send_loc.at(i).end(), xyz_ptr + coord.stride*2,
-		     sendbuf_xyz_ptr + 2*z_nsend.at(i));
+      thrust::device_ptr<double> z_ptr(coord.z());
+      thrust::gather(z_send_loc.at(i).begin(), z_send_loc.at(i).end(),
+		     z_ptr, sendbuf_xyz_ptr + 2*z_nsend.at(i));
 
       pos += z_nsend[i]*3*sizeof(double);
     } // for (int i=1;i < nz_comm;i++)
@@ -235,17 +235,17 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       // format = X[nrecv.at(i) x double] | Y[nrecv.at(i) x double] | Z[nrecv.at(i) x double]
       
       thrust::device_ptr<double> x_src_ptr((double *)&recvbuf[src_pos]);
-      thrust::device_ptr<double> x_dst_ptr(&coord.data[0]);
+      thrust::device_ptr<double> x_dst_ptr(coord.x());
       thrust::copy(x_src_ptr, x_src_ptr+z_nrecv.at(i), x_dst_ptr);
       src_pos += z_nrecv.at(i)*sizeof(double);
 
       thrust::device_ptr<double> y_src_ptr((double *)&recvbuf[src_pos]);
-      thrust::device_ptr<double> y_dst_ptr(&coord.data[coord.stride]);
+      thrust::device_ptr<double> y_dst_ptr(coord.y());
       thrust::copy(y_src_ptr, y_src_ptr+z_nrecv.at(i), y_dst_ptr);
       src_pos += z_nrecv.at(i)*sizeof(double);
 
       thrust::device_ptr<double> z_src_ptr((double *)&recvbuf[src_pos]);
-      thrust::device_ptr<double> z_dst_ptr(&coord.data[coord.stride*2]);
+      thrust::device_ptr<double> z_dst_ptr(coord.z());
       thrust::copy(z_src_ptr, z_src_ptr+z_nrecv.at(i), z_dst_ptr);
       src_pos += z_nrecv.at(i)*sizeof(double);
     }

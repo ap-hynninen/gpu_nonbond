@@ -29,8 +29,10 @@ __host__ __device__ inline int dix2ind(int dix, int diy, int diz,
 //
 // Update homezone atomlist. Simple version using atomicAdd (does this have to be faster?)
 //
-__global__ void fill_send_kernel(const int ncoord, const int stride,
-				 const double* __restrict__ coord,
+__global__ void fill_send_kernel(const int ncoord,
+				 const double* __restrict__ xin,
+				 const double* __restrict__ yin,
+				 const double* __restrict__ zin,
 				 const double inv_boxx, const double inv_boxy, const double inv_boxz,
 				 const int nx, const int ny, const int nz, const int nneigh,
 				 const int homeix, const int homeiy, const int homeiz,
@@ -49,9 +51,9 @@ __global__ void fill_send_kernel(const int ncoord, const int stride,
   __syncthreads();
   bool error = false;
   if (i < ncoord) {
-    double x = coord[i]*inv_boxx           + 0.5;
-    double y = coord[i+stride]*inv_boxy    + 0.5;
-    double z = coord[i+stride*2]*inv_boxz  + 0.5;
+    double x = xin[i]*inv_boxx + 0.5;
+    double y = yin[i]*inv_boxy + 0.5;
+    double z = zin[i]*inv_boxz + 0.5;
     x -= floor(x);
     y -= floor(y);
     z -= floor(z);
@@ -125,9 +127,13 @@ __global__ void calc_pos_send_kernel(const int nneigh,
 //
 // Packs send -buffer
 //
-__global__ void pack_send_kernel(const int ncoord, const int stride,
-				 const double* __restrict__ coord,
-				 const double* __restrict__ coord2,
+__global__ void pack_send_kernel(const int ncoord,
+				 const double* __restrict__ x1,
+				 const double* __restrict__ y1,
+				 const double* __restrict__ z1,
+				 const double* __restrict__ x2,
+				 const double* __restrict__ y2,
+				 const double* __restrict__ z2,
 				 const int* __restrict__ destind,
 				 const int* __restrict__ loc2glo,
 				 int* __restrict__ pos_send,
@@ -137,32 +143,36 @@ __global__ void pack_send_kernel(const int ncoord, const int stride,
     int ind = destind[i];
     int pos = atomicAdd(&pos_send[ind], 1);
     send[pos].gloind = loc2glo[i];
-    send[pos].x1 = coord[i];
-    send[pos].y1 = coord[i+stride];
-    send[pos].z1 = coord[i+stride*2];
-    send[pos].x2 = coord2[i];
-    send[pos].y2 = coord2[i+stride];
-    send[pos].z2 = coord2[i+stride*2];
+    send[pos].x1 = x1[i];
+    send[pos].y1 = y1[i];
+    send[pos].z1 = z1[i];
+    send[pos].x2 = x2[i];
+    send[pos].y2 = y2[i];
+    send[pos].z2 = z2[i];
   }
 }
 
 //
 // Unpacks received data
 //
-__global__ void unpack_recv_kernel(const int stride, const int num_recv_tot,
+__global__ void unpack_recv_kernel(const int num_recv_tot,
 				   const CudaDomdecHomezone::neighcomm_t* __restrict__ recv,
-				   double* __restrict__ coord,
-				   double* __restrict__ coord2,
+				   double* __restrict__ x1,
+				   double* __restrict__ y1,
+				   double* __restrict__ z1,
+				   double* __restrict__ x2,
+				   double* __restrict__ y2,
+				   double* __restrict__ z2,
 				   int* __restrict__ loc2glo) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
   if (i < num_recv_tot) {
-    loc2glo[i]         = recv[i].gloind;
-    coord[i]           = recv[i].x1;
-    coord[i+stride]    = recv[i].y1;
-    coord[i+stride*2]  = recv[i].z1;
-    coord2[i]          = recv[i].x2;
-    coord2[i+stride]   = recv[i].y2;
-    coord2[i+stride*2] = recv[i].z2;
+    loc2glo[i]= recv[i].gloind;
+    x1[i]     = recv[i].x1;
+    y1[i]     = recv[i].y1;
+    z1[i]     = recv[i].z1;
+    x2[i]     = recv[i].x2;
+    y2[i]     = recv[i].y2;
+    z2[i]     = recv[i].z2;
   }
 }
 
@@ -234,9 +244,6 @@ CudaDomdecHomezone::CudaDomdecHomezone(Domdec& domdec, CudaMPI& cudaMPI) :
   imynode = dix2ind(0, 0, 0, domdec.get_nx(), domdec.get_ny(), domdec.get_nz(),
 		    nxt, nxt*nyt);
 
-  fprintf(stderr,"%d: %d %d, imynode = %d\n",domdec.get_mynode(),neighnode.at(0),neighnode.at(1),
-	  imynode);
-
   if (neighnode.at(imynode) != domdec.get_mynode()) {
     std::cout << "CudaDomdecHomezone::CudaDomdecHomezone, error in setting neighnode(1)" << std::endl;
     exit(1);
@@ -285,14 +292,14 @@ int CudaDomdecHomezone::build(hostXYZ<double>& h_coord) {
   double inv_boxy = domdec.get_inv_boxy();
   double inv_boxz = domdec.get_inv_boxz();
 
-  int *h_loc2glo = new int[h_coord.n];
+  int *h_loc2glo = new int[h_coord.size()];
 
   // Find coordinates that are in this sub-box
   int nloc = 0;
-  for (int i=0;i < h_coord.n;i++) {
-    double x = h_coord.data[i]*inv_boxx                  + 0.5;
-    double y = h_coord.data[i+h_coord.stride]*inv_boxy   + 0.5;
-    double z = h_coord.data[i+h_coord.stride*2]*inv_boxz + 0.5;    
+  for (int i=0;i < h_coord.size();i++) {
+    double x = (*(h_coord.x()+i))*inv_boxx + 0.5;
+    double y = (*(h_coord.y()+i))*inv_boxy + 0.5;
+    double z = (*(h_coord.z()+i))*inv_boxz + 0.5;    
     x -= floor(x);
     y -= floor(y);
     z -= floor(z);
@@ -319,31 +326,20 @@ int CudaDomdecHomezone::build(hostXYZ<double>& h_coord) {
 //
 int CudaDomdecHomezone::update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream) {
 
-  assert(coord.n == coord2.n);
-  assert(coord.stride == coord2.stride);
-
-  /*
-  if (domdec.get_mynode() == 0) {
-    hostXYZ<double> h_coord(coord);
-    for (int i=0;i < 10;i++) {
-      double z = h_coord.data[i+h_coord.stride*2];
-      fprintf(stderr,"update: %d %lf\n",i,h_coord.data[i]);
-    }
-  }
-  */
+  assert(coord.size() == coord2.size());
 
   // Allocate to #coordinates to avoid busting the buffer limits
-  reallocate<int>(&destind, &destind_len, coord.n, 1.2f);
-  reallocate<neighcomm_t>(&send, &send_len, coord.n, 1.2f);
+  reallocate<int>(&destind, &destind_len, coord.size(), 1.2f);
+  reallocate<neighcomm_t>(&send, &send_len, coord.size(), 1.2f);
 
   clear_gpu_array<int>(num_send, nneigh+1, stream);
 
   int nthread = 1024;
-  int nblock = (coord.n - 1)/nthread + 1;
+  int nblock = (coord.size() - 1)/nthread + 1;
 
   // Assign coordinates into neighboring, or home, sub-boxes
   fill_send_kernel<<< nblock, nthread, 0, stream >>>
-    (coord.n, coord.stride, coord.data,
+    (coord.size(), coord.x(), coord.y(), coord.z(),
      domdec.get_inv_boxx(), domdec.get_inv_boxy(), domdec.get_inv_boxz(),
      domdec.get_nx(), domdec.get_ny(), domdec.get_nz(), nneigh,
      domdec.get_homeix(), domdec.get_homeiy(), domdec.get_homeiz(),
@@ -359,8 +355,8 @@ int CudaDomdecHomezone::update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, 
 
   // Pack coordinate data into send buffer
   pack_send_kernel<<< nblock, nthread, 0, stream >>>
-    (coord.n, coord.stride, coord.data, coord2.data, destind, get_loc2glo_ptr(),
-     pos_send, send);
+    (coord.size(), coord.x(), coord.y(), coord.z(), coord2.x(), coord2.y(), coord2.z(),
+     destind, get_loc2glo_ptr(), pos_send, send);
   cudaCheck(cudaGetLastError());
 
   // Wait here for the stream to finish
@@ -509,21 +505,12 @@ int CudaDomdecHomezone::update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, 
 
   // Unpack data on GPU
   unpack_recv_kernel<<< nblock, nthread, 0, stream >>>
-    (coord.stride, num_recv_tot, recv, coord.data, coord2.data, get_loc2glo_ptr());
+    (num_recv_tot, recv, coord.x(), coord.y(), coord.z(), coord2.x(), coord2.y(), coord2.z(),
+     get_loc2glo_ptr());
   cudaCheck(cudaGetLastError());
 
   // Wait here for the stream to finish
   cudaCheck(cudaStreamSynchronize(stream));
-
-  /*
-  if (domdec.get_mynode() == 0) {
-    hostXYZ<double> h_coord(coord);
-    for (int i=0;i < 10;i++) {
-      double z = h_coord.data[i+h_coord.stride*2];
-      fprintf(stderr,"update: %d %lf\n",i,h_coord.data[i]);
-    }
-  }
-  */
 
   return num_recv_tot;
 }

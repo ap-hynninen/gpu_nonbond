@@ -167,7 +167,7 @@ public:
 
   void assignCoordToNodes(hostXYZ<double>& coord, std::vector<int>& h_loc2glo);
 
-  void get_restart_data(hostXYZ<double> *h_coord, hostXYZ<double> *h_step, hostXYZ<double> *h_force,
+  void get_restart_data(hostXYZ<double>& h_coord, hostXYZ<double>& h_step, hostXYZ<double>& h_force,
 			double *x, double *y, double *z, double *dx, double *dy, double *dz,
 			double *fx, double *fy, double *fz);
   

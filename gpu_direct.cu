@@ -152,10 +152,10 @@ void test() {
   dir.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, VDW_VSH, EWALD);
   dir.set_vdwparam(1260, "test_data/vdwparam.txt");
   dir.set_vdwtype(ncoord, "test_data/vdwtype.txt");
-  dir.calc_force(xyzq.xyzq, nlist_ref, false, false, force_fp.xyz.stride, force_fp.xyz.data);
-  force_fp.convert(&force);
+  dir.calc_force(xyzq.xyzq, nlist_ref, false, false, force_fp.stride(), force_fp.xyz());
+  force_fp.convert(force);
   tol = 7.71e-4;
-  if (!force_main.compare(&force, tol, max_diff)) {
+  if (!force_main.compare(force, tol, max_diff)) {
     std::cout<<"Non-bonded (main) force comparison FAILED"<<std::endl;
   } else {
     std::cout<<"Non-bonded (main) force comparison OK"<<std::endl;
@@ -164,10 +164,10 @@ void test() {
 
   dir.set_vdwparam14(1260, "test_data/vdwparam14.txt");
   dir.set_14_list(nin14list, nex14list, in14list, ex14list);
-  dir.calc_14_force(xyzq.xyzq, false, false, force_fp.xyz.stride, force_fp.xyz.data);
-  force_fp.convert(&force);
+  dir.calc_14_force(xyzq.xyzq, false, false, force_fp.stride(), force_fp.xyz());
+  force_fp.convert(force);
   tol = 7.71e-4;
-  if (!force_total.compare(&force, tol, max_diff)) {
+  if (!force_total.compare(force, tol, max_diff)) {
     std::cout<<"Non-bonded (total) force comparison FAILED"<<std::endl;
   } else {
     std::cout<<"Non-bonded (total) force comparison OK"<<std::endl;
@@ -177,8 +177,8 @@ void test() {
   // Check energy and virial
   force_fp.clear();
   dir.clear_energy_virial();
-  dir.calc_force(xyzq.xyzq, nlist_ref, true, true, force_fp.xyz.stride, force_fp.xyz.data);
-  dir.calc_virial(ncoord, xyzq.xyzq, force_fp.xyz.stride, force_fp.xyz.data);
+  dir.calc_force(xyzq.xyzq, nlist_ref, true, true, force_fp.stride(), force_fp.xyz());
+  dir.calc_virial(ncoord, xyzq.xyzq, force_fp.stride(), force_fp.xyz());
 
   double energy_vdw;
   double energy_elec;
@@ -209,8 +209,8 @@ void test() {
   //--------------- Non-bonded using GPU build neighborlist -----------
   force_fp.clear();
   dir.clear_energy_virial();
-  dir.calc_force(xyzq_sorted.xyzq, nlist, true, true, force_fp.xyz.stride, force_fp.xyz.data);
-  dir.calc_virial(ncoord, xyzq_sorted.xyzq, force_fp.xyz.stride, force_fp.xyz.data);
+  dir.calc_force(xyzq_sorted.xyzq, nlist, true, true, force_fp.stride(), force_fp.xyz());
+  dir.calc_virial(ncoord, xyzq_sorted.xyzq, force_fp.stride(), force_fp.xyz());
 
   dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
   vir = (virtensor[0] + virtensor[4] + virtensor[8])/3.0;

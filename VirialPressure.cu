@@ -105,13 +105,13 @@ VirialPressure::~VirialPressure() {
 // shift = coordinate shift
 // force = forces
 //
-void VirialPressure::calc_virial(cudaXYZ<double> *coord,
-				 cudaXYZ<double> *force,
+void VirialPressure::calc_virial(cudaXYZ<double>& coord,
+				 cudaXYZ<double>& force,
 				 float3 *xyz_shift,
 				 float boxx, float boxy, float boxz,
 				 double *d_vpress, double *h_vpress,
 				 cudaStream_t stream) {
-  assert(coord->match(force));
+  assert(coord.match(force));
 
   int ncoord = coord->n;
   int stride = coord->stride;

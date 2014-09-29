@@ -145,7 +145,7 @@ void test() {
 			   ncmaplist, h_cmaplist);
 
     bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, true, false,
-			   force_fp.xyz.stride, force_fp.xyz.data,
+			   force_fp.stride(), force_fp.xyz(),
 			   true, true, true, true, true, true);
     bondedforce.get_energy_virial(true, false,
 				  &energy_bond, &energy_ureyb,
@@ -153,11 +153,11 @@ void test() {
 				  &energy_dihe, &energy_imdihe,
 				  &energy_cmap,
 				  sforcex, sforcey, sforcez);
-    force_fp.convert(&force);
+    force_fp.convert(force);
 
     double max_diff;
     double tol = 0.0057;
-    if (!force_bonded.compare(&force, tol, max_diff)) {
+    if (!force_bonded.compare(force, tol, max_diff)) {
       std::cout << "(SP) Bonded force comparison FAILED " << std::endl;
     } else {
       std::cout<<"(SP) Bonded force comparison OK (tolerance " << tol << " max difference " 
@@ -211,12 +211,12 @@ void test() {
 
     force_fp.clear();
     bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, false, false,
-			   force_fp.xyz.stride, force_fp.xyz.data,
+			   force_fp.stride(), force_fp.xyz(),
 			   true, true, true, true, true, true);
-    force_fp.convert(&force);
+    force_fp.convert(force);
 
     tol = 0.0057;
-    if (!force_bonded.compare(&force, tol, max_diff)) {
+    if (!force_bonded.compare(force, tol, max_diff)) {
       std::cout << "(SP) Bonded force comparison FAILED " << std::endl;
     } else {
       std::cout<<"(SP) Bonded force comparison OK (tolerance " << tol << " max difference " 
@@ -243,13 +243,13 @@ void test() {
 			   nimdihelist, h_imdihelist, 
 			   ncmaplist, h_cmaplist);
     bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, true, false,
-			   force_fp.xyz.stride, force_fp.xyz.data,
+			   force_fp.stride(), force_fp.xyz(),
 			   true, true, true, true, true, true);
-    force_fp.convert(&force);
+    force_fp.convert(force);
 
     double max_diff;
     double tol = 0.0058;
-    if (!force_bonded.compare(&force, tol, max_diff)) {
+    if (!force_bonded.compare(force, tol, max_diff)) {
       std::cout<<"(DP) Bonded force comparison FAILED"<<std::endl;
     } else {
       std::cout<<"(DP) Bonded force comparison OK (tolerance " << tol << " max difference " 

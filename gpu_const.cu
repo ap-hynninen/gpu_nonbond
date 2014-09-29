@@ -27,15 +27,15 @@ int main(int argc, char *argv[]) {
 //
 // Loads (x, y, z) coordinates from file
 //
-void load_coord(const char *filename, const int stride, double *xyz) {
+void load_coord(const char *filename, const int n, double *x, double *y, double *z) {
 
   std::ifstream file(filename);
   if (file.is_open()) {
 
     int i = 0;
-    while (file >> xyz[i] >> xyz[i+stride] >> xyz[i+stride*2]) i++;
+    while (file >> x[i] >> y[i] >> z[i]) i++;
 
-    if (i > stride) {
+    if (i > n) {
       std::cerr<<"Too many lines in file "<<filename<<std::endl;
       exit(1);
     }
@@ -106,7 +106,8 @@ void load_constr_mass(const int nconstr, const int nmass, const char *filename, 
 // Checks SETTLE and SHAKE results
 //
 bool check_result(const int nind, const int n, const int *ind,
-		  const double *xyz, const double *xyz_ref, const int stride,
+		  const double *x, const double *y, const double *z,
+		  const double *x_ref, const double *y_ref, const double *z_ref,
 		  const double tol, double &max_diff) {
 
   double x1, y1, z1;
@@ -116,16 +117,14 @@ bool check_result(const int nind, const int n, const int *ind,
 
   try {
     for (imol=0;imol < n;imol++) {
-
       for (j=0;j < nind;j++) {
 	i = ind[imol*nind+j];
-	x1 = xyz[i];
-	y1 = xyz[i + stride];
-	z1 = xyz[i + 2*stride];
-	x2 = xyz_ref[i];
-	y2 = xyz_ref[i + stride];
-	z2 = xyz_ref[i + 2*stride];
-	
+	x1 = x[i];
+	y1 = y[i];
+	z1 = z[i];
+	x2 = x_ref[i];
+	y2 = y_ref[i];
+	z2 = z_ref[i];
 	if (isnan(x1) || isnan(y1) || isnan(z1) || isnan(x2) || isnan(y2) || isnan(z2)) throw 1;
 	diff = max(fabs(x1-x2), max(fabs(y1-y2), fabs(z1-z2)));
 	max_diff = max(diff, max_diff);
@@ -159,7 +158,6 @@ void test() {
   const double rOHsq = 0.91623184;
   const double rHHsq = 2.29189321;
   const int ncoord = 23558;
-  //const int stride = ((ncoord-1)/32+1)*32;
   const int nsolvent = 7023;
   const int npair = 458;
   const int ntrip = 233;
@@ -167,15 +165,14 @@ void test() {
 
   cudaXYZ<double> xyz0(ncoord);
   cudaXYZ<double> xyz1(ncoord);
-  int stride = xyz0.stride;
 
   // Load coordinates
   hostXYZ<double> h_xyz0(ncoord, NON_PINNED);
   hostXYZ<double> h_xyz1(ncoord, NON_PINNED);
   hostXYZ<double> h_xyz_ref(ncoord, NON_PINNED);
-  load_coord("test_data/xyz0.txt", stride, h_xyz0.data);
-  load_coord("test_data/xyz1.txt", stride, h_xyz1.data);
-  load_coord("test_data/xyz_ref.txt", stride, h_xyz_ref.data);
+  load_coord("test_data/xyz0.txt", h_xyz0.size(), h_xyz0.x(), h_xyz0.y(), h_xyz0.z());
+  load_coord("test_data/xyz1.txt", h_xyz1.size(), h_xyz1.x(), h_xyz1.y(), h_xyz1.z());
+  load_coord("test_data/xyz_ref.txt", h_xyz_ref.size(), h_xyz_ref.x(), h_xyz_ref.y(), h_xyz_ref.z());
 
   xyz0.set_data_sync(h_xyz0);
   xyz1.set_data_sync(h_xyz1);
@@ -265,42 +262,48 @@ void test() {
   */
 
   // Apply holonomic constraints
-  holoconst.apply(&xyz0, &xyz1);
+  holoconst.apply(xyz0, xyz1);
   cudaCheck(cudaDeviceSynchronize());
 
   //copy_HtoD<double>(h_xyz1, xyz1, stride*3);
   xyz1.set_data_sync(h_xyz1);
-  holoconst.apply(&xyz0, &xyz1);
+  holoconst.apply(xyz0, xyz1);
   cudaCheck(cudaDeviceSynchronize());
 
   //--------------------------------------------------------------------------
   // Check result
   //--------------------------------------------------------------------------
-  copy_DtoH<double>(xyz1.data, h_xyz1.data, stride*3);
+  copy_DtoH<double>(xyz1.x(), h_xyz1.x(), xyz1.size());
+  copy_DtoH<double>(xyz1.y(), h_xyz1.y(), xyz1.size());
+  copy_DtoH<double>(xyz1.z(), h_xyz1.z(), xyz1.size());
 
   double max_diff;
   double tol = 5.0e-14;
 
   max_diff = 0.0;
-  if (check_result(3, nsolvent, h_solvent_ind, h_xyz1.data, h_xyz_ref.data, stride, tol, max_diff)) {
+  if (check_result(3, nsolvent, h_solvent_ind, h_xyz1.x(), h_xyz1.y(), h_xyz1.z(),
+		   h_xyz_ref.x(), h_xyz_ref.y(), h_xyz_ref.z(), tol, max_diff)) {
     std::cout<<"solvent SETTLE OK (tolerance " << tol << " max difference " << 
       max_diff << ")" << std::endl;
   }
 
   max_diff = 0.0;
-  if (check_result(2, npair, h_pair_ind, h_xyz1.data, h_xyz_ref.data, stride, tol, max_diff)) {
+  if (check_result(2, npair, h_pair_ind, h_xyz1.x(), h_xyz1.y(), h_xyz1.z(),
+		   h_xyz_ref.x(), h_xyz_ref.y(), h_xyz_ref.z(), tol, max_diff)) {
     std::cout<<"pair SHAKE OK (tolerance " << tol << " max difference " << 
       max_diff << ")" << std::endl;
   }
 
   max_diff = 0.0;
-  if (check_result(3, ntrip, h_trip_ind, h_xyz1.data, h_xyz_ref.data, stride, tol, max_diff)) {
+  if (check_result(3, ntrip, h_trip_ind, h_xyz1.x(), h_xyz1.y(), h_xyz1.z(),
+		   h_xyz_ref.x(), h_xyz_ref.y(), h_xyz_ref.z(), tol, max_diff)) {
     std::cout<<"trip SHAKE OK (tolerance " << tol << " max difference " << 
       max_diff << ")" << std::endl;
   }
 
   max_diff = 0.0;
-  if (check_result(4, nquad, h_quad_ind, h_xyz1.data, h_xyz_ref.data, stride, tol, max_diff)) {
+  if (check_result(4, nquad, h_quad_ind, h_xyz1.x(), h_xyz1.y(), h_xyz1.z(),
+		   h_xyz_ref.x(), h_xyz_ref.y(), h_xyz_ref.z(), tol, max_diff)) {
     std::cout<<"quad SHAKE OK (tolerance " << tol << " max difference " << 
       max_diff << ")" << std::endl;
   }

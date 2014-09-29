@@ -2,16 +2,15 @@
 #define FORCE_H
 
 #include <cuda.h>
-#include "cudaXYZ.h"
-#include "hostXYZ.h"
+#include "cuda_utils.h"
 
 //
-// Simple storage class for forces
+// Simple strided storage class for forces
 //
 template <typename T>
 class Force {
 
-public:
+private:
 
   // Number of coordinates in the force array
   //int ncoord;
@@ -26,26 +25,63 @@ public:
   //int data_len;
   //T *data;
 
-  cudaXYZ<T> xyz;
+  int _size;
+  int _stride;
+  int _capacity;
+  T *_xyz;
 
-  Force();
-  Force(const int ncoord);
+  //cudaXYZ<T> xyz;
+
+ public:
+
+  Force() {
+    _size = 0;
+    _stride = 0;
+    _capacity = 0;
+    _xyz = NULL;
+  }
+
+  Force(const int size) {
+    _size = 0;
+    _stride = 0;
+    _capacity = 0;
+    _xyz = NULL;
+    this->resize(size);
+  }
+
   Force(const char *filename);
-  ~Force();
+
+  ~Force() {
+    if (_xyz != NULL) deallocate<T>(&_xyz);
+  }
 
 
-  void clear(cudaStream_t stream=0);
-  bool compare(Force<T>* force, const double tol, double& max_diff);
+  void clear(cudaStream_t stream=0) {
+    clear_gpu_array<T>(this->_xyz, 3*this->_stride, stream);
+  }
 
-  void set_ncoord(int ncoord, float fac=1.0f);
-  int get_stride();
+  bool compare(Force<T>& force, const double tol, double& max_diff);
 
-  void get_data_sync(T *fx, T *fy, T *fz);
+  void resize(int size, float fac=1.0f) {
+    this->_size = size;
+    // Returns stride that aligns with 256 byte boundaries
+    this->_stride = (( (size-1+32)*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
+    int new_capacity = (int)((double)(3*this->_stride)*(double)fac);
+    reallocate<T>(&this->_xyz, &this->_capacity, new_capacity, fac);
+  }
 
-  template <typename T2> void convert(Force<T2>* force, cudaStream_t stream=0);
+  int stride() {return _stride;}
+  int size() {return _size;}
+  T* xyz() {return _xyz;}
+
+  int stride() const {return _stride;}
+  int size() const {return _size;}
+  const T* xyz() const {return _xyz;}
+
+  template <typename T2> void convert(Force<T2>& force, cudaStream_t stream=0);
   template <typename T2> void convert(cudaStream_t stream=0);
-  template <typename T2, typename T3> void convert_to(Force<T3> *force, cudaStream_t stream=0);
-  template <typename T2, typename T3> void convert_add(Force<T3> *force, cudaStream_t stream=0);
+  template <typename T2, typename T3> void convert_to(Force<T3>& force, cudaStream_t stream=0);
+  template <typename T2, typename T3> void convert_add(Force<T3>& force, cudaStream_t stream=0);
   template <typename T2> void add(float3 *force_data, int force_n, cudaStream_t stream=0);
 };
 

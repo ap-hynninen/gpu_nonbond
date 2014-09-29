@@ -4,25 +4,28 @@
 #include "cuda_utils.h"
 #include "gpu_utils.h"
 
-__global__ void heuristic_check_kernel(const int ncoord, const int stride,
-				       const double* __restrict__ coord,
-				       const double* __restrict__ ref_coord,
+__global__ void heuristic_check_kernel(const int ncoord,
+				       const double* __restrict__ x,
+				       const double* __restrict__ y,
+				       const double* __restrict__ z,
+				       const double* __restrict__ ref_x,
+				       const double* __restrict__ ref_y,
+				       const double* __restrict__ ref_z,
 				       const float rsq_limit,
 				       int* global_flag) {
   // Required shared memory:
   // blockDim.x/warpsize*sizeof(int)
   extern __shared__ int sh_flag[];
   const int tid = threadIdx.x + blockIdx.x*blockDim.x;
-  const int stride2 = stride*2;
   const int sh_flag_size = blockDim.x/warpsize;
 
   float dx = 0.0f;
   float dy = 0.0f;
   float dz = 0.0f;
   if (tid < ncoord) {
-    dx = (float)(coord[tid]         - ref_coord[tid]);
-    dy = (float)(coord[tid+stride]  - ref_coord[tid+stride]);
-    dz = (float)(coord[tid+stride2] - ref_coord[tid+stride2]);
+    dx = (float)(x[tid] - ref_x[tid]);
+    dy = (float)(y[tid] - ref_y[tid]);
+    dz = (float)(z[tid] - ref_z[tid]);
   }
 
   float rsq = dx*dx + dy*dy + dz*dz;
@@ -187,7 +190,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // NOTE: Builds rest of domdec.loc2glo and domdec.xyz_shift
     domdec.comm_coord(coord, true);
 
-    return;
+    //return;
 
     // Copy: coord => xyzq_copy
     // NOTE: coord and xyz_shift are already in the order determined by domdec.loc2glo,
@@ -287,7 +290,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
     }
     // Resize recip_xyzq and recip_force if needed
     if (recipComm.get_isRecip() && recipComm.get_num_direct() > 1) {
-      recip_xyzq.set_ncoord(recipComm.get_ncoord());
+      recip_xyzq.resize(recipComm.get_ncoord());
     }
     reallocate<float3>(&recip_force, &recip_force_len, recipComm.get_ncoord(), 1.0f);
     // Send coordinates
@@ -307,18 +310,18 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   }
 
   // Direct non-bonded force
-  dir.calc_force(xyzq.xyzq, nlist, calc_energy, calc_virial, force.xyz.stride, force.xyz.data,
+  dir.calc_force(xyzq.xyzq, nlist, calc_energy, calc_virial, force.stride(), force.xyz(),
 		 direct_stream[0]);
   cudaCheck(cudaEventRecord(done_direct_event, direct_stream[0]));
 
   // 1-4 interactions
-  dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force.xyz.stride, force.xyz.data,
+  dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force.stride(), force.xyz(),
 		    in14_stream);
   cudaCheck(cudaEventRecord(done_in14_event, in14_stream));
 
   // Bonded forces
   bonded.calc_force(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
-  		    calc_energy, calc_virial, force.xyz.stride, force.xyz.data,
+  		    calc_energy, calc_virial, force.stride(), force.xyz(),
 		    calc_bond, calc_ureyb, calc_angle, calc_dihe, calc_imdihe, calc_cmap,
 		    bonded_stream);
   cudaCheck(cudaEventRecord(done_bonded_event, bonded_stream));
@@ -425,8 +428,8 @@ void CudaPMEForcefield::assignCoordToNodes(hostXYZ<double>& coord, std::vector<i
   // Resize coordinate arrays to the new homezone size
   ref_coord.resize(domdec.get_ncoord());
   ref_coord.clear();
-  xyzq.set_ncoord(domdec.get_ncoord());
-  xyzq_copy.set_ncoord(domdec.get_ncoord());
+  xyzq.resize(domdec.get_ncoord());
+  xyzq_copy.resize(domdec.get_ncoord());
 }
 
 //
@@ -434,17 +437,15 @@ void CudaPMEForcefield::assignCoordToNodes(hostXYZ<double>& coord, std::vector<i
 // Returns true if update is needed
 //
 bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double>& coord, cudaStream_t stream) {
-  assert(ref_coord.match(&coord));
+  assert(ref_coord.match(coord));
   assert(warpsize <= 32);
 
   double rsq_limit_dbl = fabs(domdec.get_rnl() - roff)/2.0;
   rsq_limit_dbl *= rsq_limit_dbl;
   float rsq_limit = (float)rsq_limit_dbl;
 
-  int ncoord = ref_coord.n;
-  int stride = ref_coord.stride;
   int nthread = 512;
-  int nblock = (ncoord - 1)/nthread + 1;
+  int nblock = (ref_coord.size() - 1)/nthread + 1;
 
   int shmem_size = (nthread/warpsize)*sizeof(int);
 
@@ -452,7 +453,8 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double>& coord, cudaStream
   copy_HtoD<int>(h_heuristic_flag, d_heuristic_flag, 1, stream);
 
   heuristic_check_kernel<<< nblock, nthread, shmem_size, stream >>>
-    (ncoord, stride, coord.data, ref_coord.data, rsq_limit, d_heuristic_flag);
+    (coord.size(), coord.x(), coord.y(), coord.z(), ref_coord.x(), ref_coord.y(), ref_coord.z(),
+     rsq_limit, d_heuristic_flag);
 
   cudaCheck(cudaGetLastError());
 
@@ -494,8 +496,8 @@ void CudaPMEForcefield::print_energy_virial(int step) {
 //
 // Copies restart data into host buffers
 //
-void CudaPMEForcefield::get_restart_data(hostXYZ<double> *h_coord, hostXYZ<double> *h_step,
-					 hostXYZ<double> *h_force,
+void CudaPMEForcefield::get_restart_data(hostXYZ<double>& h_coord, hostXYZ<double>& h_step,
+					 hostXYZ<double>& h_force,
 					 double *x, double *y, double *z, double *dx, double *dy, double *dz,
 					 double *fx, double *fy, double *fz) {
 
@@ -512,24 +514,17 @@ void CudaPMEForcefield::get_restart_data(hostXYZ<double> *h_coord, hostXYZ<doubl
   }
   copy_DtoH_sync<int>(domdec.get_loc2glo_ptr(), h_loc2glo, ncoord);
 
-  int coord_stride  = h_coord->stride;
-  int coord_stride2 = h_coord->stride*2;
-  int step_stride  = h_step->stride;
-  int step_stride2 = h_step->stride*2;
-  int force_stride  = h_force->stride;
-  int force_stride2 = h_force->stride*2;
-
   for (int i=0;i < ncoord;i++) {
     int j = h_loc2glo[i];
-    x[j] = h_coord->data[i];
-    y[j] = h_coord->data[i + coord_stride];
-    z[j] = h_coord->data[i + coord_stride2];
-    dx[j] = h_step->data[i];
-    dy[j] = h_step->data[i + step_stride];
-    dz[j] = h_step->data[i + step_stride2];
-    fx[j] = h_force->data[i];
-    fy[j] = h_force->data[i + force_stride];
-    fz[j] = h_force->data[i + force_stride2];
+    x[j] = h_coord.x()[i];
+    y[j] = h_coord.y()[i];
+    z[j] = h_coord.z()[i];
+    dx[j] = h_step.x()[i];
+    dy[j] = h_step.y()[i];
+    dz[j] = h_step.z()[i];
+    fx[j] = h_force.x()[i];
+    fy[j] = h_force.y()[i];
+    fz[j] = h_force.z()[i];
   }
 
 }

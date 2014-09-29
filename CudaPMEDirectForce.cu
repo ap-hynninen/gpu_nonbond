@@ -706,8 +706,8 @@ void CudaPMEDirectForce<AT, CT>::set_elec_model(int elec_model, CT h) {
 //
 template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::calc_14_force(const float4 *xyzq,
-					const bool calc_energy, const bool calc_virial,
-					const int stride, AT *force, cudaStream_t stream) {
+					       const bool calc_energy, const bool calc_virial,
+					       const int stride, AT *force, cudaStream_t stream) {
 
   if (!vdwparam_texref_bound) {
     std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam14_texref must be bound" << std::endl;
@@ -740,10 +740,10 @@ void CudaPMEDirectForce<AT, CT>::calc_14_force(const float4 *xyzq,
 //
 template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
-				     const NeighborList<32>& nlist,
-				     const bool calc_energy,
-				     const bool calc_virial,
-				     const int stride, AT *force, cudaStream_t stream) {
+					    const NeighborList<32>& nlist,
+					    const bool calc_energy,
+					    const bool calc_virial,
+					    const int stride, AT *force, cudaStream_t stream) {
 
   const int tilesize = 32;
 
@@ -804,8 +804,8 @@ void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
 //
 template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::calc_virial(const int ncoord, const float4 *xyzq,
-				      const int stride, AT *force,
-				      cudaStream_t stream) {
+					     const int stride, AT *force,
+					     cudaStream_t stream) {
 
   int nthread, nblock, shmem_size;
   nthread = 256;
@@ -846,9 +846,9 @@ void CudaPMEDirectForce<AT, CT>::clear_energy_virial(cudaStream_t stream) {
 //
 template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
-					    double *energy_vdw, double *energy_elec,
-					    double *energy_excl,
-					    double *vir) {
+						   double *energy_vdw, double *energy_elec,
+						   double *energy_excl,
+						   double *vir) {
 
   if (prev_calc_energy || prev_calc_virial) {
     cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(DirectEnergyVirial_t),

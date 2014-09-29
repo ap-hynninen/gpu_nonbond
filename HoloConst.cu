@@ -34,58 +34,105 @@ struct HoloConstSettings_t {
   double shake_tol;
   int max_niter;
 
-  int stride;
-  int stride2;
-  const double* __restrict__ xyz0;
-  const double* __restrict__ xyz1;
-  double* __restrict__ xyz2;
+  const double* __restrict__ xyz[2][3];
+  double* __restrict__ xyz2[3];
 };
 
 static HoloConstSettings_t h_setup;
 static __constant__ HoloConstSettings_t d_setup;
 
-static texture<int2, 1, cudaReadModeElementType> xyz0_texref;
-static texture<int2, 1, cudaReadModeElementType> xyz1_texref;
-static int2* xyz0_texref_pointer = NULL;
-static int2* xyz1_texref_pointer = NULL;
-static int texref_stride = 0;
+// x0 = xyz_texref[0][0]
+// y0 = xyz_texref[0][1]
+// z0 = xyz_texref[0][2]
+// x1 = xyz_texref[1][0]
+// y1 = xyz_texref[1][1]
+// z1 = xyz_texref[1][2]
+static texture<int2, 1, cudaReadModeElementType> xyz_texref00;
+static texture<int2, 1, cudaReadModeElementType> xyz_texref01;
+static texture<int2, 1, cudaReadModeElementType> xyz_texref02;
+static texture<int2, 1, cudaReadModeElementType> xyz_texref10;
+static texture<int2, 1, cudaReadModeElementType> xyz_texref11;
+static texture<int2, 1, cudaReadModeElementType> xyz_texref12;
 
-template <int t>
-__forceinline__ __device__ double load_coord(const int ind) {
-  if (t == 0) {
-#if __CUDA_ARCH__ < 350
-    int2 val = tex1Dfetch(xyz0_texref, ind);
-    return __hiloint2double(val.y, val.x);
-#else
-    return __ldg(&d_setup.xyz0[ind]);
-#endif
-  } else {
-#if __CUDA_ARCH__ < 350
-    int2 val = tex1Dfetch(xyz1_texref, ind);
-    return __hiloint2double(val.y, val.x);
-#else
-    return __ldg(&d_setup.xyz1[ind]);
-#endif
+texture<int2, 1, cudaReadModeElementType>& get_xyz_texref(const int i, const int j) {
+  switch(i) {
+  case 0:
+    switch(j) {
+    case 0:
+      return xyz_texref00;
+    case 1:
+      return xyz_texref01;
+    case 2:
+      return xyz_texref02;
+    default:
+      std::cerr << "get_xyz_texref, index out of bounds: i=" << i << " j=" << j << std::endl;
+      exit(1);
+    }
+  case 1:
+    switch(j) {
+    case 0:
+      return xyz_texref10;
+    case 1:
+      return xyz_texref11;
+    case 2:
+      return xyz_texref12;
+    default:
+      std::cerr << "get_xyz_texref, index out of bounds: i=" << i << " j=" << j << std::endl;
+      exit(1);
+    }
+  default:
+    std::cerr << "get_xyz_texref, index out of bounds: i=" << i << " j=" << j << std::endl;
+    exit(1);
   }
+}
+
+static int2* xyz_texref_pointer[2][3];
+static int texref_size[2][3];
+
+template <int i, int j>
+__forceinline__ __device__ double load_coord(const int ind) {
+#if __CUDA_ARCH__ < 350
+  int2 val;
+  if (i == 0) {
+    if (j == 0) {
+      val = tex1Dfetch(xyz_texref00, ind);
+    } else if (j == 1) {
+      val = tex1Dfetch(xyz_texref01, ind);
+    } else if (j == 2) {
+      val = tex1Dfetch(xyz_texref02, ind);
+    }
+  } else if (i == 1) {
+    if (j == 0) {
+      val = tex1Dfetch(xyz_texref10, ind);
+    } else if (j == 1) {
+      val = tex1Dfetch(xyz_texref11, ind);
+    } else if (j == 2) {
+      val = tex1Dfetch(xyz_texref12, ind);
+    }
+  }
+  return __hiloint2double(val.y, val.x);
+#else
+  return __ldg(&d_setup.xyz[i][j][ind]);
+#endif
 }
 
 __forceinline__ __device__ void pair_calc(int imol) {
     int2 ind = d_setup.pair_ind[imol];
 
     // Load coordinates
-    double x0i = load_coord<0>(ind.x);
-    double y0i = load_coord<0>(ind.x+d_setup.stride);
-    double z0i = load_coord<0>(ind.x+d_setup.stride2);
-    double x0j = load_coord<0>(ind.y);
-    double y0j = load_coord<0>(ind.y+d_setup.stride);
-    double z0j = load_coord<0>(ind.y+d_setup.stride2);
+    double x0i = load_coord<0, 0>(ind.x);
+    double y0i = load_coord<0, 1>(ind.x);
+    double z0i = load_coord<0, 2>(ind.x);
+    double x0j = load_coord<0, 0>(ind.y);
+    double y0j = load_coord<0, 1>(ind.y);
+    double z0j = load_coord<0, 2>(ind.y);
 
-    double x1i = load_coord<1>(ind.x);
-    double y1i = load_coord<1>(ind.x+d_setup.stride);
-    double z1i = load_coord<1>(ind.x+d_setup.stride2);
-    double x1j = load_coord<1>(ind.y);
-    double y1j = load_coord<1>(ind.y+d_setup.stride);
-    double z1j = load_coord<1>(ind.y+d_setup.stride2);
+    double x1i = load_coord<1, 0>(ind.x);
+    double y1i = load_coord<1, 1>(ind.x);
+    double z1i = load_coord<1, 2>(ind.x);
+    double x1j = load_coord<1, 0>(ind.y);
+    double y1j = load_coord<1, 1>(ind.y);
+    double z1j = load_coord<1, 2>(ind.y);
 
     double xpij = x1i - x1j;
     double ypij = y1i - y1j;
@@ -113,37 +160,37 @@ __forceinline__ __device__ void pair_calc(int imol) {
     z1j -= hmassj_val*lambda*zrij;
 
     // Store results
-    d_setup.xyz2[ind.x]         = x1i;
-    d_setup.xyz2[ind.x+d_setup.stride]  = y1i;
-    d_setup.xyz2[ind.x+d_setup.stride2] = z1i;
-    d_setup.xyz2[ind.y]         = x1j;
-    d_setup.xyz2[ind.y+d_setup.stride]  = y1j;
-    d_setup.xyz2[ind.y+d_setup.stride2] = z1j;
+    d_setup.xyz2[0][ind.x] = x1i;
+    d_setup.xyz2[1][ind.x] = y1i;
+    d_setup.xyz2[2][ind.x] = z1i;
+    d_setup.xyz2[0][ind.y] = x1j;
+    d_setup.xyz2[1][ind.y] = y1j;
+    d_setup.xyz2[2][ind.y] = z1j;
 }
 
 __forceinline__ __device__ void trip_calc(int imol) {
     int3 ind = d_setup.trip_ind[imol];
 
     // Load coordinates
-    double x0i = load_coord<0>(ind.x);
-    double y0i = load_coord<0>(ind.x+d_setup.stride);
-    double z0i = load_coord<0>(ind.x+d_setup.stride2);
-    double x0j = load_coord<0>(ind.y);
-    double y0j = load_coord<0>(ind.y+d_setup.stride);
-    double z0j = load_coord<0>(ind.y+d_setup.stride2);
-    double x0k = load_coord<0>(ind.z);
-    double y0k = load_coord<0>(ind.z+d_setup.stride);
-    double z0k = load_coord<0>(ind.z+d_setup.stride2);
+    double x0i = load_coord<0, 0>(ind.x);
+    double y0i = load_coord<0, 1>(ind.x);
+    double z0i = load_coord<0, 2>(ind.x);
+    double x0j = load_coord<0, 0>(ind.y);
+    double y0j = load_coord<0, 1>(ind.y);
+    double z0j = load_coord<0, 2>(ind.y);
+    double x0k = load_coord<0, 0>(ind.z);
+    double y0k = load_coord<0, 1>(ind.z);
+    double z0k = load_coord<0, 2>(ind.z);
 
-    double x1i = load_coord<1>(ind.x);
-    double y1i = load_coord<1>(ind.x+d_setup.stride);
-    double z1i = load_coord<1>(ind.x+d_setup.stride2);
-    double x1j = load_coord<1>(ind.y);
-    double y1j = load_coord<1>(ind.y+d_setup.stride);
-    double z1j = load_coord<1>(ind.y+d_setup.stride2);
-    double x1k = load_coord<1>(ind.z);
-    double y1k = load_coord<1>(ind.z+d_setup.stride);
-    double z1k = load_coord<1>(ind.z+d_setup.stride2);
+    double x1i = load_coord<1, 0>(ind.x);
+    double y1i = load_coord<1, 1>(ind.x);
+    double z1i = load_coord<1, 2>(ind.x);
+    double x1j = load_coord<1, 0>(ind.y);
+    double y1j = load_coord<1, 1>(ind.y);
+    double z1j = load_coord<1, 2>(ind.y);
+    double x1k = load_coord<1, 0>(ind.z);
+    double y1k = load_coord<1, 1>(ind.z);
+    double z1k = load_coord<1, 2>(ind.z);
 
     double xrij = x0i - x0j;
     double yrij = y0i - y0j;
@@ -215,15 +262,15 @@ __forceinline__ __device__ void trip_calc(int imol) {
     z1j -= mmj*(zrij*a12);
     z1k -= mmk*(zrik*a13);
 
-    d_setup.xyz2[ind.x]         = x1i;
-    d_setup.xyz2[ind.x+d_setup.stride]  = y1i;
-    d_setup.xyz2[ind.x+d_setup.stride2] = z1i;
-    d_setup.xyz2[ind.y]         = x1j;
-    d_setup.xyz2[ind.y+d_setup.stride]  = y1j;
-    d_setup.xyz2[ind.y+d_setup.stride2] = z1j;
-    d_setup.xyz2[ind.z]         = x1k;
-    d_setup.xyz2[ind.z+d_setup.stride]  = y1k;
-    d_setup.xyz2[ind.z+d_setup.stride2] = z1k;
+    d_setup.xyz2[0][ind.x] = x1i;
+    d_setup.xyz2[1][ind.x] = y1i;
+    d_setup.xyz2[2][ind.x] = z1i;
+    d_setup.xyz2[0][ind.y] = x1j;
+    d_setup.xyz2[1][ind.y] = y1j;
+    d_setup.xyz2[2][ind.y] = z1j;
+    d_setup.xyz2[0][ind.z] = x1k;
+    d_setup.xyz2[1][ind.z] = y1k;
+    d_setup.xyz2[2][ind.z] = z1k;
 
 }
 
@@ -231,31 +278,31 @@ __forceinline__ __device__ void quad_calc(int imol) {
     int4 ind = d_setup.quad_ind[imol];
 
     // Load coordinates
-    double x0i = load_coord<0>(ind.x);
-    double y0i = load_coord<0>(ind.x+d_setup.stride);
-    double z0i = load_coord<0>(ind.x+d_setup.stride2);
-    double x0j = load_coord<0>(ind.y);
-    double y0j = load_coord<0>(ind.y+d_setup.stride);
-    double z0j = load_coord<0>(ind.y+d_setup.stride2);
-    double x0k = load_coord<0>(ind.z);
-    double y0k = load_coord<0>(ind.z+d_setup.stride);
-    double z0k = load_coord<0>(ind.z+d_setup.stride2);
-    double x0l = load_coord<0>(ind.w);
-    double y0l = load_coord<0>(ind.w+d_setup.stride);
-    double z0l = load_coord<0>(ind.w+d_setup.stride2);
+    double x0i = load_coord<0, 0>(ind.x);
+    double y0i = load_coord<0, 1>(ind.x);
+    double z0i = load_coord<0, 2>(ind.x);
+    double x0j = load_coord<0, 0>(ind.y);
+    double y0j = load_coord<0, 1>(ind.y);
+    double z0j = load_coord<0, 2>(ind.y);
+    double x0k = load_coord<0, 0>(ind.z);
+    double y0k = load_coord<0, 1>(ind.z);
+    double z0k = load_coord<0, 2>(ind.z);
+    double x0l = load_coord<0, 0>(ind.w);
+    double y0l = load_coord<0, 1>(ind.w);
+    double z0l = load_coord<0, 2>(ind.w);
 
-    double x1i = load_coord<1>(ind.x);
-    double y1i = load_coord<1>(ind.x+d_setup.stride);
-    double z1i = load_coord<1>(ind.x+d_setup.stride2);
-    double x1j = load_coord<1>(ind.y);
-    double y1j = load_coord<1>(ind.y+d_setup.stride);
-    double z1j = load_coord<1>(ind.y+d_setup.stride2);
-    double x1k = load_coord<1>(ind.z);
-    double y1k = load_coord<1>(ind.z+d_setup.stride);
-    double z1k = load_coord<1>(ind.z+d_setup.stride2);
-    double x1l = load_coord<1>(ind.w);
-    double y1l = load_coord<1>(ind.w+d_setup.stride);
-    double z1l = load_coord<1>(ind.w+d_setup.stride2);
+    double x1i = load_coord<1, 0>(ind.x);
+    double y1i = load_coord<1, 1>(ind.x);
+    double z1i = load_coord<1, 2>(ind.x);
+    double x1j = load_coord<1, 0>(ind.y);
+    double y1j = load_coord<1, 1>(ind.y);
+    double z1j = load_coord<1, 2>(ind.y);
+    double x1k = load_coord<1, 0>(ind.z);
+    double y1k = load_coord<1, 1>(ind.z);
+    double z1k = load_coord<1, 2>(ind.z);
+    double x1l = load_coord<1, 0>(ind.w);
+    double y1l = load_coord<1, 1>(ind.w);
+    double z1l = load_coord<1, 2>(ind.w);
 
     double xrij = x0i - x0j;
     double yrij = y0i - y0j;
@@ -381,18 +428,18 @@ __forceinline__ __device__ void quad_calc(int imol) {
     y1l  -= mml*(yril*a14);
     z1l  -= mml*(zril*a14);
 
-    d_setup.xyz2[ind.x]         = x1i;
-    d_setup.xyz2[ind.x+d_setup.stride]  = y1i;
-    d_setup.xyz2[ind.x+d_setup.stride2] = z1i;
-    d_setup.xyz2[ind.y]         = x1j;
-    d_setup.xyz2[ind.y+d_setup.stride]  = y1j;
-    d_setup.xyz2[ind.y+d_setup.stride2] = z1j;
-    d_setup.xyz2[ind.z]         = x1k;
-    d_setup.xyz2[ind.z+d_setup.stride]  = y1k;
-    d_setup.xyz2[ind.z+d_setup.stride2] = z1k;
-    d_setup.xyz2[ind.w]         = x1l;
-    d_setup.xyz2[ind.w+d_setup.stride]  = y1l;
-    d_setup.xyz2[ind.w+d_setup.stride2] = z1l;
+    d_setup.xyz2[0][ind.x] = x1i;
+    d_setup.xyz2[1][ind.x] = y1i;
+    d_setup.xyz2[2][ind.x] = z1i;
+    d_setup.xyz2[0][ind.y] = x1j;
+    d_setup.xyz2[1][ind.y] = y1j;
+    d_setup.xyz2[2][ind.y] = z1j;
+    d_setup.xyz2[0][ind.z] = x1k;
+    d_setup.xyz2[1][ind.z] = y1k;
+    d_setup.xyz2[2][ind.z] = z1k;
+    d_setup.xyz2[0][ind.w] = x1l;
+    d_setup.xyz2[1][ind.w] = y1l;
+    d_setup.xyz2[2][ind.w] = z1l;
 }
 
 __forceinline__ __device__ void solvent_calc(int imol) {
@@ -400,25 +447,25 @@ __forceinline__ __device__ void solvent_calc(int imol) {
     int3 ind = d_setup.solvent_ind[imol];
 
     // Load coordinates
-    double x0i = load_coord<0>(ind.x);
-    double y0i = load_coord<0>(ind.x+d_setup.stride);
-    double z0i = load_coord<0>(ind.x+d_setup.stride2);
-    double x0j = load_coord<0>(ind.y);
-    double y0j = load_coord<0>(ind.y+d_setup.stride);
-    double z0j = load_coord<0>(ind.y+d_setup.stride2);
-    double x0k = load_coord<0>(ind.z);
-    double y0k = load_coord<0>(ind.z+d_setup.stride);
-    double z0k = load_coord<0>(ind.z+d_setup.stride2);
+    double x0i = load_coord<0, 0>(ind.x);
+    double y0i = load_coord<0, 1>(ind.x);
+    double z0i = load_coord<0, 2>(ind.x);
+    double x0j = load_coord<0, 0>(ind.y);
+    double y0j = load_coord<0, 1>(ind.y);
+    double z0j = load_coord<0, 2>(ind.y);
+    double x0k = load_coord<0, 0>(ind.z);
+    double y0k = load_coord<0, 1>(ind.z);
+    double z0k = load_coord<0, 2>(ind.z);
 
-    double x1i = load_coord<1>(ind.x);
-    double y1i = load_coord<1>(ind.x+d_setup.stride);
-    double z1i = load_coord<1>(ind.x+d_setup.stride2);
-    double x1j = load_coord<1>(ind.y);
-    double y1j = load_coord<1>(ind.y+d_setup.stride);
-    double z1j = load_coord<1>(ind.y+d_setup.stride2);
-    double x1k = load_coord<1>(ind.z);
-    double y1k = load_coord<1>(ind.z+d_setup.stride);
-    double z1k = load_coord<1>(ind.z+d_setup.stride2);
+    double x1i = load_coord<1, 0>(ind.x);
+    double y1i = load_coord<1, 1>(ind.x);
+    double z1i = load_coord<1, 2>(ind.x);
+    double x1j = load_coord<1, 0>(ind.y);
+    double y1j = load_coord<1, 1>(ind.y);
+    double z1j = load_coord<1, 2>(ind.y);
+    double x1k = load_coord<1, 0>(ind.z);
+    double y1k = load_coord<1, 1>(ind.z);
+    double z1k = load_coord<1, 2>(ind.z);
 
     //
     // Convert to primed coordinates
@@ -522,15 +569,15 @@ __forceinline__ __device__ void solvent_calc(int imol) {
     double yc3p = -xb2p * sintheta + yc2p * costheta;
     double zc3p =  zc1p;
 
-    d_setup.xyz2[ind.x]         = xcm + trans11 * xa3p + trans12 * ya3p + trans13 * za3p;
-    d_setup.xyz2[ind.x+d_setup.stride]  = ycm + trans21 * xa3p + trans22 * ya3p + trans23 * za3p;
-    d_setup.xyz2[ind.x+d_setup.stride2] = zcm + trans31 * xa3p + trans32 * ya3p + trans33 * za3p;
-    d_setup.xyz2[ind.y]         = xcm + trans11 * xb3p + trans12 * yb3p + trans13 * zb3p;
-    d_setup.xyz2[ind.y+d_setup.stride]  = ycm + trans21 * xb3p + trans22 * yb3p + trans23 * zb3p;
-    d_setup.xyz2[ind.y+d_setup.stride2] = zcm + trans31 * xb3p + trans32 * yb3p + trans33 * zb3p;
-    d_setup.xyz2[ind.z]         = xcm + trans11 * xc3p + trans12 * yc3p + trans13 * zc3p;
-    d_setup.xyz2[ind.z+d_setup.stride]  = ycm + trans21 * xc3p + trans22 * yc3p + trans23 * zc3p;
-    d_setup.xyz2[ind.z+d_setup.stride2] = zcm + trans31 * xc3p + trans32 * yc3p + trans33 * zc3p;
+    d_setup.xyz2[0][ind.x] = xcm + trans11 * xa3p + trans12 * ya3p + trans13 * za3p;
+    d_setup.xyz2[1][ind.x] = ycm + trans21 * xa3p + trans22 * ya3p + trans23 * za3p;
+    d_setup.xyz2[2][ind.x] = zcm + trans31 * xa3p + trans32 * ya3p + trans33 * za3p;
+    d_setup.xyz2[0][ind.y] = xcm + trans11 * xb3p + trans12 * yb3p + trans13 * zb3p;
+    d_setup.xyz2[1][ind.y] = ycm + trans21 * xb3p + trans22 * yb3p + trans23 * zb3p;
+    d_setup.xyz2[2][ind.y] = zcm + trans31 * xb3p + trans32 * yb3p + trans33 * zb3p;
+    d_setup.xyz2[0][ind.z] = xcm + trans11 * xc3p + trans12 * yc3p + trans13 * zc3p;
+    d_setup.xyz2[1][ind.z] = ycm + trans21 * xc3p + trans22 * yc3p + trans23 * zc3p;
+    d_setup.xyz2[2][ind.z] = zcm + trans31 * xc3p + trans32 * yc3p + trans33 * zc3p;
 }
 
 __global__ void all_kernels() {
@@ -585,9 +632,12 @@ HoloConst::HoloConst() {
   quad_mass_len = 0;
   quad_mass = NULL;
 
-  xyz0_texref_pointer = NULL;
-  xyz1_texref_pointer = NULL;
-  texref_stride = 0;
+  for (int i=0;i < 2;i++) {
+    for (int j=0;j < 3;j++) {
+      xyz_texref_pointer[i][j] = NULL;
+      texref_size[i][j] = 0;
+    }
+  }
 
   if (get_cuda_arch() < 350) {
     use_textures = true;
@@ -601,15 +651,12 @@ HoloConst::HoloConst() {
 //
 HoloConst::~HoloConst() {
 
-  if (xyz0_texref_pointer != NULL) {
-    cudaCheck(cudaUnbindTexture(xyz0_texref));
-    xyz0_texref_pointer = NULL;
-  }
-
-  if (xyz1_texref_pointer != NULL) {
-    cudaCheck(cudaUnbindTexture(xyz1_texref));
-    xyz1_texref_pointer = NULL;
-  }
+  for (int i=0;i < 2;i++)
+    for (int j=0;j < 3;j++)
+      if (xyz_texref_pointer[i][j] != NULL) {
+	cudaCheck(cudaUnbindTexture(get_xyz_texref(i,j)));
+	xyz_texref_pointer[i][j] = NULL;
+      }
 
   if (solvent_ind != NULL) deallocate<int3>(&solvent_ind);
 
@@ -687,7 +734,7 @@ void HoloConst::setup_ind_mass_constr(const int npair, const int2 *global_pair_i
 //
 // Updates h_setup and d_setup if neccessary
 //
-void HoloConst::update_setup(int stride, double *xyz0, double *xyz1, double *xyz2,
+void HoloConst::update_setup(cudaXYZ<double>& xyz0, cudaXYZ<double>& xyz1, cudaXYZ<double>& xyz2,
 			     cudaStream_t stream) {
 
   bool update = false;
@@ -720,11 +767,17 @@ void HoloConst::update_setup(int stride, double *xyz0, double *xyz1, double *xyz
   update |= h_setup.shake_tol != shake_tol;
   update |= h_setup.max_niter != max_niter;
 
-  update |= h_setup.stride != stride;
-  update |= h_setup.stride2 != stride*2;
-  update |= h_setup.xyz0 != xyz0;
-  update |= h_setup.xyz1 != xyz1;
-  update |= h_setup.xyz2 != xyz2;
+  update |= h_setup.xyz[0][0] != xyz0.x();
+  update |= h_setup.xyz[0][1] != xyz0.y();
+  update |= h_setup.xyz[0][2] != xyz0.z();
+
+  update |= h_setup.xyz[1][0] != xyz1.x();
+  update |= h_setup.xyz[1][1] != xyz1.y();
+  update |= h_setup.xyz[1][2] != xyz1.z();
+
+  update |= h_setup.xyz2[0] != xyz2.x();
+  update |= h_setup.xyz2[1] != xyz2.y();
+  update |= h_setup.xyz2[2] != xyz2.z();
 
   if (update) {
 
@@ -756,11 +809,17 @@ void HoloConst::update_setup(int stride, double *xyz0, double *xyz1, double *xyz
     h_setup.shake_tol = shake_tol;
     h_setup.max_niter = max_niter;
 
-    h_setup.stride = stride;
-    h_setup.stride2 = stride*2;
-    h_setup.xyz0 = xyz0;
-    h_setup.xyz1 = xyz1;
-    h_setup.xyz2 = xyz2;
+    h_setup.xyz[0][0] = xyz0.x();
+    h_setup.xyz[0][1] = xyz0.y();
+    h_setup.xyz[0][2] = xyz0.z();
+
+    h_setup.xyz[1][0] = xyz1.x();
+    h_setup.xyz[1][1] = xyz1.y();
+    h_setup.xyz[1][2] = xyz1.z();
+
+    h_setup.xyz2[0] = xyz2.x();
+    h_setup.xyz2[1] = xyz2.y();
+    h_setup.xyz2[2] = xyz2.z();
 
     cudaCheck(cudaMemcpyToSymbolAsync(d_setup, &h_setup, sizeof(HoloConstSettings_t),
 				      0, cudaMemcpyHostToDevice, stream));
@@ -913,64 +972,52 @@ void HoloConst::set_quad(const int nquad, const int4 *global_quad_ind,
 //
 // Setup texture references for xyz0 and xyz1
 //
-void HoloConst::setup_textures(double *xyz0, double *xyz1, int stride) {
+void HoloConst::setup_textures(cudaXYZ<double>& xyz, int i) {
+  assert(xyz.x() != NULL);
+  assert(xyz.y() != NULL);
+  assert(xyz.z() != NULL);
 
-  assert(xyz0 != NULL);
-  assert(xyz1 != NULL);
-
-  // Unbind texture
-  if (xyz0_texref_pointer != (int2 *)xyz0 || stride != texref_stride) {
-    cudaCheck(cudaUnbindTexture(xyz0_texref));
-    xyz0_texref_pointer = NULL;
-  }
-  if (xyz0_texref_pointer == NULL) {
+  double* xyzp[3] = {xyz.x(), xyz.y(), xyz.z()};
+  for (int j=0;j < 3;j++) {
+    // Unbind texture
+    if (xyz_texref_pointer[i][j] != (int2 *)xyzp[j] || xyz.size() != texref_size[i][j]) {
+      cudaCheck(cudaUnbindTexture(get_xyz_texref(i,j)));
+      xyz_texref_pointer[i][j] = NULL;
+      texref_size[i][j] = 0;
+    }
     // Bind texture
-    xyz0_texref.normalized = 0;
-    xyz0_texref.filterMode = cudaFilterModePoint;
-    xyz0_texref.addressMode[0] = cudaAddressModeClamp;
-    xyz0_texref.channelDesc.x = 32;
-    xyz0_texref.channelDesc.y = 32;
-    xyz0_texref.channelDesc.z = 0;
-    xyz0_texref.channelDesc.w = 0;
-    xyz0_texref.channelDesc.f = cudaChannelFormatKindUnsigned;
-    cudaCheck(cudaBindTexture(NULL, xyz0_texref, (int2 *)xyz0, stride*3*sizeof(int2)));
-    xyz0_texref_pointer = (int2 *)xyz0;
+    if (xyz_texref_pointer[i][j] == NULL) {
+      xyz_texref_pointer[i][j] = (int2 *)xyzp[j];
+      texref_size[i][j] = xyz.size();
+      get_xyz_texref(i,j).normalized = 0;
+      get_xyz_texref(i,j).filterMode = cudaFilterModePoint;
+      get_xyz_texref(i,j).addressMode[0] = cudaAddressModeClamp;
+      get_xyz_texref(i,j).channelDesc.x = 32;
+      get_xyz_texref(i,j).channelDesc.y = 32;
+      get_xyz_texref(i,j).channelDesc.z = 0;
+      get_xyz_texref(i,j).channelDesc.w = 0;
+      get_xyz_texref(i,j).channelDesc.f = cudaChannelFormatKindUnsigned;
+      cudaCheck(cudaBindTexture(NULL, get_xyz_texref(i,j), xyz_texref_pointer[i][j],
+				texref_size[i][j]*sizeof(int2)));
+    }
   }
-
-  // Unbind texture
-  if (xyz1_texref_pointer != (int2 *)xyz1 || stride != texref_stride) {
-    cudaCheck(cudaUnbindTexture(xyz1_texref));
-    xyz1_texref_pointer = NULL;
-  }
-  if (xyz1_texref_pointer == NULL) {
-    // Bind texture
-    xyz1_texref.normalized = 0;
-    xyz1_texref.filterMode = cudaFilterModePoint;
-    xyz1_texref.addressMode[0] = cudaAddressModeClamp;
-    xyz1_texref.channelDesc.x = 32;
-    xyz1_texref.channelDesc.y = 32;
-    xyz1_texref.channelDesc.z = 0;
-    xyz1_texref.channelDesc.w = 0;
-    xyz1_texref.channelDesc.f = cudaChannelFormatKindUnsigned;
-    cudaCheck(cudaBindTexture(NULL, xyz1_texref, (int2 *)xyz1, stride*3*sizeof(int2)));
-    xyz1_texref_pointer = (int2 *)xyz1;
-  }
-
-  texref_stride = stride;
 }
 
 //
 // Apply constraints: xyz0 = reference (input), xyz1 = constrained (input/output)
 //
-void HoloConst::apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1, cudaStream_t stream) {
+void HoloConst::apply(cudaXYZ<double>& xyz0, cudaXYZ<double>& xyz1, cudaStream_t stream) {
 
-  assert(xyz0->match(xyz1));
+  assert(xyz0.match(xyz1));
 
-  int stride = xyz0->stride;
+  //int stride = xyz0->stride;
 
-  update_setup(stride, xyz0->data, xyz1->data, xyz1->data);
+  update_setup(xyz0, xyz1, xyz1);
 
-  if (use_textures) setup_textures(xyz0->data, xyz1->data, stride);
+  if (use_textures) {
+    setup_textures(xyz0, 0);
+    setup_textures(xyz1, 1);
+  }
 
   int nthread = 128;
   int nblock = (nsolvent + npair + ntrip + nquad - 1)/nthread + 1;

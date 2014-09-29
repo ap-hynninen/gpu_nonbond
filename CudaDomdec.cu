@@ -6,19 +6,22 @@
 // Calculates (x, y, z) shift
 // (x0, y0, z0) = fractional origin
 //
-__global__ void calc_xyz_shift(const int ncoord, const int stride, const double* __restrict__ coord,
+__global__ void calc_xyz_shift(const int ncoord, 
+			       const double* __restrict__ x,
+			       const double* __restrict__ y,
+			       const double* __restrict__ z,
 			       const double x0, const double y0, const double z0,
 			       const double inv_boxx, const double inv_boxy, const double inv_boxz,
 			       float3* __restrict__ xyz_shift) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
   if (i < ncoord) {
-    double x = coord[i]*inv_boxx;
-    double y = coord[i+stride]*inv_boxy;
-    double z = coord[i+stride*2]*inv_boxz;
+    double xi = x[i]*inv_boxx;
+    double yi = y[i]*inv_boxy;
+    double zi = z[i]*inv_boxz;
     float3 shift;
-    shift.x = ceilf(x0 - x);
-    shift.y = ceilf(y0 - y);
-    shift.z = ceilf(z0 - z);
+    shift.x = ceilf(x0 - xi);
+    shift.y = ceilf(y0 - yi);
+    shift.z = ceilf(z0 - zi);
     xyz_shift[i] = shift;
   }
 }
@@ -26,17 +29,20 @@ __global__ void calc_xyz_shift(const int ncoord, const int stride, const double*
 //
 // Re-order coordinates
 //
-__global__ void reorder_coord_kernel(const int ncoord, const int stride,
+__global__ void reorder_coord_kernel(const int ncoord,
 				     const int* __restrict__ ind_sorted,
-				     const double* __restrict__ coord_src,
-				     double* __restrict__ coord_dst) {
+				     const double* __restrict__ x_src,
+				     const double* __restrict__ y_src,
+				     const double* __restrict__ z_src,
+				     double* __restrict__ x_dst,
+				     double* __restrict__ y_dst,
+				     double* __restrict__ z_dst) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
-  const int stride2 = stride*2;
   if (i < ncoord) {
     int j = ind_sorted[i];
-    coord_dst[i]         = coord_src[j];
-    coord_dst[i+stride]  = coord_src[j+stride];
-    coord_dst[i+stride2] = coord_src[j+stride2];
+    x_dst[i] = x_src[j];
+    y_dst[i] = y_src[j];
+    z_dst[i] = z_src[j];
   }
 }
 
@@ -233,7 +239,7 @@ void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStrea
     nthread = 512;
     nblock = (zone_pcoord[7] - 1)/nthread + 1;
     calc_xyz_shift<<< nblock, nthread, 0, stream >>>
-      (zone_pcoord[7], coord.stride, coord.data,
+      (zone_pcoord[7], coord.x(), coord.y(), coord.z(),
        x0, y0, z0, this->get_inv_boxx(), this->get_inv_boxy(), this->get_inv_boxz(), xyz_shift0);
     cudaCheck(cudaGetLastError());
   }
@@ -251,14 +257,15 @@ void CudaDomdec::comm_force(Force<long long int>& force, cudaStream_t stream) {
 //
 void CudaDomdec::reorder_coord(cudaXYZ<double>& coord_src, cudaXYZ<double>& coord_dst,
 			       const int* ind_sorted, cudaStream_t stream) {
-  assert(coord_src.match(&coord_dst));
-  assert(zone_pcoord[7] == coord_src.n);
+  assert(coord_src.match(coord_dst));
+  assert(zone_pcoord[7] == coord_src.size());
 
   if (numnode == 1) {
     int nthread = 512;
     int nblock = (zone_pcoord[7] - 1)/nthread + 1;
     reorder_coord_kernel<<< nblock, nthread, 0, stream >>>
-      (zone_pcoord[7], coord_src.stride, ind_sorted, coord_src.data, coord_dst.data);
+      (zone_pcoord[7], ind_sorted, coord_src.x(), coord_src.y(), coord_src.z(),
+       coord_dst.x(), coord_dst.y(), coord_dst.z());
     cudaCheck(cudaGetLastError());
   } else {
     std::cerr << "CudaDomdec::reorder_coord, not ready for numnode > 1" << std::endl;

@@ -8,7 +8,7 @@ void CudaDomdecRecipLooper::run() {
     if (!recipComm.recv_header()) break;
 
     // Resize coordinate array if needed
-    xyzq.set_ncoord(recipComm.get_ncoord());
+    xyzq.resize(recipComm.get_ncoord());
 
     // Resize force array if needed
     reallocate<float3>(&force, &force_len, recipComm.get_ncoord(), 1.0f);

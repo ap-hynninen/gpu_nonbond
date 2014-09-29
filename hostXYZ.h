@@ -8,7 +8,7 @@
 template<typename T> class cudaXYZ;
 
 //
-// Host XYZ strided array class
+// Host XYZ array class
 // By default host array is allocated pinned (PINNED)
 //
 // (c) Antti-Pekka Hynninen, 2014, aphynninen@hotmail.com
@@ -20,100 +20,93 @@ template <typename T>
 class hostXYZ : public XYZ<T> {
 
 private:
-  int type;
+  int _type;
 
 public:
 
-  hostXYZ() {
-    this->type = PINNED;
-  }
+ hostXYZ() : _type(PINNED) {}
 
-  hostXYZ(int n, int type=PINNED) {
-    this->type = type;
-    this->resize(n);
+ hostXYZ(int size, int type=PINNED) : _type(type) {
+    this->resize(size);
   }
-
-  hostXYZ(int n, int stride, T *data, int type=PINNED) {
-    this->n = n;
-    this->stride = stride;
-    this->data = data;
-    this->type = type;
-  }
+  
+ hostXYZ(int size, int capacity, T *x, T *y, T *z, int type=PINNED) : 
+  _type(type), XYZ<T>(size, capacity, x, y, z) {}
 
   template <typename P>
-  hostXYZ(cudaXYZ<P> &xyz, int type=PINNED) {
-    this->type = type;
-    this->resize(xyz.n);
+    hostXYZ(cudaXYZ<P> &xyz, int type=PINNED) : _type(type) {
+    this->resize(xyz.size());
     this->set_data_sync(xyz);
   }
 
   ~hostXYZ() {
-    this->n = 0;
-    this->stride = 0;
-    this->size = 0;
-    if (this->data != NULL) {
-      if (type == PINNED) {
-	deallocate_host<T>(&this->data);
+    this->_size = 0;
+    this->_capacity = 0;
+    if (this->_x != NULL) {
+      if (this->_type == PINNED) {
+	deallocate_host<T>(&this->_x);
+	deallocate_host<T>(&this->_y);
+	deallocate_host<T>(&this->_z);
       } else {
-	delete [] this->data;
+	delete [] this->_x;
+	delete [] this->_y;
+	delete [] this->_z;
       }
     }
   }
 
-  void resize(int n, float fac=1.0f) {
-    this->n = n;
-    this->stride = calc_stride<T>(this->n);
-    if (type == PINNED) {
-      reallocate_host<T>(&this->data, &this->size, 3*this->stride, fac);
+  void realloc_array(T** array, int* capacity, float fac) {
+    if (this->_type == PINNED) {
+      reallocate_host<T>(array, capacity, this->_size, fac);
     } else {
-      if (this->data != NULL && this->size < 3*this->stride) {
-	delete [] this->data;
-	this->data = NULL;
+      if (*array != NULL && this->_capacity < *capacity) {
+	delete [] *array;
+	*array = NULL;
       }
-      if (this->data == NULL) {
+      if (*array == NULL) {
 	if (fac > 1.0f) {
-	  this->size = (int)(((double)(3*this->stride))*(double)(fac));
+	  *capacity = (int)(((double)(this->_size))*(double)(fac));
 	} else {
-	  this->size = 3*this->stride;
+	  *capacity = this->_size;
 	}
-	this->data = new T[this->size];
-      }
+	*array = new T[*capacity];
+      }      
     }
   }
-
-  // Sets data from cudaXYZ object
-  //  void set_data(cudaXYZ<T> &xyz, cudaStream_t stream=0) {
-  //    assert(this->stride == xyz.stride);
-  //    copy_DtoH<T>(xyz.data, this->data, 3*this->stride, stream);
-  //  }
 
   // Sets data from cudaXYZ object
   template <typename P>
   void set_data(cudaXYZ<P> &xyz, cudaStream_t stream=0) {
     assert(this->match(xyz));
-    copy_DtoH<T>((T *)xyz.data, this->data, 3*this->stride, stream);
+    copy_DtoH<T>((T *)xyz.x(), this->_x, this->_size, stream);
+    copy_DtoH<T>((T *)xyz.y(), this->_y, this->_size, stream);
+    copy_DtoH<T>((T *)xyz.z(), this->_z, this->_size, stream);
   }
 
-  // Sets data from cudaXYZ object
+  // Sets data from cudaXYZ object with sync
   template <typename P>
   void set_data_sync(cudaXYZ<P> &xyz) {
     assert(this->match(xyz));
-    copy_DtoH_sync<T>((T *)xyz.data, this->data, 3*this->stride);
+    copy_DtoH_sync<T>((T *)xyz.x(), this->_x, this->_size);
+    copy_DtoH_sync<T>((T *)xyz.y(), this->_y, this->_size);
+    copy_DtoH_sync<T>((T *)xyz.z(), this->_z, this->_size);
   }
 
-  // Sets data from list of numbers on device
-  void set_data_sync(const T *d_x, const T *d_y, const T *d_z) {
-    copy_DtoH_sync<T>(d_x, this->data,                  this->n);
-    copy_DtoH_sync<T>(d_y, &this->data[this->stride],   this->n);
-    copy_DtoH_sync<T>(d_z, &this->data[this->stride*2], this->n);
+  // Sets data from device arrays
+  void set_data_sync(const int size, const T *d_x, const T *d_y, const T *d_z) {
+    assert(size == this->_size);
+    copy_DtoH_sync<T>(d_x, this->_x, this->_size);
+    copy_DtoH_sync<T>(d_y, this->_y, this->_size);
+    copy_DtoH_sync<T>(d_z, this->_z, this->_size);
   }
 
-  // Sets data from host buffers
-  void set_data_fromhost(const T *h_x, const T *h_y, const T *h_z) {
-    for (int i=0;i < this->n;i++) {
-      this->data[i]                = h_x[i];
-      this->data[i+this->stride]   = h_y[i];
-      this->data[i+this->stride*2] = h_z[i];
+  // Sets data from host arrays
+  void set_data_fromhost(const int size, const T *h_x, const T *h_y, const T *h_z) {
+    assert(size == this->_size);
+    for (int i=0;i < this->_size;i++) {
+      this->_x[i] = h_x[i];
+      this->_y[i] = h_y[i];
+      this->_z[i] = h_z[i];
     }
   }
 

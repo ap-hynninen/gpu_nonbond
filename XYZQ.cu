@@ -15,33 +15,34 @@
 //
 // Copies x, y, z coordinates into xyzq -array
 //
-__global__ void set_xyz_kernel(const int ncoord, const int stride,
-			       const double* __restrict__ xyz,
+__global__ void set_xyz_kernel(const int ncoord,
+			       const double* __restrict__ x,
+			       const double* __restrict__ y,
+			       const double* __restrict__ z,
 			       float4* __restrict__ xyzq) {
   const int tid = threadIdx.x + blockIdx.x*blockDim.x;
   if (tid < ncoord) {
-    float x = xyz[tid];
-    float y = xyz[tid + stride];
-    float z = xyz[tid + stride*2];
-    xyzq[tid].x = x;
-    xyzq[tid].y = y;
-    xyzq[tid].z = z;
+    xyzq[tid].x = x[tid];
+    xyzq[tid].y = y[tid];
+    xyzq[tid].z = z[tid];
   }
 }
 
 //
 // Copies (x, y, z, q) into xyzq -array
 //
-__global__ void set_xyzq_kernel(const int ncoord, const int stride,
-				const double* __restrict__ xyz,
+__global__ void set_xyzq_kernel(const int ncoord,
+				const double* __restrict__ x,
+				const double* __restrict__ y,
+				const double* __restrict__ z,
 				const float* __restrict__ q,
 				float4* __restrict__ xyzq) {
   const int tid = threadIdx.x + blockIdx.x*blockDim.x;
   if (tid < ncoord) {
     float4 xyzq_val;
-    xyzq_val.x = xyz[tid];
-    xyzq_val.y = xyz[tid + stride];
-    xyzq_val.z = xyz[tid + stride*2];
+    xyzq_val.x = x[tid];
+    xyzq_val.y = y[tid];
+    xyzq_val.z = z[tid];
     xyzq_val.w = q[tid];
     xyzq[tid] = xyzq_val;
   }
@@ -50,8 +51,10 @@ __global__ void set_xyzq_kernel(const int ncoord, const int stride,
 //
 // Copies (x, y, z, q) into xyzq -array and also shifts (x, y, z)
 //
-__global__ void set_xyzq_shift_kernel(const int ncoord, const int stride,
-				      const double* __restrict__ xyz,
+__global__ void set_xyzq_shift_kernel(const int ncoord,
+				      const double* __restrict__ x,
+				      const double* __restrict__ y,
+				      const double* __restrict__ z,
 				      const float* __restrict__ q,
 				      const int* __restrict__ loc2glo,
 				      const float3* __restrict__ xyz_shift,
@@ -61,9 +64,9 @@ __global__ void set_xyzq_shift_kernel(const int ncoord, const int stride,
   if (tid < ncoord) {
     float4 xyzq_val;
     float3 shift = xyz_shift[tid];
-    xyzq_val.x = (float)(xyz[tid]            + ((double)shift.x)*boxx);
-    xyzq_val.y = (float)(xyz[tid + stride]   + ((double)shift.y)*boxy);
-    xyzq_val.z = (float)(xyz[tid + stride*2] + ((double)shift.z)*boxz);
+    xyzq_val.x = (float)(x[tid] + ((double)shift.x)*boxx);
+    xyzq_val.y = (float)(y[tid] + ((double)shift.y)*boxy);
+    xyzq_val.z = (float)(z[tid] + ((double)shift.z)*boxz);
     xyzq_val.w = q[loc2glo[tid]];
     xyzq[tid] = xyzq_val;
   }
@@ -72,8 +75,10 @@ __global__ void set_xyzq_shift_kernel(const int ncoord, const int stride,
 //
 // Copies (x, y, z) into xyzq -array and also shifts (x, y, z)
 //
-__global__ void set_xyz_shift_kernel(const int ncoord, const int stride,
-				     const double* __restrict__ xyz,
+__global__ void set_xyz_shift_kernel(const int ncoord,
+				     const double* __restrict__ x,
+				     const double* __restrict__ y,
+				     const double* __restrict__ z,
 				     const float3* __restrict__ xyz_shift,
 				     const double boxx, const double boxy, const double boxz,
 				     float4* __restrict__ xyzq) {
@@ -81,9 +86,9 @@ __global__ void set_xyz_shift_kernel(const int ncoord, const int stride,
   if (tid < ncoord) {
     float4 xyzq_val;
     float3 shift = xyz_shift[tid];
-    xyzq_val.x = (float)(xyz[tid]            + ((double)shift.x)*boxx);
-    xyzq_val.y = (float)(xyz[tid + stride]   + ((double)shift.y)*boxy);
-    xyzq_val.z = (float)(xyz[tid + stride*2] + ((double)shift.z)*boxz);
+    xyzq_val.x = (float)(x[tid] + ((double)shift.x)*boxx);
+    xyzq_val.y = (float)(y[tid] + ((double)shift.y)*boxy);
+    xyzq_val.z = (float)(z[tid] + ((double)shift.z)*boxz);
     xyzq[tid].x = xyzq_val.x;
     xyzq[tid].y = xyzq_val.y;
     xyzq[tid].z = xyzq_val.z;
@@ -170,9 +175,9 @@ XYZQ::~XYZQ() {
 }
 
 //
-// Set ncoord
+// Resize
 //
-void XYZQ::set_ncoord(int ncoord, float fac) {
+void XYZQ::resize(int ncoord, float fac) {
   this->ncoord = ncoord;
   int req_xyzq_len = get_xyzq_len();
   
@@ -194,7 +199,7 @@ void XYZQ::set_xyzq(const cudaXYZ<double>& coord, const float *q, cudaStream_t s
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
-  set_xyzq_kernel<<< nblock, nthread, 0, stream >>>(coord.n, coord.stride, coord.data, q, xyzq);
+  set_xyzq_kernel<<< nblock, nthread, 0, stream >>>(coord.size(), coord.x(), coord.y(), coord.z(), q, xyzq);
 
   cudaCheck(cudaGetLastError());
 }
@@ -208,7 +213,7 @@ void XYZQ::set_xyzq(const cudaXYZ<double>& coord, const float *q, const int *loc
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
-  set_xyzq_shift_kernel<<< nblock, nthread, 0, stream >>>(coord.n, coord.stride, coord.data, q,
+  set_xyzq_shift_kernel<<< nblock, nthread, 0, stream >>>(coord.size(), coord.x(), coord.y(), coord.z(), q,
 							  loc2glo, xyz_shift, boxx, boxy, boxz, xyzq);
 
   cudaCheck(cudaGetLastError());
@@ -221,7 +226,7 @@ void XYZQ::set_xyz(const cudaXYZ<double>& coord, cudaStream_t stream) {
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
-  set_xyz_kernel<<< nblock, nthread, 0, stream >>>(coord.n, coord.stride, coord.data, xyzq);
+  set_xyz_kernel<<< nblock, nthread, 0, stream >>>(coord.size(), coord.x(), coord.y(), coord.z(), xyzq);
 
   cudaCheck(cudaGetLastError());
 }
@@ -233,7 +238,7 @@ void XYZQ::set_xyz(const cudaXYZ<double>& coord, const int start, const int end,
 		   const double boxx, const double boxy, const double boxz, cudaStream_t stream) {
   assert(start >= 0);
   assert(end < ncoord);
-  assert(end < coord.n);
+  assert(end < coord.size());
   int nset = end-start+1;
   assert(nset >= 0);
 
@@ -242,7 +247,7 @@ void XYZQ::set_xyz(const cudaXYZ<double>& coord, const int start, const int end,
   int nthread = 512;
   int nblock = (nset-1)/nthread+1;
 
-  set_xyz_shift_kernel<<< nblock, nthread, 0, stream >>>(nset, coord.stride, &coord.data[start],
+  set_xyz_shift_kernel<<< nblock, nthread, 0, stream >>>(nset, coord.x()+start, coord.y()+start, coord.z()+start,
 							 &xyz_shift[start], boxx, boxy, boxz, &xyzq[start]);
 
   cudaCheck(cudaGetLastError());

@@ -47,7 +47,7 @@ class CudaDomdecRecip : public DomdecRecip {
 	    const bool calc_energy, const bool calc_virial, Force<long long int>& force) {
     double recip[9];
     solvePoisson(inv_boxx, inv_boxy, inv_boxz, coord, ncoord, calc_energy, calc_virial, recip);
-    grid.gather_force(coord, ncoord, recip, force.xyz.stride, force.xyz.data);
+    grid.gather_force(coord, ncoord, recip, force.stride(), force.xyz());
     if (calc_energy) grid.calc_self_energy(coord, ncoord);
   }
 
@@ -59,7 +59,7 @@ class CudaDomdecRecip : public DomdecRecip {
 	    const bool calc_energy, const bool calc_virial, Force<float>& force) {
     double recip[9];
     solvePoisson(inv_boxx, inv_boxy, inv_boxz, coord, ncoord, calc_energy, calc_virial, recip);
-    grid.gather_force(coord, ncoord, recip, force.xyz.stride, force.xyz.data);
+    grid.gather_force(coord, ncoord, recip, force.stride(), force.xyz());
     if (calc_energy) grid.calc_self_energy(coord, ncoord);
   }
 

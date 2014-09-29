@@ -13,14 +13,6 @@
         }                                                  \
     } while(0)
 
-// Returns stride that aligns with 256 byte boundaries
-template <typename T>
-inline int calc_stride(int ncoord) {
-  //const int sizeof_T = 4;
-  return (( (ncoord-1+32)*sizeof(T) - 1)/256 + 1)*256/sizeof(T);
-  //return ((ncoord*sizeof_T - 1)/256 + 1)*256/sizeof_T;
-}
-
 void deallocate_host_T(void **pp);
 void allocate_host_T(void **pp, const int len, const size_t sizeofT);
 void reallocate_host_T(void **pp, int *curlen, const int newlen, const float fac, const size_t sizeofT);

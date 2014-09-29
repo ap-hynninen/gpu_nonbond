@@ -40,7 +40,7 @@ class Domdec {
     boxx(boxx), boxy(boxy), boxz(boxz),
     rnl(rnl), nx(nx), ny(ny), nz(nz), numnode(nx*ny*nz),
     mynode(mynode) {
-      
+
       // Setup (homeix, homeiy, homeiz)
       int m = mynode;
       homeiz = m/(nx*ny);

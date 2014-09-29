@@ -7,9 +7,9 @@ class HoloConst {
 private:
 
   bool use_textures;
-  void setup_textures(double *xyz0, double *xyz1, int stride);
+  void setup_textures(cudaXYZ<double>& xyz, int i);
 
-  void update_setup(int stride, double *xyz0, double *xyz1, double *xyz2,
+  void update_setup(cudaXYZ<double>& xyz0, cudaXYZ<double>& xyz1, cudaXYZ<double>& xyz2,
 		    cudaStream_t stream=0);
 
   void set_solvent(const int nsolvent, const int3 *h_solvent_ind);
@@ -109,7 +109,7 @@ public:
 			     const int nsolvent, const int3 *global_solvent_ind,
 			     const int* loc2glo);
 
-  void apply(cudaXYZ<double> *xyz0, cudaXYZ<double> *xyz1, cudaStream_t stream=0);
+  void apply(cudaXYZ<double>& xyz0, cudaXYZ<double>& xyz1, cudaStream_t stream=0);
 
 };
 

@@ -20,8 +20,8 @@ public:
   VirialPressure();
   ~VirialPressure();
 
-  void calc_virial(cudaXYZ<double> *coord,
-		   cudaXYZ<double> *force,
+  void calc_virial(cudaXYZ<double>& coord,
+		   cudaXYZ<double>& force,
 		   float3 *xyz_shift,
 		   float boxx, float boxy, float boxz,
 		   double *d_vpress, double *h_vpress,

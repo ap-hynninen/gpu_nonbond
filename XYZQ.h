@@ -26,7 +26,7 @@ public:
   XYZQ(const char *filename, int align=1);
   ~XYZQ();
 
-  void set_ncoord(int ncoord, float fac=1.0f);
+  void resize(int ncoord, float fac=1.0f);
   void set_xyzq(int ncopy, float4 *h_xyzq, size_t offset=0, cudaStream_t stream=0);
 
   void set_xyzq(const cudaXYZ<double>& coord, const float *q, cudaStream_t stream=0);
