@@ -59,6 +59,7 @@ class Domdec {
 
   // Return number of nodes
   int get_numnode() {return numnode;}
+  int get_numnode() const {return numnode;}
 
   // Return the cumulative coordinate number
   int* get_zone_pcoord() {return zone_pcoord;}

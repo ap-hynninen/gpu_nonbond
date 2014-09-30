@@ -3,7 +3,42 @@
 #include "gpu_utils.h"
 #include "CudaDomdecBonded.h"
 
-__global__ void build_tbl_kernel(const int nbond_tbl, int* __restrict__ bond_tbl,
+__global__ void build_tbl_kernel_single(const int nbond_tbl, int* __restrict__ bond_tbl,
+					const int nureyb_tbl, int* __restrict__ ureyb_tbl,
+					const int nangle_tbl, int* __restrict__ angle_tbl,
+					const int ndihe_tbl, int* __restrict__ dihe_tbl,
+					const int nimdihe_tbl, int* __restrict__ imdihe_tbl,
+					const int ncmap_tbl, int* __restrict__ cmap_tbl,
+					const int nin14_tbl, int* __restrict__ in14_tbl,
+					const int nex14_tbl, int* __restrict__ ex14_tbl) {
+  const int pos = threadIdx.x + blockIdx.x*blockDim.x;
+  if (pos < nbond_tbl) {
+    bond_tbl[pos] = pos;
+  } else if (pos < nbond_tbl + nureyb_tbl) {
+    ureyb_tbl[pos-nbond_tbl] = pos-nbond_tbl;
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl) {
+    angle_tbl[pos-nbond_tbl-nureyb_tbl] = pos-nbond_tbl-nureyb_tbl;
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl) {
+    dihe_tbl[pos-nbond_tbl-nureyb_tbl-nangle_tbl] = pos-nbond_tbl-nureyb_tbl-nangle_tbl;
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl + nimdihe_tbl) {
+    imdihe_tbl[pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl] = 
+      pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl;
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl + nimdihe_tbl + ncmap_tbl) {
+    cmap_tbl[pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl] = 
+      pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl;
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl + nimdihe_tbl + ncmap_tbl
+	     + nin14_tbl) {
+    in14_tbl[pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl-ncmap_tbl] = 
+      pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl-ncmap_tbl;
+  } else if (pos < nbond_tbl + nureyb_tbl + nangle_tbl + ndihe_tbl + nimdihe_tbl + ncmap_tbl
+	     + nin14_tbl + nex14_tbl) {
+    ex14_tbl[pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl-ncmap_tbl-nin14_tbl] = 
+      pos-nbond_tbl-nureyb_tbl-nangle_tbl-ndihe_tbl-nimdihe_tbl-ncmap_tbl-nin14_tbl;
+  }
+}
+
+__global__ void build_tbl_kernel(
+				 const int nbond_tbl, int* __restrict__ bond_tbl,
 				 const int nureyb_tbl, int* __restrict__ ureyb_tbl,
 				 const int nangle_tbl, int* __restrict__ angle_tbl,
 				 const int ndihe_tbl, int* __restrict__ dihe_tbl,
@@ -44,14 +79,14 @@ __global__ void build_tbl_kernel(const int nbond_tbl, int* __restrict__ bond_tbl
 //
 // Class creator
 //
-CudaDomdecBonded::CudaDomdecBonded(const int nbond, const bond_t* h_bond,
+CudaDomdecBonded::CudaDomdecBonded(const CudaDomdec& domdec, const int nbond, const bond_t* h_bond,
 				   const int nureyb, const bond_t* h_ureyb,
 				   const int nangle, const angle_t* h_angle,
 				   const int ndihe, const dihe_t* h_dihe,
 				   const int nimdihe, const dihe_t* h_imdihe,
 				   const int ncmap, const cmap_t* h_cmap,
 				   const int nin14, const xx14_t* h_in14,
-				   const int nex14, const xx14_t* h_ex14) {
+				   const int nex14, const xx14_t* h_ex14) : domdec(domdec) {
   assert((nureyb == 0) || (nureyb > 0 && nureyb == nangle));
 
   bond = NULL;
@@ -142,6 +177,8 @@ CudaDomdecBonded::CudaDomdecBonded(const int nbond, const bond_t* h_bond,
   nex14_tbl = 0;
   ex14_tbl_len = 0;
   ex14_tbl = NULL;
+
+  tbl_upto_date = false;
 }
 
 //
@@ -170,10 +207,9 @@ CudaDomdecBonded::~CudaDomdecBonded() {
 //
 // Build tables
 //
-void CudaDomdecBonded::build_tbl(const CudaDomdec *domdec, const int *zone_patom,
-				 cudaStream_t stream) {
+void CudaDomdecBonded::build_tbl(cudaStream_t stream) {
 
-  if (domdec->numnode == 1) {
+  if (domdec.get_numnode() == 1 && !tbl_upto_date) {
     nbond_tbl = nbond;
     nureyb_tbl = nureyb;
     nangle_tbl = nangle;
@@ -196,7 +232,7 @@ void CudaDomdecBonded::build_tbl(const CudaDomdec *domdec, const int *zone_patom
     int nblock = (nbond_tbl + nureyb_tbl + nangle_tbl + 
 		  ndihe_tbl + nimdihe_tbl + ncmap_tbl +
 		  nin14_tbl + nex14_tbl - 1)/nthread + 1;
-    build_tbl_kernel<<< nblock, nthread, 0, stream >>>
+    build_tbl_kernel_single<<< nblock, nthread, 0, stream >>>
       (nbond_tbl, bond_tbl,
        nureyb_tbl, ureyb_tbl,
        nangle_tbl, angle_tbl,
@@ -207,6 +243,7 @@ void CudaDomdecBonded::build_tbl(const CudaDomdec *domdec, const int *zone_patom
        nex14_tbl, ex14_tbl);
     cudaCheck(cudaGetLastError());
 
+    tbl_upto_date = true;
   } else {
     std::cerr << "CudaDomdecBonded::build_tbl, numnode > 1 not implemented yet" << std::endl;
     exit(1);

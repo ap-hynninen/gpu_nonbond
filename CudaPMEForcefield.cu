@@ -210,7 +210,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     //domdec.get_boxz(), domdec.get_rnl(), xyzq.xyzq, domdec.get_loc2glo());
 
     // Build bonded tables
-    domdec_bonded.build_tbl(&domdec, domdec.get_zone_pcoord());
+    domdec_bonded.build_tbl();
 
     // Setup bonded interaction lists
     bonded.setup_list(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),

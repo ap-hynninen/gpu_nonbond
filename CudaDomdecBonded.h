@@ -8,6 +8,8 @@ class CudaDomdecBonded {
 
  private:
 
+  const CudaDomdec& domdec;
+
   // Global bonded lists, constant
   int nbond;
   bond_t* bond;
@@ -33,7 +35,7 @@ class CudaDomdecBonded {
   int nex14;
   xx14_t *ex14;
 
-  // Bonded tables, potentially change at every neighborlist build
+  // Bonded tables, change at every neighborlist build
   int nbond_tbl;
   int bond_tbl_len;
   int *bond_tbl;
@@ -66,9 +68,11 @@ class CudaDomdecBonded {
   int ex14_tbl_len;
   int *ex14_tbl;
 
+  bool tbl_upto_date;
+
  public:
 
-  CudaDomdecBonded(const int nbond, const bond_t* h_bond,
+  CudaDomdecBonded(const CudaDomdec& domdec, const int nbond, const bond_t* h_bond,
 		   const int nureyb, const bond_t* h_ureyb,
 		   const int nangle, const angle_t* h_angle,
 		   const int ndihe, const dihe_t* h_dihe,
@@ -78,8 +82,7 @@ class CudaDomdecBonded {
 		   const int nex14, const xx14_t* h_ex14);
   ~CudaDomdecBonded();
 
-  void build_tbl(const CudaDomdec* domdec, const int *zone_patom,
-		 cudaStream_t stream=0);
+  void build_tbl(cudaStream_t stream=0);
 
   bond_t* get_bond() {return bond;}
   bond_t* get_ureyb() {return ureyb;}

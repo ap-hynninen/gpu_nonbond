@@ -198,6 +198,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	reallocate_host<char>(&h_recvbuf, &h_recvbuf_len, precv.at(nz_comm), 1.2f);
       }
       z_recv_ind.resize(precv.at(nz_comm));
+      coord.resize(coord.size()+precv.at(nz_comm));
     }
 
     // Send & Recv data
@@ -219,7 +220,11 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       }
     }    
 
+    //----------------------------------------------------
     // Unpack data from +z-direction into correct arrays
+    //----------------------------------------------------
+    // Position where we start adding coordinates
+    int cpos = domdec.get_zone_pcoord()[0];
     for (int i=0;i < nz_comm;i++) {
       int pos = 0;
       int src_pos = precv.at(i);
@@ -235,19 +240,20 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       // format = X[nrecv.at(i) x double] | Y[nrecv.at(i) x double] | Z[nrecv.at(i) x double]
       
       thrust::device_ptr<double> x_src_ptr((double *)&recvbuf[src_pos]);
-      thrust::device_ptr<double> x_dst_ptr(coord.x());
+      thrust::device_ptr<double> x_dst_ptr(coord.x() + cpos);
       thrust::copy(x_src_ptr, x_src_ptr+z_nrecv.at(i), x_dst_ptr);
       src_pos += z_nrecv.at(i)*sizeof(double);
 
       thrust::device_ptr<double> y_src_ptr((double *)&recvbuf[src_pos]);
-      thrust::device_ptr<double> y_dst_ptr(coord.y());
+      thrust::device_ptr<double> y_dst_ptr(coord.y() + cpos);
       thrust::copy(y_src_ptr, y_src_ptr+z_nrecv.at(i), y_dst_ptr);
       src_pos += z_nrecv.at(i)*sizeof(double);
 
       thrust::device_ptr<double> z_src_ptr((double *)&recvbuf[src_pos]);
-      thrust::device_ptr<double> z_dst_ptr(coord.z());
+      thrust::device_ptr<double> z_dst_ptr(coord.z() + cpos);
       thrust::copy(z_src_ptr, z_src_ptr+z_nrecv.at(i), z_dst_ptr);
       src_pos += z_nrecv.at(i)*sizeof(double);
+      cpos += z_nrecv.at(i);
     }
   } // if (nz_comm > 0)
   

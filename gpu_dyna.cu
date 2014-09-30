@@ -338,13 +338,14 @@ void test() {
     NeighborList<32> nlist(ncoord, iblo14, inb14);
 
     // Setup domain decomposition
-    CudaDomdecBonded domdec_bonded(nbond, bond, nureyb, ureyb, nangle, angle,
-				   ndihe, dihe, nimdihe, imdihe, ncmap, cmap,
-				   nin14, in14, nex14, ex14);
 
     CudaMPI cudaMPI(cudaAware, comm_direct);
 
     CudaDomdec domdec(ncoord, boxx, boxy, boxz, rnl, nx, ny, nz, mynode, cudaMPI);
+
+    CudaDomdecBonded domdec_bonded(domdec, nbond, bond, nureyb, ureyb, nangle, angle,
+				   ndihe, dihe, nimdihe, imdihe, ncmap, cmap,
+				   nin14, in14, nex14, ex14);
 
     // Charges
     float *q = new float[ncoord];
