@@ -2,24 +2,72 @@
 #ifndef BONDED_STRUCT_H
 #define BONDED_STRUCT_H
 
+#include <vector>
+
+enum {BOND, UREYB, ANGLE, DIHE, IMDIHE, CMAP, IN14, EX14};
+
 struct bond_t {
   int i, j, itype;
+  static int type() {return 0;}
+  static int size() {return 2;}
+  void getAtoms(std::vector<int>& atoms) {
+    atoms.resize(size());
+    atoms.at(0) = i;
+    atoms.at(1) = j;
+  }
 };
 
 struct angle_t {
   int i, j, k, itype;
+  static int type() {return 1;}
+  static int size() {return 3;}
+  void getAtoms(std::vector<int>& atoms) {
+    atoms.resize(size());
+    atoms.at(0) = i;
+    atoms.at(1) = j;
+    atoms.at(2) = k;
+  }
 };
 
 struct dihe_t {
   int i, j, k, l, itype;
+  static int type() {return 2;}
+  static int size() {return 4;}
+  void getAtoms(std::vector<int>& atoms) {
+    atoms.resize(size());
+    atoms.at(0) = i;
+    atoms.at(1) = j;
+    atoms.at(2) = k;
+    atoms.at(3) = l;
+  }
 };
 
 struct cmap_t {
   int i1, j1, k1, l1, i2, j2, k2, l2, itype;
+  static int type() {return 3;}
+  static int size() {return 8;}
+  void getAtoms(std::vector<int>& atoms) {
+    atoms.resize(size());
+    atoms.at(0) = i1;
+    atoms.at(1) = j1;
+    atoms.at(2) = k1;
+    atoms.at(3) = l1;
+    atoms.at(4) = i2;
+    atoms.at(5) = j2;
+    atoms.at(6) = k2;
+    atoms.at(7) = l2;
+  }
 };
 
 struct xx14_t {
   int i, j;
+  static int type() {return 4;}
+  static int size() {return 2;}
+  void getAtoms(std::vector<int>& atoms) {
+    atoms.resize(size());
+    atoms.at(0) = i;
+    atoms.at(1) = j;
+  }
 };
 
 // Data structures for bonds, angles, dihedrals, and cmap

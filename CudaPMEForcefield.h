@@ -9,7 +9,7 @@
 #include "BondedForce.h"
 #include "Grid.h"
 #include "CudaDomdec.h"
-#include "CudaDomdecBonded.h"
+#include "CudaDomdecGroups.h"
 #include "CudaDomdecRecip.h"
 #include "CudaDomdecRecipComm.h"
 
@@ -72,7 +72,7 @@ private:
   // Domain decomposition
   // ---------------------
   CudaDomdec& domdec;
-  CudaDomdecBonded& domdec_bonded;
+  CudaDomdecGroups& domdecGroups;
 
   // Host version of loc2glo
   int h_loc2glo_len;
@@ -140,7 +140,7 @@ private:
 
 public:
 
-  CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded& domdec_bonded,
+  CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecGroups& domdecGroups,
 		    NeighborList<32>& nlist,
 		    const int nbondcoef, const float2 *h_bondcoef,
 		    const int nureybcoef, const float2 *h_ureybcoef,

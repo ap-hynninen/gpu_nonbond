@@ -12,7 +12,9 @@ __global__ void calc_xyz_shift(const int ncoord,
 			       const double* __restrict__ z,
 			       const double x0, const double y0, const double z0,
 			       const double inv_boxx, const double inv_boxy, const double inv_boxz,
-			       float3* __restrict__ xyz_shift) {
+			       const int* __restrict__ loc2glo,
+			       float3* __restrict__ xyz_shift,
+			       char* __restrict__ coordLoc) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
   if (i < ncoord) {
     double xi = x[i]*inv_boxx;
@@ -23,6 +25,12 @@ __global__ void calc_xyz_shift(const int ncoord,
     shift.y = ceilf(y0 - yi);
     shift.z = ceilf(z0 - zi);
     xyz_shift[i] = shift;
+    float xf = (float)xi + shift.x;
+    float yf = (float)yi + shift.y;
+    float zf = (float)zi + shift.z;
+    // (xf, yf, zf) is in range (0...1)
+    int iglo = loc2glo[i];
+    coordLoc[iglo] = 7;
   }
 }
 
@@ -120,12 +128,16 @@ CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, do
 
   mass_tmp_len = 0;
   mass_tmp = NULL;
+
+  allocate<char>(&coordLoc, ncoord_glo);
+  clear_gpu_array_sync<char>(coordLoc, ncoord_glo);
 }
 
 //
 // Class destructor
 //
 CudaDomdec::~CudaDomdec() {
+  deallocate<char>(&coordLoc);
   if (xyz_shift0 != NULL) deallocate<float3>(&xyz_shift0);
   if (xyz_shift1 != NULL) deallocate<float3>(&xyz_shift1);
   if (mass_tmp != NULL) deallocate<float>(&mass_tmp);
@@ -240,7 +252,8 @@ void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStrea
     nblock = (zone_pcoord[7] - 1)/nthread + 1;
     calc_xyz_shift<<< nblock, nthread, 0, stream >>>
       (zone_pcoord[7], coord.x(), coord.y(), coord.z(),
-       x0, y0, z0, this->get_inv_boxx(), this->get_inv_boxy(), this->get_inv_boxz(), xyz_shift0);
+       x0, y0, z0, this->get_inv_boxx(), this->get_inv_boxy(), this->get_inv_boxz(),
+       this->get_loc2glo_ptr(), xyz_shift0, coordLoc);
     cudaCheck(cudaGetLastError());
   }
 

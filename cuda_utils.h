@@ -251,6 +251,13 @@ void clear_gpu_array(T *data, const int ndata
 }
 #endif
 
+#ifdef __cplusplus
+template <class T>
+void clear_gpu_array_sync(T *data, const int ndata) {
+  clear_gpu_array_T(data, ndata, sizeof(T));
+}
+#endif
+
 //----------------------------------------------------------------------------------------
 
 #ifdef __cplusplus

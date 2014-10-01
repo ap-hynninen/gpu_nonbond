@@ -6,7 +6,7 @@
 #include "mpi_utils.h"
 #include "CudaLeapfrogIntegrator.h"
 #include "CudaDomdec.h"
-#include "CudaDomdecBonded.h"
+#include "CudaDomdecGroups.h"
 #include "CudaPMEForcefield.h"
 #include "CudaDomdecRecipLooper.h"
 
@@ -99,6 +99,21 @@ void write_xyz(const int n, const double *x, const double *y, const double *z, c
   if (file.is_open()) {
     for (int i=0;i < n;i++) {
       file << x[i] << " " << y[i] << " " << z[i] << std::endl;
+    }
+  } else {
+    std::cout << "write_xyz: Error opening file " << filename << std::endl;
+    exit(1);
+  }
+}
+
+//
+// Reads (x, y, z) from a file
+//
+void read_xyz(const int n, double *x, double *y, double *z, const char *filename) {
+  std::ifstream file(filename);
+  if (file.is_open()) {
+    for (int i=0;i < n;i++) {
+      file >> x[i] >> y[i] >> z[i];
     }
   } else {
     std::cout << "write_xyz: Error opening file " << filename << std::endl;
@@ -223,9 +238,6 @@ void test() {
     const int nimdihe = 418;
     const int nimdihecoef = 40;
 
-    const int ncmap = 0;
-    const int ncmapcoef = 0;
-
     bond_t *bond = new bond_t[nbond];
     load_vec<int>(3, "test_data/bond.txt", nbond, (int *)bond);
     float2 *bondcoef = new float2[nbondcoef];
@@ -250,9 +262,6 @@ void test() {
     load_vec<int>(5, "test_data/imdihe.txt", nimdihe, (int *)imdihe);
     float4 *imdihecoef = new float4[nimdihecoef];
     load_vec<float>(4, "test_data/imdihecoef.txt", nimdihecoef, (float *)imdihecoef);
-
-    cmap_t *cmap = NULL;
-    float2 *cmapcoef = NULL;
 
     //-------------------------------------------------------------------------------------
 
@@ -343,9 +352,26 @@ void test() {
 
     CudaDomdec domdec(ncoord, boxx, boxy, boxz, rnl, nx, ny, nz, mynode, cudaMPI);
 
-    CudaDomdecBonded domdec_bonded(domdec, nbond, bond, nureyb, ureyb, nangle, angle,
-				   ndihe, dihe, nimdihe, imdihe, ncmap, cmap,
-				   nin14, in14, nex14, ex14);
+    CudaDomdecGroups domdecGroups(domdec);
+
+    AtomGroup<bond_t> bondGroup(nbond, bond);
+    AtomGroup<bond_t> ureybGroup(nureyb, ureyb);
+    AtomGroup<angle_t> angleGroup(nangle, angle);
+    AtomGroup<dihe_t> diheGroup(ndihe, dihe);
+    AtomGroup<dihe_t> imdiheGroup(nimdihe, imdihe);
+    AtomGroup<xx14_t> in14Group(nin14, in14);
+    AtomGroup<xx14_t> ex14Group(nex14, ex14);
+    // Register groups
+    // NOTE: the register IDs (BOND, UREYB, ...) must be unique
+    domdecGroups.beginGroups();
+    domdecGroups.insertGroup(BOND, bondGroup, bond);
+    domdecGroups.insertGroup(UREYB, ureybGroup, ureyb);
+    domdecGroups.insertGroup(ANGLE, angleGroup, angle);
+    domdecGroups.insertGroup(DIHE, diheGroup, dihe);
+    domdecGroups.insertGroup(IMDIHE, imdiheGroup, imdihe);
+    domdecGroups.insertGroup(IN14, in14Group, in14);
+    domdecGroups.insertGroup(EX14, ex14Group, ex14);
+    domdecGroups.finishGroups();
 
     // Charges
     float *q = new float[ncoord];
@@ -353,12 +379,12 @@ void test() {
 
     // Setup PME force field
     CudaPMEForcefield forcefield(// Domain decomposition
-				 domdec, domdec_bonded,
+				 domdec, domdecGroups,
 				 // Neighborlist
 				 nlist,
 				 // Bonded
 				 nbondcoef, bondcoef, nureybcoef, ureybcoef, nanglecoef, anglecoef,
-				 ndihecoef, dihecoef, nimdihecoef, imdihecoef, ncmapcoef, cmapcoef,
+				 ndihecoef, dihecoef, nimdihecoef, imdihecoef, 0, NULL,
 				 // Direct non-bonded
 				 roff, ron, kappa, e14fac, VDW_VSH, EWALD,
 				 nvdwparam, vdwparam, vdwparam14, vdwtype, q,
@@ -401,6 +427,38 @@ void test() {
     int nstep = 100;
     leapfrog.run(nstep);
 
+    if (nstep == 100 || nstep == 1) {
+      double* fxref = new double[ncoord];
+      double* fyref = new double[ncoord];
+      double* fzref = new double[ncoord];
+      char filename[256];
+      sprintf(filename,"test_data/force_dyn%d.txt",nstep);
+      read_xyz(ncoord, fxref, fyref, fzref, filename);
+      double max_err = 0.0;
+      double err_tol = 1.0e-8;
+      for (int i=0;i < ncoord;i++) {
+	double dfx = fx[i] - fxref[i];
+	double dfy = fy[i] - fyref[i];
+	double dfz = fz[i] - fzref[i];
+	double err = dfx*dfx + dfy*dfy + dfz*dfz;
+	max_err = max(max_err, err);
+	if (err > err_tol) {
+	  std::cout << "i = " << i << " err = " << err << std::endl;
+	  break;
+	}
+      }
+      if (max_err < err_tol) {
+	std::cout << "Test OK, maximum error = " << max_err << std::endl;
+      } else {
+	std::cout << "Test FAILED" << std::endl;
+      }
+      delete [] fxref;
+      delete [] fyref;
+      delete [] fzref;
+    } else {
+      std::cout << "Test NOT performed (nstep != 100)" << std::endl;
+    }
+
     write_xyz(ncoord, x, y, z, "coord.txt");
     write_xyz(ncoord, dx, dy, dz, "step.txt");
     write_xyz(ncoord, fx, fy, fz, "force.txt");
@@ -437,9 +495,6 @@ void test() {
   
     if (imdihe != NULL) delete [] imdihe;
     delete [] imdihecoef;
-
-    //delete [] cmap;
-    //delete [] cmapcoef;
 
     //-------------------------------------------------------------------------------------
 

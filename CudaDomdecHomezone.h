@@ -90,6 +90,7 @@ class CudaDomdecHomezone {
   int update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream=0);
 
   int* get_loc2glo_ptr() {return thrust::raw_pointer_cast(loc2glo.data());}
+  const int* get_loc2glo_ptr() const {return thrust::raw_pointer_cast(loc2glo.data());}
   thrust::device_vector<int>& get_loc2glo() {return loc2glo;}
 };
 

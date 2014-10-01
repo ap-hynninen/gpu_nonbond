@@ -59,7 +59,7 @@ __global__ void heuristic_check_kernel(const int ncoord,
 //
 // Class creator
 //
-CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded& domdec_bonded,
+CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecGroups& domdecGroups,
 				     NeighborList<32>& nlist,
 				     const int nbondcoef, const float2 *h_bondcoef,
 				     const int nureybcoef, const float2 *h_ureybcoef,
@@ -74,7 +74,7 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecBonded& domde
 				     const float *h_vdwparam14,
 				     const int *h_glo_vdwtype, const float *h_glo_q,
 				     CudaDomdecRecip* recip, CudaDomdecRecipComm& recipComm) : 
-  domdec(domdec), recip(recip), domdec_bonded(domdec_bonded), nlist(nlist), recipComm(recipComm),
+  domdec(domdec), recip(recip), domdecGroups(domdecGroups), nlist(nlist), recipComm(recipComm),
   kappa(kappa), recip_force_len(0), recip_force(NULL) {
 
   // Create streams
@@ -210,23 +210,23 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     //domdec.get_boxz(), domdec.get_rnl(), xyzq.xyzq, domdec.get_loc2glo());
 
     // Build bonded tables
-    domdec_bonded.build_tbl();
+    domdecGroups.build_tbl();
 
     // Setup bonded interaction lists
     bonded.setup_list(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
 		      nlist.get_glo2loc(),
-		      domdec_bonded.get_nbond_tbl(), domdec_bonded.get_bond_tbl(),
-		      domdec_bonded.get_bond(),
-		      domdec_bonded.get_nureyb_tbl(), domdec_bonded.get_ureyb_tbl(),
-		      domdec_bonded.get_ureyb(),
-		      domdec_bonded.get_nangle_tbl(), domdec_bonded.get_angle_tbl(),
-		      domdec_bonded.get_angle(),
-		      domdec_bonded.get_ndihe_tbl(), domdec_bonded.get_dihe_tbl(),
-		      domdec_bonded.get_dihe(),
-		      domdec_bonded.get_nimdihe_tbl(), domdec_bonded.get_imdihe_tbl(),
-		      domdec_bonded.get_imdihe(),
-		      domdec_bonded.get_ncmap_tbl(), domdec_bonded.get_cmap_tbl(),
-		      domdec_bonded.get_cmap());
+		      domdecGroups.getNumGroupTable(BOND), domdecGroups.getGroupTable(BOND),
+		      domdecGroups.getGroupList<bond_t>(BOND),
+		      domdecGroups.getNumGroupTable(UREYB), domdecGroups.getGroupTable(UREYB),
+		      domdecGroups.getGroupList<bond_t>(UREYB),
+		      domdecGroups.getNumGroupTable(ANGLE), domdecGroups.getGroupTable(ANGLE),
+		      domdecGroups.getGroupList<angle_t>(ANGLE),
+		      domdecGroups.getNumGroupTable(DIHE), domdecGroups.getGroupTable(DIHE),
+		      domdecGroups.getGroupList<dihe_t>(DIHE),
+		      domdecGroups.getNumGroupTable(IMDIHE), domdecGroups.getGroupTable(IMDIHE),
+		      domdecGroups.getGroupList<dihe_t>(IMDIHE),
+		      domdecGroups.getNumGroupTable(CMAP), domdecGroups.getGroupTable(CMAP),
+		      domdecGroups.getGroupList<cmap_t>(CMAP));
 
     // Set vdwtype for Direct non-bonded interactions
     dir.set_vdwtype(domdec.get_ncoord_tot(), glo_vdwtype, domdec.get_loc2glo_ptr());
@@ -234,10 +234,10 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Setup 1-4 interaction lists
     dir.set_14_list(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
 		    nlist.get_glo2loc(),
-		    domdec_bonded.get_nin14_tbl(), domdec_bonded.get_in14_tbl(),
-		    domdec_bonded.get_in14(),
-		    domdec_bonded.get_nex14_tbl(), domdec_bonded.get_ex14_tbl(),
-		    domdec_bonded.get_ex14());
+		    domdecGroups.getNumGroupTable(IN14), domdecGroups.getGroupTable(IN14),
+		    domdecGroups.getGroupList<xx14_t>(IN14),
+		    domdecGroups.getNumGroupTable(EX14), domdecGroups.getGroupTable(EX14),
+		    domdecGroups.getGroupList<xx14_t>(EX14));
 
     // Re-order prev_step vector:
     domdec.reorder_coord(prev_step, ref_coord, nlist.get_ind_sorted());

@@ -53,9 +53,11 @@ class Domdec {
 
   // Return the global total number of coordinates
   int get_ncoord_glo() {return ncoord_glo;}
+  int get_ncoord_glo() const {return ncoord_glo;}
 
   // Return the number of coordinates in the homezone
   int get_ncoord() {return zone_ncoord[0];}
+  int get_ncoord() const {return zone_ncoord[0];}
 
   // Return number of nodes
   int get_numnode() {return numnode;}
@@ -63,9 +65,11 @@ class Domdec {
 
   // Return the cumulative coordinate number
   int* get_zone_pcoord() {return zone_pcoord;}
+  const int* get_zone_pcoord() const {return zone_pcoord;}
 
   // Return the total number of coordinates in all zones
   int get_ncoord_tot() {return zone_pcoord[7];};
+  int get_ncoord_tot() const {return zone_pcoord[7];};
 
   // Calculate zone_pcoord
   void update_zone_pcoord() {
@@ -77,21 +81,32 @@ class Domdec {
 
   // Return current node ID
   int get_mynode() {return mynode;}
+  int get_mynode() const {return mynode;}
 
   int get_nx() {return nx;}
   int get_ny() {return ny;}
   int get_nz() {return nz;}
+  int get_nx() const {return nx;}
+  int get_ny() const {return ny;}
+  int get_nz() const {return nz;}
 
   double get_inv_boxx() {return 1.0/boxx;}
   double get_inv_boxy() {return 1.0/boxy;}
   double get_inv_boxz() {return 1.0/boxz;}
+  double get_inv_boxx() const {return 1.0/boxx;}
+  double get_inv_boxy() const {return 1.0/boxy;}
+  double get_inv_boxz() const {return 1.0/boxz;}
 
   // Return neighborlist cut-off
   double get_rnl() {return rnl;}
+  double get_rnl() const {return rnl;}
 
   int get_homeix() {return homeix;}
   int get_homeiy() {return homeiy;}
   int get_homeiz() {return homeiz;}
+  int get_homeix() const {return homeix;}
+  int get_homeiy() const {return homeiy;}
+  int get_homeiz() const {return homeiz;}
 
   // Returns the node index for box (ix, iy, iz)
   // NOTE: deals correctly with periodic boundary conditions
