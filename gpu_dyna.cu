@@ -361,6 +361,7 @@ void test() {
     AtomGroup<dihe_t> imdiheGroup(nimdihe, imdihe);
     AtomGroup<xx14_t> in14Group(nin14, in14);
     AtomGroup<xx14_t> ex14Group(nex14, ex14);
+    //AtomGroup<pair_t> pairGroup(npair, pair);
     // Register groups
     // NOTE: the register IDs (BOND, UREYB, ...) must be unique
     domdecGroups.beginGroups();
@@ -371,6 +372,7 @@ void test() {
     domdecGroups.insertGroup(IMDIHE, imdiheGroup, imdihe);
     domdecGroups.insertGroup(IN14, in14Group, in14);
     domdecGroups.insertGroup(EX14, ex14Group, ex14);
+    //domdecGroups.insertGroup(PAIR, pairGroup, pair);
     domdecGroups.finishGroups();
 
     // Charges

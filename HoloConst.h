@@ -47,7 +47,11 @@ private:
   double mH_div_mH2O;
   double ra, rc, rb, ra_inv, rc2;
 
+  //----------------------------------------------------------
+  // Following arrays change at every neighborlist update
+  //----------------------------------------------------------
   // Solvent indices
+  //----------------------------------------------------------
   int nsolvent;
   int solvent_ind_len;
   int3 *solvent_ind;

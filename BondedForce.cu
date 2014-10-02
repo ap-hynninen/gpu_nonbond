@@ -974,7 +974,7 @@ BondedForce<AT, CT>::~BondedForce() {
   if (cmaplist != NULL) deallocate<cmaplist_t>(&cmaplist);
   if (cmapcoef != NULL) deallocate<float2>(&cmapcoef);
 
-  if (h_energy_virial != NULL) deallocate_host<BondedEnergyVirial_t>(&h_energy_virial);
+  deallocate_host<BondedEnergyVirial_t>(&h_energy_virial);
 
 }
 

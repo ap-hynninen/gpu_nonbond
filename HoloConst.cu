@@ -1007,10 +1007,11 @@ void HoloConst::setup_textures(cudaXYZ<double>& xyz, int i) {
 // Apply constraints: xyz0 = reference (input), xyz1 = constrained (input/output)
 //
 void HoloConst::apply(cudaXYZ<double>& xyz0, cudaXYZ<double>& xyz1, cudaStream_t stream) {
-
   assert(xyz0.match(xyz1));
 
-  //int stride = xyz0->stride;
+  int ntot = nsolvent + npair + ntrip + nquad;
+
+  if (ntot == 0) return;
 
   update_setup(xyz0, xyz1, xyz1);
 
@@ -1020,9 +1021,7 @@ void HoloConst::apply(cudaXYZ<double>& xyz0, cudaXYZ<double>& xyz1, cudaStream_t
   }
 
   int nthread = 128;
-  int nblock = (nsolvent + npair + ntrip + nquad - 1)/nthread + 1;
+  int nblock = (ntot - 1)/nthread + 1;
   all_kernels<<< nblock, nthread, 0, stream >>>();
   cudaCheck(cudaGetLastError());
-
-
 }
