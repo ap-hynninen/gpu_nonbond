@@ -329,15 +329,15 @@ void test() {
     double *quad_mass = (double *)malloc(nquad*7*sizeof(double));
     load_constr_mass(3, 7, "test_data/global_quad_constr_mass.txt", nquad, quad_constr, quad_mass);
 
-    HoloConst holoconst;
-    holoconst.setup_solvent_parameters(mO, mH, rOHsq, rHHsq);
+    HoloConst* holoconst = new HoloConst;;
+    holoconst->setup_solvent_parameters(mO, mH, rOHsq, rHHsq);
 
     //-------------------------------------------------------------------------------------
 
     cudaStream_t integrator_stream;
     cudaCheck(cudaStreamCreate(&integrator_stream));
 
-    CudaLeapfrogIntegrator leapfrog(&holoconst,
+    CudaLeapfrogIntegrator leapfrog(holoconst,
 				    npair, (int2 *)pair_ind, pair_constr, pair_mass,
 				    ntrip, (int3 *)trip_ind, trip_constr, trip_mass,
 				    nquad, (int4 *)quad_ind, quad_constr, quad_mass,
@@ -528,6 +528,9 @@ void test() {
     delete [] trip_mass;
     delete [] quad_constr;
     delete [] quad_mass;
+
+    //-------------------------------------------------------------------------------------
+    delete holoconst;
 
   } else {
     // ------------------------------------------------------------

@@ -5,7 +5,8 @@ OS := $(shell uname -s)
 YES := $(shell which make | wc -l 2> /dev/null)
 
 # Set optimization level
-OPTLEV = -g
+#OPTLEV = -g
+OPTLEV = -O3
 
 # Detect CUDA, Intel compiler, and MPI
 CUDA_COMPILER := $(shell which nvcc | wc -l 2> /dev/null)
