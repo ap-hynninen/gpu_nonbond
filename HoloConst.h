@@ -9,6 +9,8 @@ private:
 
   // If true, we use indexed constraint and mass data
   bool use_indexed;
+  // If true, we use SETTLE for all triplets
+  bool use_settle;
 
   bool use_textures;
   void setup_textures(cudaXYZ<double>& xyz, int i);
@@ -126,6 +128,10 @@ public:
 
   void setup_solvent_parameters(double mO, double mH, double rOHsq, double rHHsq);
 
+  void setup_settle_parameters(const int nsettle,
+			       const double* h_massP, const double* h_massH,
+			       const double* h_rPHsq, const double* h_rHHsq);
+
   void realloc_constr_mass(const int npair_type, const int ntrip_type, const int nquad_type);
 
   void setup_ind_mass_constr(const int npair, const int2 *h_pair_ind,
@@ -154,6 +160,14 @@ public:
 		     const int nquad, const dihe_t* h_quad_indtype,
 		     const int nquad_type, const double* h_quad_constr, const double* h_quad_mass,
 		     const int nsolvent, const int3* h_solvent_ind);
+
+  void setup_indexed(const int npair, const bond_t* h_pair_indtype,
+		     const int npair_type, const double* h_pair_constr, const double* h_pair_mass,
+		     const int ntrip, const angle_t* h_trip_indtype,
+		     const int ntrip_type, const double* h_trip_constr, const double* h_trip_mass,
+		     const int nquad, const dihe_t* h_quad_indtype,
+		     const int nquad_type, const double* h_quad_constr, const double* h_quad_mass,
+		     const int nsettle, const angle_t* h_settle_indtype);
 
   void apply(cudaXYZ<double>& xyz0, cudaXYZ<double>& xyz1, cudaStream_t stream=0);
 

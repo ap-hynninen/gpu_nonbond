@@ -726,7 +726,7 @@ __global__ void all_kernels() {
 			   sh_pair_constr, sh_pair_mass);
   } else if (imol < d_setup.nsolvent + d_setup.npair + d_setup.ntrip) {
     trip_calc<use_indexed>(imol - d_setup.nsolvent - d_setup.npair,
-			   sh_trip_constr, sh_trip_mass);
+    			   sh_trip_constr, sh_trip_mass);
   } else if (imol < d_setup.nsolvent + d_setup.npair + d_setup.ntrip + d_setup.nquad) {
     quad_calc<use_indexed>(imol - d_setup.nsolvent - d_setup.npair - d_setup.ntrip,
 			   sh_quad_constr, sh_quad_mass);
@@ -795,6 +795,7 @@ HoloConst::HoloConst() {
   }
 
   use_indexed = false;
+  use_settle = false;
 }
 
 //
@@ -845,6 +846,23 @@ void HoloConst::setup_solvent_parameters(double mO, double mH, double rOHsq, dou
   rb = ra*mO/(2.0*mH);
   rc = sqrt(rHHsq)/2.0;
   rc2 = 2.0*rc;
+
+}
+
+//
+// Setup SETTLE parameters
+//
+// massP = mass of heavy atoms
+// massH = mass of light (hydrogen) atoms
+// rPHsq = squared distance between P and H
+// rHHsq = squared distance between H and H
+//
+void HoloConst::setup_settle_parameters(const int nsettle,
+					const double* h_massP, const double* h_massH,
+					const double* h_rPHsq, const double* h_rHHsq) {
+
+  use_settle = true;
+  //this->nsettle = nsettle;
 
 }
 
@@ -925,6 +943,23 @@ void HoloConst::setup_indexed(const int npair, const bond_t* h_pair_indtype,
   set_quad(nquad, h_quad_indtype, nquad_type, h_quad_constr, h_quad_mass);
   set_solvent(nsolvent, h_solvent_ind);
 }
+
+/*
+//
+// Setup indexed
+//
+void HoloConst::setup_indexed(const int npair, const bond_t* h_pair_indtype,
+			      const int npair_type, const double* h_pair_constr, const double* h_pair_mass,
+			      const int nquad, const dihe_t* h_quad_indtype,
+			      const int nquad_type, const double* h_quad_constr, const double* h_quad_mass,
+			      const int nsettle, const angle_t* h_settle_indtype) {
+  assert(use_settle);
+  use_indexed = true;
+  realloc_constr_mass(npair_type, ntrip_type, nquad_type);
+  set_pair(npair, h_pair_indtype, npair_type, h_pair_constr, h_pair_mass);
+  set_quad(nquad, h_quad_indtype, nquad_type, h_quad_constr, h_quad_mass);
+}
+*/
 
 //
 // Updates h_setup and d_setup if neccessary

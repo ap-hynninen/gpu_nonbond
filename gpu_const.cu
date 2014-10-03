@@ -247,27 +247,27 @@ void test_parametric(const double mO, const double mH, const double rOHsq, const
 //
 void test_indexed(const double mO, const double mH, const double rOHsq, const double rHHsq,
 		  const int npair, const int ntrip, const int nquad,
-		  const int nsolvent, const int* h_solvent_ind,
+		  const int nsolvent, const int3* h_solvent_ind,
 		  cudaXYZ<double>& xyz0, cudaXYZ<double>& xyz1, hostXYZ<double>& h_xyz1) {
 
   const int npair_type = 9;
   const int ntrip_type = 3;
   const int nquad_type = 2;
 
-  double *h_pair_constr = new double[npair];
-  double *h_pair_mass = new double[npair*2];
+  double *h_pair_constr = new double[npair_type];
+  double *h_pair_mass = new double[npair_type*2];
   load_constr_mass(1, 2, "test_data/pair_types.txt", npair_type, h_pair_constr, h_pair_mass);
   bond_t* h_pair_indtype = new bond_t[npair];
   load_vec<int>(3, "test_data/pair_indtype.txt", npair, (int *)h_pair_indtype);
 
-  double *h_trip_constr = new double[ntrip*2];
-  double *h_trip_mass = new double[ntrip*5];
+  double *h_trip_constr = new double[ntrip_type*2];
+  double *h_trip_mass = new double[ntrip_type*5];
   load_constr_mass(2, 5, "test_data/trip_types.txt", ntrip_type, h_trip_constr, h_trip_mass);
   angle_t* h_trip_indtype = new angle_t[ntrip];
   load_vec<int>(4, "test_data/trip_indtype.txt", ntrip, (int *)h_trip_indtype);
 
-  double *h_quad_constr = new double[nquad*3];
-  double *h_quad_mass = new double[nquad*7];
+  double *h_quad_constr = new double[nquad_type*3];
+  double *h_quad_mass = new double[nquad_type*7];
   load_constr_mass(3, 7, "test_data/quad_types.txt", nquad_type, h_quad_constr, h_quad_mass);
   dihe_t* h_quad_indtype = new dihe_t[nquad];
   load_vec<int>(5, "test_data/quad_indtype.txt", nquad, (int *)h_quad_indtype);
@@ -278,7 +278,7 @@ void test_indexed(const double mO, const double mH, const double rOHsq, const do
   holoconst.setup_indexed(npair, h_pair_indtype, npair_type, h_pair_constr, h_pair_mass,
 			  ntrip, h_trip_indtype, ntrip_type, h_trip_constr, h_trip_mass,
 			  nquad, h_quad_indtype, nquad_type, h_quad_constr, h_quad_mass,
-			  nsolvent, (int3 *)h_solvent_ind);
+			  nsolvent, h_solvent_ind);
 
   // Apply holonomic constraints
   xyz1.set_data_sync(h_xyz1);
@@ -292,6 +292,108 @@ void test_indexed(const double mO, const double mH, const double rOHsq, const do
   delete [] h_pair_indtype;
   delete [] h_trip_indtype;
   delete [] h_quad_indtype;
+
+  delete [] h_pair_constr;
+  delete [] h_pair_mass;
+  delete [] h_trip_constr;
+  delete [] h_trip_mass;
+  delete [] h_quad_constr;
+  delete [] h_quad_mass;
+}
+
+//
+// Test indexed version with SETTLE for triplets
+//
+void test_indexed_settle(const double mO, const double mH, const double rOHsq, const double rHHsq,
+			 const int npair, const int ntrip, const int nquad,
+			 const int nsolvent, const int3* h_solvent_ind,
+			 cudaXYZ<double>& xyz0, cudaXYZ<double>& xyz1,
+			 hostXYZ<double>& h_xyz0, hostXYZ<double>& h_xyz1) {
+
+  const int npair_type = 9;
+  const int ntrip_type = 3;
+  const int nquad_type = 2;
+
+  double *h_pair_constr = new double[npair_type];
+  double *h_pair_mass = new double[npair_type*2];
+  load_constr_mass(1, 2, "test_data/pair_types.txt", npair_type, h_pair_constr, h_pair_mass);
+  bond_t* h_pair_indtype = new bond_t[npair];
+  load_vec<int>(3, "test_data/pair_indtype.txt", npair, (int *)h_pair_indtype);
+
+  double *h_trip_constr = new double[ntrip_type*2];
+  double *h_trip_mass = new double[ntrip_type*5];
+  load_constr_mass(2, 5, "test_data/trip_types.txt", ntrip_type, h_trip_constr, h_trip_mass);
+  angle_t* h_trip_indtype = new angle_t[ntrip];
+  load_vec<int>(4, "test_data/trip_indtype.txt", ntrip, (int *)h_trip_indtype);
+  // Merge triplets with solvent
+  angle_t* h_settle_ind = new angle_t[nsolvent + ntrip];
+  for (int i=0;i < nsolvent;i++) {
+    h_settle_ind[i].i     = h_solvent_ind[i].x;
+    h_settle_ind[i].j     = h_solvent_ind[i].y;
+    h_settle_ind[i].k     = h_solvent_ind[i].z;
+    h_settle_ind[i].itype = ntrip_type;
+  }
+  for (int i=nsolvent;i < nsolvent+ntrip;i++) {
+    h_settle_ind[i].i     = h_trip_indtype[i-nsolvent].i;
+    h_settle_ind[i].j     = h_trip_indtype[i-nsolvent].j;
+    h_settle_ind[i].k     = h_trip_indtype[i-nsolvent].k;
+    h_settle_ind[i].itype = h_trip_indtype[i-nsolvent].itype;
+  }
+  double* h_massP = new double[ntrip_type+1];
+  double* h_massH = new double[ntrip_type+1];
+  double* h_rPHsq = new double[ntrip_type+1];
+  double* h_rHHsq = new double[ntrip_type+1];
+  for (int i=0;i < ntrip_type;i++) {
+    h_massP[i] = 1.0/h_trip_mass[i*5];
+    h_massH[i] = 1.0/h_trip_mass[i*5+1];
+    h_rPHsq[i] = h_trip_constr[i*2];
+    int j;
+    for (j=0;j < ntrip;j++) if (h_trip_indtype[j].itype == i) break;
+    int jj = h_trip_indtype[j].j;
+    int kk = h_trip_indtype[j].k;
+    double xjk = h_xyz0.x()[jj] - h_xyz0.x()[kk];
+    double yjk = h_xyz0.y()[jj] - h_xyz0.y()[kk];
+    double zjk = h_xyz0.z()[jj] - h_xyz0.z()[kk];
+    h_rHHsq[i] = xjk*xjk + yjk*yjk + zjk*zjk;
+  }
+  h_massP[ntrip_type] = mO;
+  h_massH[ntrip_type] = mH;
+  h_rPHsq[ntrip_type] = rOHsq;
+  h_rHHsq[ntrip_type] = rHHsq;
+
+  double *h_quad_constr = new double[nquad_type*3];
+  double *h_quad_mass = new double[nquad_type*7];
+  load_constr_mass(3, 7, "test_data/quad_types.txt", nquad_type, h_quad_constr, h_quad_mass);
+  dihe_t* h_quad_indtype = new dihe_t[nquad];
+  load_vec<int>(5, "test_data/quad_indtype.txt", nquad, (int *)h_quad_indtype);
+
+  // Setup
+  HoloConst holoconst;
+  holoconst.setup_settle_parameters(ntrip_type+1, h_massP, h_massH, h_rPHsq, h_rHHsq);
+  /*
+  holoconst.setup_indexed(npair, h_pair_indtype, npair_type, h_pair_constr, h_pair_mass,
+			  nquad, h_quad_indtype, nquad_type, h_quad_constr, h_quad_mass,
+			  nsolvent+ntrip, h_settle_ind);
+  */
+
+  // Apply holonomic constraints
+  xyz1.set_data_sync(h_xyz1);
+  holoconst.apply(xyz0, xyz1);
+  xyz1.set_data_sync(h_xyz1);
+  holoconst.apply(xyz0, xyz1);
+  xyz1.set_data_sync(h_xyz1);
+  holoconst.apply(xyz0, xyz1);
+  cudaCheck(cudaDeviceSynchronize());
+
+  delete [] h_pair_indtype;
+  delete [] h_trip_indtype;
+  delete [] h_quad_indtype;
+
+  delete [] h_settle_ind;
+  delete [] h_massP;
+  delete [] h_massH;
+  delete [] h_rPHsq;
+  delete [] h_rHHsq;
 
   delete [] h_pair_constr;
   delete [] h_pair_mass;
@@ -351,17 +453,12 @@ void test() {
   check_results(xyz1, h_xyz_ref, nsolvent, h_solvent_ind, npair, h_pair_ind,
 		ntrip, h_trip_ind, nquad, h_quad_ind);
 
-  //hostXYZ<double> h_xyz_tmp(xyz1);
-
   //-------------------------
   // Test indexed
   //-------------------------
-  xyz1.set_data_sync(h_xyz1);
-  test_indexed(mO, mH, rOHsq, rHHsq, npair, ntrip, nquad, nsolvent, h_solvent_ind, xyz0, xyz1, h_xyz1);
+  test_indexed(mO, mH, rOHsq, rHHsq, npair, ntrip, nquad, nsolvent, (int3 *)h_solvent_ind, xyz0, xyz1, h_xyz1);
   check_results(xyz1, h_xyz_ref, nsolvent, h_solvent_ind, npair, h_pair_ind,
   		ntrip, h_trip_ind, nquad, h_quad_ind);
-  //check_results(xyz1, h_xyz_tmp, nsolvent, h_solvent_ind, npair, h_pair_ind,
-  //		ntrip, h_trip_ind, nquad, h_quad_ind);
 
   free(h_solvent_ind);
 
