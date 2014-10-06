@@ -4,7 +4,7 @@
 
 #include <vector>
 
-enum {BOND, UREYB, ANGLE, DIHE, IMDIHE, CMAP, IN14, EX14};
+enum {BOND, UREYB, ANGLE, DIHE, IMDIHE, CMAP, IN14, EX14, PAIR, TRIP, QUAD, SOLVENT};
 
 struct bond_t {
   int i, j, itype;
@@ -67,6 +67,18 @@ struct xx14_t {
     atoms.resize(size());
     atoms.at(0) = i;
     atoms.at(1) = j;
+  }
+};
+
+struct solvent_t {
+  int i, j, k;
+  static int type() {return 5;}
+  static int size() {return 3;}
+  void getAtoms(std::vector<int>& atoms) {
+    atoms.resize(size());
+    atoms.at(0) = i;
+    atoms.at(1) = j;
+    atoms.at(2) = k;
   }
 };
 

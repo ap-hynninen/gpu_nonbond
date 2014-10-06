@@ -302,11 +302,33 @@ void test() {
     const int npair = 458;
     const int ntrip = 233;
     const int nquad = 99;
+    const int npair_type = 9;
+    const int ntrip_type = 3;
+    const int nquad_type = 2;
+
+    double *h_pair_constr = new double[npair_type];
+    double *h_pair_mass = new double[npair_type*2];
+    load_constr_mass(1, 2, "test_data/pair_types.txt", npair_type, h_pair_constr, h_pair_mass);
+    bond_t* h_pair_indtype = new bond_t[npair];
+    load_vec<int>(3, "test_data/pair_indtype.txt", npair, (int *)h_pair_indtype);
+
+    double *h_trip_constr = new double[ntrip_type*2];
+    double *h_trip_mass = new double[ntrip_type*5];
+    load_constr_mass(2, 5, "test_data/trip_types.txt", ntrip_type, h_trip_constr, h_trip_mass);
+    angle_t* h_trip_indtype = new angle_t[ntrip];
+    load_vec<int>(4, "test_data/trip_indtype.txt", ntrip, (int *)h_trip_indtype);
+
+    double *h_quad_constr = new double[nquad_type*3];
+    double *h_quad_mass = new double[nquad_type*7];
+    load_constr_mass(3, 7, "test_data/quad_types.txt", nquad_type, h_quad_constr, h_quad_mass);
+    dihe_t* h_quad_indtype = new dihe_t[nquad];
+    load_vec<int>(5, "test_data/quad_indtype.txt", nquad, (int *)h_quad_indtype);
 
     // Load constraint indices
-    int *solvent_ind = (int *)malloc(nsolvent*3*sizeof(int));
-    load_vec<int>(3, "test_data/solvent_ind.txt", nsolvent, solvent_ind);
+    solvent_t *h_solvent_ind = new solvent_t[nsolvent];
+    load_vec<int>(3, "test_data/solvent_ind.txt", nsolvent, (int *)h_solvent_ind);
 
+    /*
     int *pair_ind = (int *)malloc(npair*2*sizeof(int));
     load_vec<int>(2, "test_data/pair_ind.txt", npair, pair_ind);
 
@@ -328,20 +350,19 @@ void test() {
     double *quad_constr = (double *)malloc(nquad*3*sizeof(double));
     double *quad_mass = (double *)malloc(nquad*7*sizeof(double));
     load_constr_mass(3, 7, "test_data/quad_constr_mass.txt", nquad, quad_constr, quad_mass);
+    */
 
     HoloConst* holoconst = new HoloConst;;
     holoconst->setup_solvent_parameters(mO, mH, rOHsq, rHHsq);
-
+    holoconst->setup_types(npair_type, h_pair_constr, h_pair_mass,
+			   ntrip_type, h_trip_constr, h_trip_mass,
+			   nquad_type, h_quad_constr, h_quad_mass);
     //-------------------------------------------------------------------------------------
 
     cudaStream_t integrator_stream;
     cudaCheck(cudaStreamCreate(&integrator_stream));
 
-    CudaLeapfrogIntegrator leapfrog(holoconst,
-				    npair, (int2 *)pair_ind, pair_constr, pair_mass,
-				    ntrip, (int3 *)trip_ind, trip_constr, trip_mass,
-				    nquad, (int4 *)quad_ind, quad_constr, quad_mass,
-				    nsolvent, (int3 *)solvent_ind, 0);
+    CudaLeapfrogIntegrator leapfrog(holoconst, 0);
 
     // Neighborlist
     NeighborList<32> nlist(ncoord, iblo14, inb14);
@@ -361,7 +382,10 @@ void test() {
     AtomGroup<dihe_t> imdiheGroup(nimdihe, imdihe);
     AtomGroup<xx14_t> in14Group(nin14, in14);
     AtomGroup<xx14_t> ex14Group(nex14, ex14);
-    //AtomGroup<pair_t> pairGroup(npair, pair);
+    AtomGroup<bond_t>    pairGroup(npair, h_pair_indtype);
+    AtomGroup<angle_t>   tripGroup(ntrip, h_trip_indtype);
+    AtomGroup<dihe_t>    quadGroup(nquad, h_quad_indtype);
+    AtomGroup<solvent_t> solventGroup(nsolvent, h_solvent_ind);
     // Register groups
     // NOTE: the register IDs (BOND, UREYB, ...) must be unique
     domdecGroups.beginGroups();
@@ -516,8 +540,9 @@ void test() {
 
     //-------------------------------------------------------------------------------------
 
-    delete [] solvent_ind;
+    delete [] h_solvent_ind;
 
+    /*
     delete [] pair_ind;
     delete [] trip_ind;
     delete [] quad_ind;
@@ -528,6 +553,18 @@ void test() {
     delete [] trip_mass;
     delete [] quad_constr;
     delete [] quad_mass;
+    */
+
+    delete [] h_pair_indtype;
+    delete [] h_trip_indtype;
+    delete [] h_quad_indtype;
+
+    delete [] h_pair_constr;
+    delete [] h_pair_mass;
+    delete [] h_trip_constr;
+    delete [] h_trip_mass;
+    delete [] h_quad_constr;
+    delete [] h_quad_mass;
 
     //-------------------------------------------------------------------------------------
     delete holoconst;

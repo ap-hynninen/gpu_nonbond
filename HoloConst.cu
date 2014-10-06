@@ -898,11 +898,16 @@ void HoloConst::setup_ind_mass_constr(const int npair, const int2 *h_pair_ind,
   use_indexed = false;
   realloc_constr_mass(npair, ntrip, nquad);
   // Copy ind, mass, and constr from CPU to GPU
-  set_pair(npair, h_pair_ind, h_pair_constr, h_pair_mass);
-  set_trip(ntrip, h_trip_ind, h_trip_constr, h_trip_mass);
-  set_quad(nquad, h_quad_ind, h_quad_constr, h_quad_mass);
-  set_solvent(nsolvent, h_solvent_ind);
+  set_pair(npair, h_pair_ind);
+  set_pair_type(npair, h_pair_constr, h_pair_mass);
 
+  set_trip(ntrip, h_trip_ind);
+  set_trip_type(ntrip, h_trip_constr, h_trip_mass);
+
+  set_quad(nquad, h_quad_ind);
+  set_quad_type(nquad, h_quad_constr, h_quad_mass);
+
+  set_solvent(nsolvent, h_solvent_ind);
 }
 
 /*
@@ -938,10 +943,29 @@ void HoloConst::setup_indexed(const int npair, const bond_t* h_pair_indtype,
 			      const int nsolvent, const int3* h_solvent_ind) {
   use_indexed = true;
   realloc_constr_mass(npair_type, ntrip_type, nquad_type);
-  set_pair(npair, h_pair_indtype, npair_type, h_pair_constr, h_pair_mass);
-  set_trip(ntrip, h_trip_indtype, ntrip_type, h_trip_constr, h_trip_mass);
-  set_quad(nquad, h_quad_indtype, nquad_type, h_quad_constr, h_quad_mass);
+  set_pair(npair, h_pair_indtype);
+  set_pair_type(npair_type, h_pair_constr, h_pair_mass);
+
+  set_trip(ntrip, h_trip_indtype);
+  set_trip_type(ntrip_type, h_trip_constr, h_trip_mass);
+
+  set_quad(nquad, h_quad_indtype);
+  set_quad_type(nquad_type, h_quad_constr, h_quad_mass);
+
   set_solvent(nsolvent, h_solvent_ind);
+}
+
+//
+// Setup types
+//
+void HoloConst::setup_types(const int npair_type, const double* h_pair_constr, const double* h_pair_mass,
+			    const int ntrip_type, const double* h_trip_constr, const double* h_trip_mass,
+			    const int nquad_type, const double* h_quad_constr, const double* h_quad_mass) {
+  use_indexed = true;
+  realloc_constr_mass(npair_type, ntrip_type, nquad_type);
+  set_pair_type(npair_type, h_pair_constr, h_pair_mass);
+  set_trip_type(ntrip_type, h_trip_constr, h_trip_mass);
+  set_quad_type(nquad_type, h_quad_constr, h_quad_mass);
 }
 
 /*
@@ -1104,49 +1128,32 @@ void HoloConst::set_solvent(const int nsolvent, const int3 *global_solvent_ind, 
 //
 // Setups pair_ind -table
 //
-void HoloConst::set_pair(const int npair, const int2 *h_pair_ind,
-			 const double *h_pair_constr, const double *h_pair_mass) {
-
+void HoloConst::set_pair(const int npair, const int2 *h_pair_ind) {
   this->npair = npair;
-  this->npair_type = npair;
-
   if (npair > 0) {
     reallocate<int2>(&pair_ind, &pair_ind_len, npair, 1.5f);
     copy_HtoD<int2>(h_pair_ind, pair_ind, npair);
-  }
-
-  if (npair > 0) {
-    //reallocate<double>(&pair_constr, &pair_constr_len, npair, 1.5f);
-    copy_HtoD<double>(h_pair_constr, pair_constr, npair);
-  }
-
-  if (npair > 0) {
-    //reallocate<double>(&pair_mass, &pair_mass_len, npair*2, 1.5f);
-    copy_HtoD<double>(h_pair_mass, pair_mass, npair*2);
   }
 }
 
 //
 // Setups pair_ind -table
 //
-void HoloConst::set_pair(const int npair, const bond_t* h_pair_indtype,
-			 const int npair_type, const double *h_pair_constr, const double *h_pair_mass) {
-
+void HoloConst::set_pair(const int npair, const bond_t* h_pair_indtype) {
   this->npair = npair;
-  this->npair_type = npair_type;
-  
   if (npair > 0) {
     reallocate<bond_t>(&pair_indtype, &pair_ind_len, npair, 1.5f);
     copy_HtoD<bond_t>(h_pair_indtype, pair_indtype, npair);
   }
+}
 
+//
+// Setups pair_ind -table
+//
+void HoloConst::set_pair_type(const int npair_type, const double *h_pair_constr, const double *h_pair_mass) {
+  this->npair_type = npair_type;
   if (npair_type > 0) {
-    //reallocate<double>(&pair_constr, &pair_constr_len, npair_type, 1.5f);
     copy_HtoD<double>(h_pair_constr, pair_constr, npair_type);
-  }
-
-  if (npair_type > 0) {
-    //reallocate<double>(&pair_mass, &pair_mass_len, npair_type*2, 1.5f);
     copy_HtoD<double>(h_pair_mass, pair_mass, npair_type*2);
   }
 }
@@ -1175,49 +1182,32 @@ void HoloConst::set_pair(const int npair, const int2 *global_pair_ind,
 //
 // Setups trip_ind -table
 //
-void HoloConst::set_trip(const int ntrip, const int3 *h_trip_ind,
-			 const double *h_trip_constr, const double *h_trip_mass) {
-
+void HoloConst::set_trip(const int ntrip, const int3 *h_trip_ind) {
   this->ntrip = ntrip;
-  this->ntrip_type = ntrip;
-
   if (ntrip > 0) {
     reallocate<int3>(&trip_ind, &trip_ind_len, ntrip, 1.5f);
     copy_HtoD<int3>(h_trip_ind, trip_ind, ntrip);
-  }
-
-  if (ntrip > 0) {
-    //reallocate<double>(&trip_constr, &trip_constr_len, ntrip*2, 1.5f);
-    copy_HtoD<double>(h_trip_constr, trip_constr, ntrip*2);
-  }
-
-  if (ntrip > 0) {
-    //reallocate<double>(&trip_mass, &trip_mass_len, ntrip*5, 1.5f);
-    copy_HtoD<double>(h_trip_mass, trip_mass, ntrip*5);
   }
 }
 
 //
 // Setups trip_ind -table
 //
-void HoloConst::set_trip(const int ntrip, const angle_t* h_trip_indtype,
-			 const int ntrip_type, const double *h_trip_constr, const double *h_trip_mass) {
-
+void HoloConst::set_trip(const int ntrip, const angle_t* h_trip_indtype) {
   this->ntrip = ntrip;
-  this->ntrip_type = ntrip_type;
-
   if (ntrip > 0) {
     reallocate<angle_t>(&trip_indtype, &trip_ind_len, ntrip, 1.5f);
     copy_HtoD<angle_t>(h_trip_indtype, trip_indtype, ntrip);
   }
+}
 
+//
+// Setups trip_type -table
+//
+void HoloConst::set_trip_type(const int ntrip_type, const double *h_trip_constr, const double *h_trip_mass) {
+  this->ntrip_type = ntrip_type;
   if (ntrip_type > 0) {
-    //reallocate<double>(&trip_constr, &trip_constr_len, ntrip_type*2, 1.5f);
     copy_HtoD<double>(h_trip_constr, trip_constr, ntrip_type*2);
-  }
-
-  if (ntrip_type > 0) {
-    //reallocate<double>(&trip_mass, &trip_mass_len, ntrip_type*5, 1.5f);
     copy_HtoD<double>(h_trip_mass, trip_mass, ntrip_type*5);
   }
 }
@@ -1250,49 +1240,32 @@ void HoloConst::set_trip(const int ntrip, const int3 *global_trip_ind,
 //
 // Setups quad_ind -table
 //
-void HoloConst::set_quad(const int nquad, const int4 *h_quad_ind,
-			 const double *h_quad_constr, const double *h_quad_mass) {
-
+void HoloConst::set_quad(const int nquad, const int4 *h_quad_ind) {
   this->nquad = nquad;
-  this->nquad_type = nquad;
-
   if (nquad > 0) {
     reallocate<int4>(&quad_ind, &quad_ind_len, nquad, 1.5f);
     copy_HtoD<int4>(h_quad_ind, quad_ind, nquad);
-  }
-
-  if (nquad > 0) {
-    //reallocate<double>(&quad_constr, &quad_constr_len, nquad*3, 1.5f);
-    copy_HtoD<double>(h_quad_constr, quad_constr, nquad*3);
-  }
-
-  if (nquad > 0) {
-    //reallocate<double>(&quad_mass, &quad_mass_len, nquad*7, 1.5f);
-    copy_HtoD<double>(h_quad_mass, quad_mass, nquad*7);
   }
 }
 
 //
 // Setups quad_ind -table
 //
-void HoloConst::set_quad(const int nquad, const dihe_t* h_quad_indtype,
-			 const int nquad_type, const double *h_quad_constr, const double *h_quad_mass) {
-
+void HoloConst::set_quad(const int nquad, const dihe_t* h_quad_indtype) {
   this->nquad = nquad;
-  this->nquad_type = nquad_type;
-
   if (nquad > 0) {
     reallocate<dihe_t>(&quad_indtype, &quad_ind_len, nquad, 1.5f);
     copy_HtoD<dihe_t>(h_quad_indtype, quad_indtype, nquad);
   }
+}
 
+//
+// Setups quad_type -table
+//
+void HoloConst::set_quad_type(const int nquad_type, const double *h_quad_constr, const double *h_quad_mass) {
+  this->nquad_type = nquad_type;
   if (nquad_type > 0) {
-    //reallocate<double>(&quad_constr, &quad_constr_len, nquad_type*3, 1.5f);
     copy_HtoD<double>(h_quad_constr, quad_constr, nquad_type*3);
-  }
-
-  if (nquad_type > 0) {
-    //reallocate<double>(&quad_mass, &quad_mass_len, nquad_type*7, 1.5f);
     copy_HtoD<double>(h_quad_mass, quad_mass, nquad_type*7);
   }
 }

@@ -21,35 +21,15 @@ private:
   void set_solvent(const int nsolvent, const int3 *h_solvent_ind);
   void set_solvent(const int nsolvent, const int3 *global_solvent_ind, const int *loc2glo);
 
-  void set_pair(const int npair, const int2 *h_pair_ind,
-		const double *h_pair_constr, const double *h_pair_mass);
-  void set_pair(const int npair, const bond_t* h_pair_indtype,
-		const int npair_type, const double *h_pair_constr, const double *h_pair_mass);
-  /*
-  void set_pair(const int npair, const int2 *global_pair_ind,
-		const double *global_pair_constr, const double *global_pair_mass,
-		const int *loc2glo);
-  */
-
-  void set_trip(const int ntrip, const int3 *h_trip_ind,
-		const double *h_trip_constr, const double *h_trip_mass);
-  void set_trip(const int ntrip, const angle_t* h_trip_indtype,
-		const int ntrip_type, const double *h_trip_constr, const double *h_trip_mass);
-  /*
-  void set_trip(const int ntrip, const int3 *global_trip_ind,
-		const double *global_trip_constr, const double *global_trip_mass,
-		const int *loc2glo);
-  */
-
-  void set_quad(const int nquad, const int4 *h_quad_ind,
-		const double *h_quad_constr, const double *h_quad_mass);
-  void set_quad(const int nquad, const dihe_t* h_quad_indtype,
-		const int nquad_type, const double *h_quad_constr, const double *h_quad_mass);
-  /*
-  void set_quad(const int nquad, const int4 *global_quad_ind,
-		const double *global_quad_constr, const double *global_quad_mass,
-		const int *loc2glo);
-  */
+  void set_pair(const int npair, const int2 *h_pair_ind);
+  void set_pair(const int npair, const bond_t* h_pair_indtype);
+  void set_pair_type(const int npair_type, const double *h_pair_constr, const double *h_pair_mass);
+  void set_trip(const int ntrip, const int3 *h_trip_ind);
+  void set_trip(const int ntrip, const angle_t* h_trip_indtype);
+  void set_trip_type(const int ntrip_type, const double *h_trip_constr, const double *h_trip_mass);
+  void set_quad(const int nquad, const int4 *h_quad_ind);
+  void set_quad(const int nquad, const dihe_t* h_quad_indtype);
+  void set_quad_type(const int nquad_type, const double *h_quad_constr, const double *h_quad_mass);
 
   // Maximum number of iterations for triplet and quad shake
   int max_niter;
@@ -168,6 +148,10 @@ public:
 		     const int nquad, const dihe_t* h_quad_indtype,
 		     const int nquad_type, const double* h_quad_constr, const double* h_quad_mass,
 		     const int nsettle, const angle_t* h_settle_indtype);
+
+  void setup_types(const int npair_type, const double* h_pair_constr, const double* h_pair_mass,
+		   const int ntrip_type, const double* h_trip_constr, const double* h_trip_mass,
+		   const int nquad_type, const double* h_quad_constr, const double* h_quad_mass);
 
   void apply(cudaXYZ<double>& xyz0, cudaXYZ<double>& xyz1, cudaStream_t stream=0);
 

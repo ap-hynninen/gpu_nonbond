@@ -123,35 +123,10 @@ __global__ void calc_kine_kernel(const int ncoord,
 //
 // Class creator
 //
-CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst,
-					       const int npair, const int2 *h_pair_ind,
-					       const double *h_pair_constr, const double *h_pair_mass,
-					       const int ntrip, const int3 *h_trip_ind,
-					       const double *h_trip_constr, const double *h_trip_mass,
-					       const int nquad, const int4 *h_quad_ind,
-					       const double *h_quad_constr, const double *h_quad_mass,
-					       const int nsolvent, const int3 *h_solvent_ind,
-					       cudaStream_t stream) {
+CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_t stream) {
   this->holoconst = holoconst;
 
-  this->npair = 0;
-  this->pair_ind = NULL;
-  this->pair_constr = NULL;
-  this->pair_mass = NULL;
-  
-  this->ntrip = 0;
-  this->trip_ind = NULL;
-  this->trip_constr = NULL;
-  this->trip_mass = NULL;
-  
-  this->nquad = 0;
-  this->quad_ind = NULL;
-  this->quad_constr = NULL;
-  this->quad_mass = NULL;
-  
-  this->nsolvent = 0;
-  this->solvent_ind = NULL;
-  
+  /*
   if (holoconst != NULL) {
     this->npair = npair;
     if (npair > 0) {
@@ -186,6 +161,7 @@ CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst,
       copy_HtoD<int3>(h_solvent_ind, solvent_ind, nsolvent);
     }
   }
+  */
   this->stream = stream;
   cudaCheck(cudaEventCreate(&copy_rms_work_done_event));
   cudaCheck(cudaEventCreate(&copy_temp_ekin_done_event));
@@ -201,6 +177,7 @@ CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst,
 //
 CudaLeapfrogIntegrator::~CudaLeapfrogIntegrator() {
 
+  /*
   if (pair_ind != NULL) deallocate<int2>(&pair_ind);
   if (pair_constr != NULL) deallocate<double>(&pair_constr);
   if (pair_mass != NULL) deallocate<double>(&pair_mass);
@@ -214,6 +191,7 @@ CudaLeapfrogIntegrator::~CudaLeapfrogIntegrator() {
   if (quad_mass != NULL) deallocate<double>(&quad_mass);
 
   if (solvent_ind != NULL) deallocate<int3>(&solvent_ind);
+  */
 
   cudaCheck(cudaEventDestroy(copy_rms_work_done_event));
   cudaCheck(cudaEventDestroy(copy_temp_ekin_done_event));

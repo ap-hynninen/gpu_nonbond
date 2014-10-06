@@ -37,6 +37,7 @@ private:
   int mass_len;
   float *mass;
 
+  /*
   // Holonomic constraint global arrays:
   //
   // pair_ind[npair]
@@ -68,6 +69,7 @@ private:
 
   int nsolvent;
   int3 *solvent_ind;
+  */
 
   // Force array
   Force<long long int> force;
@@ -115,15 +117,7 @@ private:
 
 public:
 
-  CudaLeapfrogIntegrator(HoloConst *holoconst,
-			 const int npair, const int2 *h_pair_ind,
-			 const double *h_pair_constr, const double *h_pair_mass,
-			 const int ntrip, const int3 *h_trip_ind,
-			 const double *h_trip_constr, const double *h_trip_mass,
-			 const int nquad, const int4 *h_quad_ind,
-			 const double *h_quad_constr, const double *h_quad_mass,
-			 const int nsolvent, const int3 *h_solvent_ind,
-			 cudaStream_t stream=0);
+  CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_t stream=0);
   ~CudaLeapfrogIntegrator();
 
   void spec_init(const double *x, const double *y, const double *z,

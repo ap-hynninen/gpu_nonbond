@@ -110,9 +110,9 @@ void test() {
   nlist_ref.analyze();
   std::cout << "=======================================" << std::endl;
 
-  int *loc2glo_ind = new int[ncoord];
-  load_ind<int>(1, "test_data/loc2glo.txt", ncoord, loc2glo_ind);
-  for (int i=0;i < ncoord;i++) loc2glo_ind[i]--;
+  //int *loc2glo_ind = new int[ncoord];
+  //load_ind<int>(1, "test_data/loc2glo.txt", ncoord, loc2glo_ind);
+  //for (int i=0;i < ncoord;i++) loc2glo_ind[i]--;
 
   int zone_patom[8] = {23558, 23558, 23558, 23558, 23558, 23558, 23558, 23558};
   float3 min_xyz[8], max_xyz[8];
@@ -221,7 +221,7 @@ void test() {
   delete [] in14list;
   delete [] ex14list;
 
-  delete [] loc2glo_ind;
+  //delete [] loc2glo_ind;
 
   delete [] iblo14;
   delete [] inb14;
