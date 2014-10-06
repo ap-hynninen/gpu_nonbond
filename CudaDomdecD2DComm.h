@@ -6,6 +6,7 @@
 #include "cudaXYZ.h"
 #include "Domdec.h"
 #include "CudaMPI.h"
+#include "Force.h"
 #include "DomdecD2DComm.h"
 
 class CudaDomdecD2DComm : public DomdecD2DComm {
@@ -62,6 +63,7 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
 
   void comm_coord(cudaXYZ<double>& coord, thrust::device_vector<int>& loc2glo,
 		  const bool update);
+  void comm_force(Force<long long int>& force);
 };
 
 #endif // CUDADOMDECD2DCOMM_H

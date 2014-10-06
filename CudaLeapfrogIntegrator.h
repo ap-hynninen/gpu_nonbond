@@ -37,40 +37,6 @@ private:
   int mass_len;
   float *mass;
 
-  /*
-  // Holonomic constraint global arrays:
-  //
-  // pair_ind[npair]
-  // pair_constr[npair]
-  // pair_mass[npair*2]
-  //
-  // trip_ind[ntrip]
-  // trip_constr[ntrip*2]
-  // trip_mass[ntrip*5]
-  //
-  // quad_ind[nquad]
-  // quad_constr[nquad*3]
-  // quad_mass[nquad*7]
-  //
-  int npair;
-  int2 *pair_ind;
-  double *pair_constr;
-  double *pair_mass;
-
-  int ntrip;
-  int3 *trip_ind;
-  double *trip_constr;
-  double *trip_mass;
-
-  int nquad;
-  int4 *quad_ind;
-  double *quad_constr;
-  double *quad_mass;
-
-  int nsolvent;
-  int3 *solvent_ind;
-  */
-
   // Force array
   Force<long long int> force;
 

@@ -18,8 +18,8 @@ private:
   void update_setup(cudaXYZ<double>& xyz0, cudaXYZ<double>& xyz1, cudaXYZ<double>& xyz2,
 		    cudaStream_t stream=0);
 
-  void set_solvent(const int nsolvent, const int3 *h_solvent_ind);
-  void set_solvent(const int nsolvent, const int3 *global_solvent_ind, const int *loc2glo);
+  void set_solvent(const int nsolvent, const solvent_t *h_solvent_ind);
+  void set_solvent(const int nsolvent, const solvent_t *global_solvent_ind, const int *loc2glo);
 
   void set_pair(const int npair, const int2 *h_pair_ind);
   void set_pair(const int npair, const bond_t* h_pair_indtype);
@@ -52,7 +52,7 @@ private:
   //----------------------------------------------------------
   int nsolvent;
   int solvent_ind_len;
-  int3 *solvent_ind;
+  solvent_t *solvent_ind;
 
   //----------------------------------------------------------
   // Solute pairs
@@ -60,12 +60,11 @@ private:
   int npair;
   int pair_ind_len;
   int2 *pair_ind;
+  int pair_indtype_len;
   bond_t* pair_indtype;
 
   int npair_type;
-  //int pair_constr_len;
   double *pair_constr;
-  //int pair_mass_len;
   double *pair_mass;
 
   //----------------------------------------------------------
@@ -74,12 +73,11 @@ private:
   int ntrip;
   int trip_ind_len;
   int3 *trip_ind;
+  int trip_indtype_len;
   angle_t* trip_indtype;
   
   int ntrip_type;
-  //int trip_constr_len;
   double *trip_constr;
-  //int trip_mass_len;
   double *trip_mass;
 
   //----------------------------------------------------------
@@ -88,12 +86,11 @@ private:
   int nquad;
   int quad_ind_len;
   int4 *quad_ind;
+  int quad_indtype_len;
   dihe_t* quad_indtype;
 
   int nquad_type;
-  //int quad_constr_len;
   double *quad_constr;
-  //int quad_mass_len;
   double *quad_mass;
   
   // Pointer to all constrains and masses
@@ -120,18 +117,7 @@ public:
 			     const double *h_trip_constr, const double *h_trip_mass,
 			     const int nquad, const int4 *h_quad_ind,
 			     const double *h_quad_constr, const double *h_quad_mass,
-			     const int nsolvent, const int3 *h_solvent_ind);
-
-  /*
-  void setup_ind_mass_constr(const int npair, const int2 *global_pair_ind,
-			     const double *global_pair_constr, const double *global_pair_mass,
-			     const int ntrip, const int3 *global_trip_ind,
-			     const double *global_trip_constr, const double *global_trip_mass,
-			     const int nquad, const int4 *global_quad_ind,
-			     const double *global_quad_constr, const double *global_quad_mass,
-			     const int nsolvent, const int3 *global_solvent_ind,
-			     const int* loc2glo);
-  */
+			     const int nsolvent, const solvent_t *h_solvent_ind);
 
   void setup_indexed(const int npair, const bond_t* h_pair_indtype,
 		     const int npair_type, const double* h_pair_constr, const double* h_pair_mass,
@@ -139,7 +125,7 @@ public:
 		     const int ntrip_type, const double* h_trip_constr, const double* h_trip_mass,
 		     const int nquad, const dihe_t* h_quad_indtype,
 		     const int nquad_type, const double* h_quad_constr, const double* h_quad_mass,
-		     const int nsolvent, const int3* h_solvent_ind);
+		     const int nsolvent, const solvent_t* h_solvent_ind);
 
   void setup_indexed(const int npair, const bond_t* h_pair_indtype,
 		     const int npair_type, const double* h_pair_constr, const double* h_pair_mass,
@@ -148,6 +134,13 @@ public:
 		     const int nquad, const dihe_t* h_quad_indtype,
 		     const int nquad_type, const double* h_quad_constr, const double* h_quad_mass,
 		     const int nsettle, const angle_t* h_settle_indtype);
+
+  void setup_list(const int* glo2loc,
+		  const int npair, const int* pair_tbl, const bond_t* global_pair_indtype,
+		  const int ntrip, const int* trip_tbl, const angle_t* global_trip_indtype,
+		  const int nquad, const int* quad_tbl, const dihe_t* global_quad_indtype,
+		  const int nsolvent, const int* solvent_tbl, const solvent_t* global_solvent_ind,
+		  cudaStream_t stream=0);
 
   void setup_types(const int npair_type, const double* h_pair_constr, const double* h_pair_mass,
 		   const int ntrip_type, const double* h_trip_constr, const double* h_trip_mass,

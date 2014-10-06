@@ -160,7 +160,7 @@ public:
 
   void pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_step);
   void calc(const bool calc_energy, const bool calc_virial, Force<long long int>& force);
-  void post_calc(const float *global_mass, float *mass);
+  void post_calc(const float *global_mass, float *mass, HoloConst *holoconst);
   void stop_calc() {recipComm.send_stop();}
 
   void wait_calc(cudaStream_t stream);

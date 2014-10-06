@@ -269,6 +269,13 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 
 }
 
+//
+// Communicate forces
+//
+void CudaDomdecD2DComm::comm_force(Force<long long int>& force) {
+
+}
+
 void CudaDomdecD2DComm::computeByteNumPos(const int nc_comm, std::vector<int>& c_nsend,
 					  std::vector<int>& nsend, std::vector<int>& psend,
 					  const bool update) {

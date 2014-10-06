@@ -122,6 +122,127 @@ void read_xyz(const int n, double *x, double *y, double *z, const char *filename
 }
 
 //
+// Checks holonomic constraints
+//
+void check_holoconst(const double* x, const double* y, const double* z,
+		     const int npair, const bond_t* h_pair_indtype, const double* h_pair_constr, 
+		     const int ntrip, const angle_t* h_trip_indtype, const double* h_trip_constr,
+		     const int nquad, const dihe_t* h_quad_indtype, const double* h_quad_constr,
+		     const int nsolvent, const solvent_t* h_solvent_ind,
+		     const double rOHsq, const double rHHsq) {
+  double tol = 1.0e-8;
+  double max_err = 0.0;
+
+  for (int i=0;i < npair;i++) {
+    bond_t bond = h_pair_indtype[i];
+    double dx = x[bond.i] - x[bond.j];
+    double dy = y[bond.i] - y[bond.j];
+    double dz = z[bond.i] - z[bond.j];
+    double rsq = dx*dx + dy*dy + dz*dz;
+    double err = fabs(rsq - h_pair_constr[bond.itype]);
+    max_err = max(max_err, err);
+    if (err > tol) {
+      std::cout << "Error in PAIR: err = " << err << std::endl;
+      return;
+    }
+  }
+
+  for (int i=0;i < ntrip;i++) {
+    angle_t angle = h_trip_indtype[i];
+    double dx = x[angle.i] - x[angle.j];
+    double dy = y[angle.i] - y[angle.j];
+    double dz = z[angle.i] - z[angle.j];
+    double rsq = dx*dx + dy*dy + dz*dz;
+    double err = fabs(rsq - h_trip_constr[angle.itype*2]);
+    max_err = max(max_err, err);
+    if (err > tol) {
+      std::cout << "Error in TRIP (i-j): err = " << err << std::endl;
+      return;
+    }
+    dx = x[angle.i] - x[angle.k];
+    dy = y[angle.i] - y[angle.k];
+    dz = z[angle.i] - z[angle.k];
+    rsq = dx*dx + dy*dy + dz*dz;
+    err = fabs(rsq - h_trip_constr[angle.itype*2+1]);
+    max_err = max(max_err, err);
+    if (err > tol) {
+      std::cout << "Error in TRIP (i-k): err = " << err << std::endl;
+      return;
+    }
+  }
+
+  for (int i=0;i < nquad;i++) {
+    dihe_t dihe = h_quad_indtype[i];
+    double dx = x[dihe.i] - x[dihe.j];
+    double dy = y[dihe.i] - y[dihe.j];
+    double dz = z[dihe.i] - z[dihe.j];
+    double rsq = dx*dx + dy*dy + dz*dz;
+    double err = fabs(rsq - h_quad_constr[dihe.itype*3]);
+    max_err = max(max_err, err);
+    if (err > tol) {
+      std::cout << "Error in QUAD (i-j): err = " << err << std::endl;
+      return;
+    }
+    dx = x[dihe.i] - x[dihe.k];
+    dy = y[dihe.i] - y[dihe.k];
+    dz = z[dihe.i] - z[dihe.k];
+    rsq = dx*dx + dy*dy + dz*dz;
+    err = fabs(rsq - h_quad_constr[dihe.itype*3+1]);
+    max_err = max(max_err, err);
+    if (err > tol) {
+      std::cout << "Error in QUAD (i-k): err = " << err << std::endl;
+      return;
+    }
+    dx = x[dihe.i] - x[dihe.l];
+    dy = y[dihe.i] - y[dihe.l];
+    dz = z[dihe.i] - z[dihe.l];
+    rsq = dx*dx + dy*dy + dz*dz;
+    err = fabs(rsq - h_quad_constr[dihe.itype*3+2]);
+    max_err = max(max_err, err);
+    if (err > tol) {
+      std::cout << "Error in QUAD (i-l): err = " << err << std::endl;
+      return;
+    }
+  }
+
+  for (int i=0;i < nsolvent;i++) {
+    solvent_t solvent = h_solvent_ind[i];
+    double dx = x[solvent.i] - x[solvent.j];
+    double dy = y[solvent.i] - y[solvent.j];
+    double dz = z[solvent.i] - z[solvent.j];
+    double rsq = dx*dx + dy*dy + dz*dz;
+    double err = fabs(rsq - rOHsq);
+    max_err = max(max_err, err);
+    if (err > tol) {
+      std::cout << "Error in SOLVENT (O-H1): err = " << err << std::endl;
+      return;
+    }
+    dx = x[solvent.i] - x[solvent.k];
+    dy = y[solvent.i] - y[solvent.k];
+    dz = z[solvent.i] - z[solvent.k];
+    rsq = dx*dx + dy*dy + dz*dz;
+    err = fabs(rsq - rOHsq);
+    max_err = max(max_err, err);
+    if (err > tol) {
+      std::cout << "Error in SOLVENT (O-H2): err = " << err << std::endl;
+      return;
+    }
+    dx = x[solvent.j] - x[solvent.k];
+    dy = y[solvent.j] - y[solvent.k];
+    dz = z[solvent.j] - z[solvent.k];
+    rsq = dx*dx + dy*dy + dz*dz;
+    err = fabs(rsq - rHHsq);
+    max_err = max(max_err, err);
+    if (err > tol) {
+      std::cout << "Error in SOLVENT (H1-H2): err = " << err << std::endl;
+      return;
+    }
+  }
+
+  std::cout << "check_holoconst OK (max_err = " << max_err << ")" << std::endl;
+}
+
+//
 // Test the code using data in test_data/ -directory
 //
 void test() {
@@ -238,59 +359,59 @@ void test() {
     const int nimdihe = 418;
     const int nimdihecoef = 40;
 
-    bond_t *bond = new bond_t[nbond];
-    load_vec<int>(3, "test_data/bond.txt", nbond, (int *)bond);
-    float2 *bondcoef = new float2[nbondcoef];
-    load_vec<float>(2, "test_data/bondcoef.txt", nbondcoef, (float *)bondcoef);
+    bond_t *h_bond = new bond_t[nbond];
+    load_vec<int>(3, "test_data/bond.txt", nbond, (int *)h_bond);
+    float2 *h_bondcoef = new float2[nbondcoef];
+    load_vec<float>(2, "test_data/bondcoef.txt", nbondcoef, (float *)h_bondcoef);
 
-    bond_t *ureyb = new bond_t[nureyb];
-    load_vec<int>(3, "test_data/ureyb.txt", nureyb, (int *)ureyb);
-    float2 *ureybcoef = new float2[nureybcoef];
-    load_vec<float>(2, "test_data/ureybcoef.txt", nureybcoef, (float *)ureybcoef);
+    bond_t *h_ureyb = new bond_t[nureyb];
+    load_vec<int>(3, "test_data/ureyb.txt", nureyb, (int *)h_ureyb);
+    float2 *h_ureybcoef = new float2[nureybcoef];
+    load_vec<float>(2, "test_data/ureybcoef.txt", nureybcoef, (float *)h_ureybcoef);
 
-    angle_t *angle = new angle_t[nangle];
-    load_vec<int>(4, "test_data/angle.txt", nangle, (int *)angle);
-    float2 *anglecoef = new float2[nanglecoef];
-    load_vec<float>(2, "test_data/anglecoef.txt", nanglecoef, (float *)anglecoef);
+    angle_t *h_angle = new angle_t[nangle];
+    load_vec<int>(4, "test_data/angle.txt", nangle, (int *)h_angle);
+    float2 *h_anglecoef = new float2[nanglecoef];
+    load_vec<float>(2, "test_data/anglecoef.txt", nanglecoef, (float *)h_anglecoef);
 
-    dihe_t *dihe = new dihe_t[ndihe];
-    load_vec<int>(5, "test_data/dihe.txt", ndihe, (int *)dihe);
-    float4 *dihecoef = new float4[ndihecoef];
-    load_vec<float>(4, "test_data/dihecoef.txt", ndihecoef, (float *)dihecoef);
+    dihe_t *h_dihe = new dihe_t[ndihe];
+    load_vec<int>(5, "test_data/dihe.txt", ndihe, (int *)h_dihe);
+    float4 *h_dihecoef = new float4[ndihecoef];
+    load_vec<float>(4, "test_data/dihecoef.txt", ndihecoef, (float *)h_dihecoef);
 
-    dihe_t *imdihe = new dihe_t[nimdihe];
-    load_vec<int>(5, "test_data/imdihe.txt", nimdihe, (int *)imdihe);
-    float4 *imdihecoef = new float4[nimdihecoef];
-    load_vec<float>(4, "test_data/imdihecoef.txt", nimdihecoef, (float *)imdihecoef);
+    dihe_t *h_imdihe = new dihe_t[nimdihe];
+    load_vec<int>(5, "test_data/imdihe.txt", nimdihe, (int *)h_imdihe);
+    float4 *h_imdihecoef = new float4[nimdihecoef];
+    load_vec<float>(4, "test_data/imdihecoef.txt", nimdihecoef, (float *)h_imdihecoef);
 
     //-------------------------------------------------------------------------------------
 
     const int nvdwparam = 1260;
-    float* vdwparam = new float[nvdwparam];
-    float* vdwparam14 = new float[nvdwparam];
-    load_vec<float>(1, "test_data/vdwparam.txt", nvdwparam, vdwparam);
-    load_vec<float>(1, "test_data/vdwparam14.txt", nvdwparam, vdwparam14);
+    float* h_vdwparam = new float[nvdwparam];
+    float* h_vdwparam14 = new float[nvdwparam];
+    load_vec<float>(1, "test_data/vdwparam.txt", nvdwparam, h_vdwparam);
+    load_vec<float>(1, "test_data/vdwparam14.txt", nvdwparam, h_vdwparam14);
 
-    int *vdwtype = new int[ncoord];
-    load_vec<int>(1, "test_data/glo_vdwtype.txt", ncoord, vdwtype);
+    int *h_vdwtype = new int[ncoord];
+    load_vec<int>(1, "test_data/glo_vdwtype.txt", ncoord, h_vdwtype);
 
     //-------------------------------------------------------------------------------------
 
     const int niblo14 = 23558;
     const int ninb14 = 34709;
-    int *iblo14 = new int[niblo14];
-    int *inb14 = new int[ninb14];
-    load_vec<int>(1, "test_data/iblo14.txt", niblo14, iblo14);
-    load_vec<int>(1, "test_data/inb14.txt", ninb14, inb14);
+    int *h_iblo14 = new int[niblo14];
+    int *h_inb14 = new int[ninb14];
+    load_vec<int>(1, "test_data/iblo14.txt", niblo14, h_iblo14);
+    load_vec<int>(1, "test_data/inb14.txt", ninb14, h_inb14);
 
     //-------------------------------------------------------------------------------------
   
     const int nin14 = 6556;
     const int nex14 = 28153;
-    xx14_t *in14 = new xx14_t[nin14];
-    xx14_t *ex14 = new xx14_t[nex14];
-    load_vec<int>(2, "test_data/in14.txt", nin14, (int *)in14);
-    load_vec<int>(2, "test_data/ex14.txt", nex14, (int *)ex14);
+    xx14_t *h_in14 = new xx14_t[nin14];
+    xx14_t *h_ex14 = new xx14_t[nex14];
+    load_vec<int>(2, "test_data/in14.txt", nin14, (int *)h_in14);
+    load_vec<int>(2, "test_data/ex14.txt", nex14, (int *)h_ex14);
 
     //-------------------------------------------------------------------------------------
 
@@ -305,6 +426,8 @@ void test() {
     const int npair_type = 9;
     const int ntrip_type = 3;
     const int nquad_type = 2;
+
+    const bool holoconst_on = true;
 
     double *h_pair_constr = new double[npair_type];
     double *h_pair_mass = new double[npair_type*2];
@@ -328,44 +451,21 @@ void test() {
     solvent_t *h_solvent_ind = new solvent_t[nsolvent];
     load_vec<int>(3, "test_data/solvent_ind.txt", nsolvent, (int *)h_solvent_ind);
 
-    /*
-    int *pair_ind = (int *)malloc(npair*2*sizeof(int));
-    load_vec<int>(2, "test_data/pair_ind.txt", npair, pair_ind);
-
-    int *trip_ind = (int *)malloc(ntrip*3*sizeof(int));
-    load_vec<int>(3, "test_data/trip_ind.txt", ntrip, trip_ind);
-
-    int *quad_ind = (int *)malloc(nquad*4*sizeof(int));
-    load_vec<int>(4, "test_data/quad_ind.txt", nquad, quad_ind);
-
-    // Load constraint distances and masses
-    double *pair_constr = (double *)malloc(npair*sizeof(double));
-    double *pair_mass = (double *)malloc(npair*2*sizeof(double));
-    load_constr_mass(1, 2, "test_data/pair_constr_mass.txt", npair, pair_constr, pair_mass);
-
-    double *trip_constr = (double *)malloc(ntrip*2*sizeof(double));
-    double *trip_mass = (double *)malloc(ntrip*5*sizeof(double));
-    load_constr_mass(2, 5, "test_data/trip_constr_mass.txt", ntrip, trip_constr, trip_mass);
-
-    double *quad_constr = (double *)malloc(nquad*3*sizeof(double));
-    double *quad_mass = (double *)malloc(nquad*7*sizeof(double));
-    load_constr_mass(3, 7, "test_data/quad_constr_mass.txt", nquad, quad_constr, quad_mass);
-    */
-
-    HoloConst* holoconst = new HoloConst;;
-    holoconst->setup_solvent_parameters(mO, mH, rOHsq, rHHsq);
-    holoconst->setup_types(npair_type, h_pair_constr, h_pair_mass,
-			   ntrip_type, h_trip_constr, h_trip_mass,
-			   nquad_type, h_quad_constr, h_quad_mass);
+    HoloConst* holoconst = NULL;
+    if (holoconst_on) {
+      holoconst = new HoloConst;;
+      holoconst->setup_solvent_parameters(mO, mH, rOHsq, rHHsq);
+      holoconst->setup_types(npair_type, h_pair_constr, h_pair_mass,
+			     ntrip_type, h_trip_constr, h_trip_mass,
+			     nquad_type, h_quad_constr, h_quad_mass);
+    }
     //-------------------------------------------------------------------------------------
 
     cudaStream_t integrator_stream;
     cudaCheck(cudaStreamCreate(&integrator_stream));
 
-    CudaLeapfrogIntegrator leapfrog(holoconst, 0);
-
     // Neighborlist
-    NeighborList<32> nlist(ncoord, iblo14, inb14);
+    NeighborList<32> nlist(ncoord, h_iblo14, h_inb14);
 
     // Setup domain decomposition
 
@@ -375,13 +475,13 @@ void test() {
 
     CudaDomdecGroups domdecGroups(domdec);
 
-    AtomGroup<bond_t> bondGroup(nbond, bond);
-    AtomGroup<bond_t> ureybGroup(nureyb, ureyb);
-    AtomGroup<angle_t> angleGroup(nangle, angle);
-    AtomGroup<dihe_t> diheGroup(ndihe, dihe);
-    AtomGroup<dihe_t> imdiheGroup(nimdihe, imdihe);
-    AtomGroup<xx14_t> in14Group(nin14, in14);
-    AtomGroup<xx14_t> ex14Group(nex14, ex14);
+    AtomGroup<bond_t> bondGroup(nbond, h_bond);
+    AtomGroup<bond_t> ureybGroup(nureyb, h_ureyb);
+    AtomGroup<angle_t> angleGroup(nangle, h_angle);
+    AtomGroup<dihe_t> diheGroup(ndihe, h_dihe);
+    AtomGroup<dihe_t> imdiheGroup(nimdihe, h_imdihe);
+    AtomGroup<xx14_t> in14Group(nin14, h_in14);
+    AtomGroup<xx14_t> ex14Group(nex14, h_ex14);
     AtomGroup<bond_t>    pairGroup(npair, h_pair_indtype);
     AtomGroup<angle_t>   tripGroup(ntrip, h_trip_indtype);
     AtomGroup<dihe_t>    quadGroup(nquad, h_quad_indtype);
@@ -389,19 +489,26 @@ void test() {
     // Register groups
     // NOTE: the register IDs (BOND, UREYB, ...) must be unique
     domdecGroups.beginGroups();
-    domdecGroups.insertGroup(BOND, bondGroup, bond);
-    domdecGroups.insertGroup(UREYB, ureybGroup, ureyb);
-    domdecGroups.insertGroup(ANGLE, angleGroup, angle);
-    domdecGroups.insertGroup(DIHE, diheGroup, dihe);
-    domdecGroups.insertGroup(IMDIHE, imdiheGroup, imdihe);
-    domdecGroups.insertGroup(IN14, in14Group, in14);
-    domdecGroups.insertGroup(EX14, ex14Group, ex14);
-    //domdecGroups.insertGroup(PAIR, pairGroup, pair);
+    domdecGroups.insertGroup(BOND, bondGroup, h_bond);
+    domdecGroups.insertGroup(UREYB, ureybGroup, h_ureyb);
+    domdecGroups.insertGroup(ANGLE, angleGroup, h_angle);
+    domdecGroups.insertGroup(DIHE, diheGroup, h_dihe);
+    domdecGroups.insertGroup(IMDIHE, imdiheGroup, h_imdihe);
+    domdecGroups.insertGroup(IN14, in14Group, h_in14);
+    domdecGroups.insertGroup(EX14, ex14Group, h_ex14);
+    if (holoconst_on) {
+      domdecGroups.insertGroup(PAIR,    pairGroup, h_pair_indtype);
+      domdecGroups.insertGroup(TRIP,    tripGroup, h_trip_indtype);
+      domdecGroups.insertGroup(QUAD,    quadGroup, h_quad_indtype);
+      domdecGroups.insertGroup(SOLVENT, solventGroup, h_solvent_ind);
+    }
     domdecGroups.finishGroups();
 
+    CudaLeapfrogIntegrator leapfrog(holoconst, 0);
+
     // Charges
-    float *q = new float[ncoord];
-    load_vec<float>(1, "test_data/q.txt", ncoord, q);
+    float *h_q = new float[ncoord];
+    load_vec<float>(1, "test_data/q.txt", ncoord, h_q);
 
     // Setup PME force field
     CudaPMEForcefield forcefield(// Domain decomposition
@@ -409,15 +516,15 @@ void test() {
 				 // Neighborlist
 				 nlist,
 				 // Bonded
-				 nbondcoef, bondcoef, nureybcoef, ureybcoef, nanglecoef, anglecoef,
-				 ndihecoef, dihecoef, nimdihecoef, imdihecoef, 0, NULL,
+				 nbondcoef, h_bondcoef, nureybcoef, h_ureybcoef, nanglecoef, h_anglecoef,
+				 ndihecoef, h_dihecoef, nimdihecoef, h_imdihecoef, 0, NULL,
 				 // Direct non-bonded
 				 roff, ron, kappa, e14fac, VDW_VSH, EWALD,
-				 nvdwparam, vdwparam, vdwparam14, vdwtype, q,
+				 nvdwparam, h_vdwparam, h_vdwparam14, h_vdwtype, h_q,
 				 // Recip non-bonded
 				 recip, recipComm);
 
-    delete [] q;
+    delete [] h_q;
 
     leapfrog.set_forcefield(&forcefield);
 
@@ -453,12 +560,16 @@ void test() {
     int nstep = 100;
     leapfrog.run(nstep);
 
-    if (nstep == 100 || nstep == 1) {
+    if (nstep == 100 || (nstep == 1 && !holoconst_on)) {
       double* fxref = new double[ncoord];
       double* fyref = new double[ncoord];
       double* fzref = new double[ncoord];
       char filename[256];
-      sprintf(filename,"test_data/force_dyn%d.txt",nstep);
+      if (nstep == 100 && holoconst_on) {
+	sprintf(filename,"test_data/force_dyn%d_holoconst.txt",nstep);
+      } else {
+	sprintf(filename,"test_data/force_dyn%d.txt",nstep);
+      }
       read_xyz(ncoord, fxref, fyref, fzref, filename);
       double max_err = 0.0;
       double err_tol = 1.0e-8;
@@ -491,6 +602,14 @@ void test() {
 
     cudaCheck(cudaStreamDestroy(integrator_stream));
 
+    if (holoconst_on) {
+      check_holoconst(x, y, z,
+		      npair, h_pair_indtype, h_pair_constr, 
+		      ntrip, h_trip_indtype, h_trip_constr,
+		      nquad, h_quad_indtype, h_quad_constr,
+		      nsolvent, h_solvent_ind, rOHsq, rHHsq);
+    }
+
     delete [] mass;
 
     delete [] x;
@@ -507,36 +626,36 @@ void test() {
 
     //-------------------------------------------------------------------------------------
 
-    if (bond != NULL) delete [] bond;
-    delete [] bondcoef;
+    if (h_bond != NULL) delete [] h_bond;
+    delete [] h_bondcoef;
   
-    if (ureyb != NULL) delete [] ureyb;
-    delete [] ureybcoef;
+    if (h_ureyb != NULL) delete [] h_ureyb;
+    delete [] h_ureybcoef;
   
-    if (angle != NULL) delete [] angle;
-    delete [] anglecoef;
+    if (h_angle != NULL) delete [] h_angle;
+    delete [] h_anglecoef;
 
-    if (dihe != NULL) delete [] dihe;
-    delete [] dihecoef;
+    if (h_dihe != NULL) delete [] h_dihe;
+    delete [] h_dihecoef;
   
-    if (imdihe != NULL) delete [] imdihe;
-    delete [] imdihecoef;
+    if (h_imdihe != NULL) delete [] h_imdihe;
+    delete [] h_imdihecoef;
 
     //-------------------------------------------------------------------------------------
 
-    delete [] vdwparam;
-    delete [] vdwparam14;
-    delete [] vdwtype;
+    delete [] h_vdwparam;
+    delete [] h_vdwparam14;
+    delete [] h_vdwtype;
 
     //-------------------------------------------------------------------------------------
 
-    delete [] iblo14;
-    delete [] inb14;
+    delete [] h_iblo14;
+    delete [] h_inb14;
 
     //-------------------------------------------------------------------------------------
 
-    delete [] in14;
-    delete [] ex14;
+    delete [] h_in14;
+    delete [] h_ex14;
 
     //-------------------------------------------------------------------------------------
 
@@ -567,7 +686,7 @@ void test() {
     delete [] h_quad_mass;
 
     //-------------------------------------------------------------------------------------
-    delete holoconst;
+    if (holoconst != NULL) delete holoconst;
 
   } else {
     // ------------------------------------------------------------

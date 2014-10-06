@@ -392,17 +392,29 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
 
 //
 // Post-process force calculation. Used for array re-ordering after neighborlist search
+// Updates holonomic constraint tables if neccessary
 //
-void CudaPMEForcefield::post_calc(const float *global_mass, float *mass) {
+void CudaPMEForcefield::post_calc(const float *global_mass, float *mass, HoloConst* holoconst) {
 
   if (neighborlist_updated) {
-
     // Re-order xyz_shift
     domdec.reorder_xyz_shift(nlist.get_ind_sorted());
 
     // Re-order mass
     //domdec.reorder_mass(mass, nlist.get_ind_sorted());
     map_to_local_array<float>(domdec.get_ncoord(), domdec.get_loc2glo_ptr(), global_mass, mass);
+
+    if (holoconst != NULL) {
+      holoconst->setup_list(nlist.get_glo2loc(),
+			    domdecGroups.getNumGroupTable(PAIR), domdecGroups.getGroupTable(PAIR),
+			    domdecGroups.getGroupList<bond_t>(PAIR),
+			    domdecGroups.getNumGroupTable(TRIP), domdecGroups.getGroupTable(TRIP),
+			    domdecGroups.getGroupList<angle_t>(TRIP),
+			    domdecGroups.getNumGroupTable(QUAD), domdecGroups.getGroupTable(QUAD),
+			    domdecGroups.getGroupList<dihe_t>(QUAD),
+			    domdecGroups.getNumGroupTable(SOLVENT), domdecGroups.getGroupTable(SOLVENT),
+			    domdecGroups.getGroupList<solvent_t>(SOLVENT));
+    }
   }
 
   cudaCheck(cudaEventRecord(done_calc_event, direct_stream[0]));

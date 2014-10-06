@@ -175,7 +175,7 @@ bool check_result(const int nind, const int n, const int *ind,
 // Check results
 //
 void check_results(cudaXYZ<double>& xyz_res, hostXYZ<double>& h_xyz_cor,
-		   const int nsolvent, const int* h_solvent_ind,
+		   const int nsolvent, const solvent_t* h_solvent_ind,
 		   const int npair, const int* h_pair_ind,
 		   const int ntrip, const int* h_trip_ind,
 		   const int nquad, const int* h_quad_ind) {
@@ -187,7 +187,7 @@ void check_results(cudaXYZ<double>& xyz_res, hostXYZ<double>& h_xyz_cor,
 
   max_diff = 0.0;
   tol = 5.0e-13;
-  if (check_result(3, nsolvent, h_solvent_ind, h_xyz_res.x(), h_xyz_res.y(), h_xyz_res.z(),
+  if (check_result(3, nsolvent, (int *)h_solvent_ind, h_xyz_res.x(), h_xyz_res.y(), h_xyz_res.z(),
 		   h_xyz_cor.x(), h_xyz_cor.y(), h_xyz_cor.z(), tol, max_diff)) {
     std::cout<<"solvent SETTLE OK (tolerance " << tol << " max difference " << 
       max_diff << ")" << std::endl;
@@ -226,7 +226,7 @@ void test_parametric(const double mO, const double mH, const double rOHsq, const
 		     const int npair, const int* h_pair_ind,
 		     const int ntrip, const int* h_trip_ind,
 		     const int nquad, const int* h_quad_ind,
-		     const int nsolvent, const int* h_solvent_ind,
+		     const int nsolvent, const solvent_t* h_solvent_ind,
 		     cudaXYZ<double>& xyz_ref, cudaXYZ<double>& xyz_res, hostXYZ<double>& h_xyz_start) {
   //---------------------------------------------------------------------------
   // Load constraint distances and masses
@@ -250,7 +250,7 @@ void test_parametric(const double mO, const double mH, const double rOHsq, const
   holoconst.setup_ind_mass_constr(npair, (int2 *)h_pair_ind, h_pair_constr, h_pair_mass,
 				  ntrip, (int3 *)h_trip_ind, h_trip_constr, h_trip_mass,
 				  nquad, (int4 *)h_quad_ind, h_quad_constr, h_quad_mass,
-				  nsolvent, (int3 *)h_solvent_ind);
+				  nsolvent, h_solvent_ind);
 
   // Apply holonomic constraints, result is in xyz_res
   xyz_res.set_data_sync(h_xyz_start);
@@ -270,7 +270,7 @@ void test_parametric(const double mO, const double mH, const double rOHsq, const
 //
 void test_indexed(const double mO, const double mH, const double rOHsq, const double rHHsq,
 		  const int npair, const int ntrip, const int nquad,
-		  const int nsolvent, const int3* h_solvent_ind,
+		  const int nsolvent, const solvent_t* h_solvent_ind,
 		  cudaXYZ<double>& xyz_ref, cudaXYZ<double>& xyz_res, hostXYZ<double>& h_xyz_start) {
 
   const int npair_type = 9;
@@ -462,8 +462,8 @@ void test() {
   xyz_ref.set_data_sync(h_xyz_ref);
 
   // Load constraint indices
-  int *h_solvent_ind = (int *)malloc(nsolvent*3*sizeof(int));
-  load_vec<int>(3, "test_data/solvent_ind.txt", nsolvent, h_solvent_ind);
+  solvent_t *h_solvent_ind = new solvent_t[nsolvent];
+  load_vec<int>(3, "test_data/solvent_ind.txt", nsolvent, (int *)h_solvent_ind);
 
   int *h_pair_ind = (int *)malloc(npair*2*sizeof(int));
   load_vec<int>(2, "test_data/pair_ind.txt", npair, h_pair_ind);
@@ -485,12 +485,12 @@ void test() {
   //-------------------------
   // Test indexed
   //-------------------------
-  test_indexed(mO, mH, rOHsq, rHHsq, npair, ntrip, nquad, nsolvent, (int3 *)h_solvent_ind,
+  test_indexed(mO, mH, rOHsq, rHHsq, npair, ntrip, nquad, nsolvent, h_solvent_ind,
 	       xyz_ref, xyz_res, h_xyz_start);
   check_results(xyz_res, h_xyz_cor, nsolvent, h_solvent_ind, npair, h_pair_ind,
   		ntrip, h_trip_ind, nquad, h_quad_ind);
 
-  free(h_solvent_ind);
+  delete [] h_solvent_ind;
 
   free(h_pair_ind);
   free(h_trip_ind);
