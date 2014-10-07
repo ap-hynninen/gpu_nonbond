@@ -236,7 +236,8 @@ float pair_elec_force_14(const float r2, const float r, const float rinv,
 //
 template <typename AT, typename CT, int vdw_model, int elec_model, 
 	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
-__device__ void calc_in14_force_device(const int pos, const xx14list_t* in14list,
+__device__ void calc_in14_force_device(const cudaTextureObject_t tex,
+				       const int pos, const xx14list_t* in14list,
 				       const int* vdwtype, const float* vdwparam14,
 				       const float4* xyzq, const int stride, AT *force,
 				       double &vdw_pot, double &elec_pot) {
@@ -261,16 +262,22 @@ __device__ void calc_in14_force_device(const int pos, const xx14list_t* in14list
   int ia = vdwtype[i];
   int ja = vdwtype[j];
   int aa = max(ja, ia);
-  int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
 
   CT c6, c12;
   if (tex_vdwparam) {
-    //c6 = __ldg(&vdwparam[ivdw]);
-    //c12 = __ldg(&vdwparam[ivdw+1]);
-    float2 c6c12 = tex1Dfetch(vdwparam14_texref, ivdw);
+    int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
+    //c6 = __ldg(&vdwparam14[ivdw]);
+    //c12 = __ldg(&vdwparam14[ivdw+1]);
+    float2 c6c12 = tex1Dfetch<float2>(tex, ivdw);
     c6  = c6c12.x;
     c12 = c6c12.y;
+    //c6 = vdwparam14[ivdw*2];
+    //c12 = vdwparam14[ivdw*2+1];
+    //if (c6 != c6c12.x || c12 != c6c12.y) {
+    //  printf("ivdw=%d c6=%f c6c12.x=%f c12=%f c6c12.y=%f\n",ivdw,c6,c6c12.x,c12,c6c12.y);
+    // }
   } else {
+    int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2);
     c6 = vdwparam14[ivdw];
     c12 = vdwparam14[ivdw+1];
   }
@@ -279,12 +286,12 @@ __device__ void calc_in14_force_device(const int pos, const xx14list_t* in14list
 
   double dpot_vdw;
   CT fij_vdw = pair_vdw_force<vdw_model, calc_energy>(r2, r, rinv, rinv2, c6, c12, dpot_vdw);
-  vdw_pot += dpot_vdw;
+  if (calc_energy) vdw_pot += dpot_vdw;
 
   double dpot_elec;
   CT fij_elec = pair_elec_force_14<elec_model, calc_energy>(r2, r, rinv, qq,
-							    d_setup.e14fac, dpot_elec);
-  elec_pot += dpot_elec;
+  							    d_setup.e14fac, dpot_elec);
+  if (calc_energy) elec_pot += dpot_elec;
 
   CT fij = (fij_vdw + fij_elec)*rinv2;
 
@@ -333,7 +340,7 @@ __device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list
   double dpot_elec;
   CT fij_elec = pair_elec_force_14<elec_model, calc_energy>(r2, r, rinv, qq,
 							    0.0f, dpot_elec);
-  elec_pot += dpot_elec;
+  if (calc_energy) elec_pot += dpot_elec;
   CT fij = fij_elec*rinv2;
   // Calculate force components
   AT fxij, fyij, fzij;
@@ -356,7 +363,8 @@ __device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list
 //
 template <typename AT, typename CT, int vdw_model, int elec_model, 
 	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
-__global__ void calc_14_force_kernel(const int nin14list, const int nex14list,
+__global__ void calc_14_force_kernel(const cudaTextureObject_t tex,
+				     const int nin14list, const int nex14list,
 				     const int nin14block,
 				     const xx14list_t* in14list, const xx14list_t* ex14list,
 				     const int* vdwtype, const float* vdwparam14,
@@ -375,7 +383,7 @@ __global__ void calc_14_force_kernel(const int nin14list, const int nex14list,
     int pos = threadIdx.x + blockIdx.x*blockDim.x;
     if (pos < nin14list) {
       calc_in14_force_device<AT, CT, vdw_model, elec_model, calc_energy, calc_virial, tex_vdwparam>
-	(pos, in14list, vdwtype, vdwparam14, xyzq, stride, force, vdw_pot, elec_pot);
+	(tex, pos, in14list, vdwtype, vdwparam14, xyzq, stride, force, vdw_pot, elec_pot);
     }
 
     if (calc_energy) {
@@ -431,7 +439,7 @@ __global__ void calc_14_force_kernel(const int nin14list, const int nex14list,
 //
 template <typename AT, typename CT, int tilesize, int vdw_model, int elec_model,
 	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
-__global__ void calc_force_kernel(const int base,
+__global__ void calc_force_kernel(const cudaTextureObject_t tex, const int base,
 				  const int n_ientry, const ientry_t* __restrict__ ientry,
 				  const int* __restrict__ tile_indj,
 				  const tile_excl_t<tilesize>* __restrict__ tile_excl,
@@ -440,6 +448,7 @@ __global__ void calc_force_kernel(const int base,
 				  const float4* __restrict__ xyzq, const int* __restrict__ vdwtype,
 #ifdef USE_BLOCK
 				  const int* __restrict__ blocktype,
+				  const cudaTextureObject_t block_tex,
 #endif
 				  AT* __restrict__ force) {
 
@@ -646,16 +655,17 @@ __global__ void calc_force_kernel(const int base,
 	coulpotl += dpot_elec;
 
 	int aa = (ja > ia) ? ja : ia;      // aa = max(ja,ia)
-	int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
 	
 	float c6, c12;
 	if (tex_vdwparam) {
+	  int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
 	  //c6 = __ldg(&vdwparam[ivdw]);
 	  //c12 = __ldg(&vdwparam[ivdw+1]);
-	  float2 c6c12 = tex1Dfetch(vdwparam_texref, ivdw);
+	  float2 c6c12 = tex1Dfetch<float2>(tex, ivdw);
 	  c6  = c6c12.x;
 	  c12 = c6c12.y;
 	} else {
+	  int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2);
 	  c6 = sh_vdwparam[ivdw];
 	  c12 = sh_vdwparam[ivdw+1];
 	}
@@ -669,7 +679,7 @@ __global__ void calc_force_kernel(const int base,
 #ifdef USE_BLOCK
 	int bb = (jb > ib) ? jb : ib;      // bb = max(jb,ib)
 	int iblock = (bb*(bb-3) + 2*(jb + ib) - 2);
-	float scale = tex1Dfetch(blockparam_texref, iblock);
+	float scale = tex1Dfetch<float>(block_tex, iblock);
 	fij_vdw *= scale;
 	fij_elec *= scale;
 	if (calc_energy) {

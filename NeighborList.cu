@@ -2140,14 +2140,14 @@ bool NeighborList<tilesize>::test_z_columns(const int* zone_patom,
 
   int ncoord = zone_patom[7];
   float4 *h_xyzq = new float4[ncoord];
-  copy_DtoH<float4>(xyzq, h_xyzq, ncoord);
+  copy_DtoH_sync<float4>(xyzq, h_xyzq, ncoord);
   float4 *h_xyzq_sorted = new float4[ncoord];
-  copy_DtoH<float4>(xyzq_sorted, h_xyzq_sorted, ncoord);
+  copy_DtoH_sync<float4>(xyzq_sorted, h_xyzq_sorted, ncoord);
 
   int *h_col_patom = new int[ncol_tot+1];
-  copy_DtoH<int>(col_patom, h_col_patom, ncol_tot+1);
+  copy_DtoH_sync<int>(col_patom, h_col_patom, ncol_tot+1);
   int *h_ind_sorted = new int[ncoord];
-  copy_DtoH<int>(ind_sorted, h_ind_sorted, ncoord);
+  copy_DtoH_sync<int>(ind_sorted, h_ind_sorted, ncoord);
 
   bool ok = true;
 
@@ -2226,15 +2226,15 @@ bool NeighborList<tilesize>::test_sort(const int* zone_patom,
 
   int ncoord = zone_patom[7];
   float4 *h_xyzq = new float4[ncoord];
-  copy_DtoH<float4>(xyzq, h_xyzq, ncoord);
+  copy_DtoH_sync<float4>(xyzq, h_xyzq, ncoord);
   float4 *h_xyzq_sorted = new float4[ncoord];
-  copy_DtoH<float4>(xyzq_sorted, h_xyzq_sorted, ncoord);
+  copy_DtoH_sync<float4>(xyzq_sorted, h_xyzq_sorted, ncoord);
   int *h_col_patom = new int[ncol_tot+1];
-  copy_DtoH<int>(col_patom, h_col_patom, ncol_tot+1);
+  copy_DtoH_sync<int>(col_patom, h_col_patom, ncol_tot+1);
   int *h_ind_sorted = new int[ncoord];
-  copy_DtoH<int>(ind_sorted, h_ind_sorted, ncoord);
+  copy_DtoH_sync<int>(ind_sorted, h_ind_sorted, ncoord);
   int *h_cell_patom = new int[ncell_max];
-  copy_DtoH<int>(cell_patom, h_cell_patom, ncell_max);
+  copy_DtoH_sync<int>(cell_patom, h_cell_patom, ncell_max);
 
   bool ok = true;
 
@@ -2722,7 +2722,7 @@ void NeighborList<tilesize>::sort_core(const int ncol_tot, const int ncoord,
 // Sets ientry from host memory array
 //
 template <int tilesize>
-void NeighborList<tilesize>::set_ientry(int n_ientry, ientry_t *h_ientry, cudaStream_t stream) {
+void NeighborList<tilesize>::set_ientry(int n_ientry, ientry_t *h_ientry) {
 
   this->n_ientry = n_ientry;
 
@@ -2730,7 +2730,7 @@ void NeighborList<tilesize>::set_ientry(int n_ientry, ientry_t *h_ientry, cudaSt
   reallocate<ientry_t>(&ientry, &ientry_len, n_ientry, 1.4f);
 
   // Copy to device
-  copy_HtoD<ientry_t>(h_ientry, ientry, n_ientry, stream);
+  copy_HtoD_sync<ientry_t>(h_ientry, ientry, n_ientry);
 }
 
 //
@@ -2826,16 +2826,16 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 
   int *h_atom_excl_pos = new int[atom_excl_pos_len];
   int *h_atom_excl = new int[atom_excl_len];
-  copy_DtoH<int>(atom_excl_pos, h_atom_excl_pos, atom_excl_pos_len);
-  copy_DtoH<int>(atom_excl, h_atom_excl, atom_excl_len);
+  copy_DtoH_sync<int>(atom_excl_pos, h_atom_excl_pos, atom_excl_pos_len);
+  copy_DtoH_sync<int>(atom_excl, h_atom_excl, atom_excl_len);
 
   int ncoord = zone_patom[7];
 
   int *h_loc2glo = new int[ncoord];
-  copy_DtoH<int>(loc2glo, h_loc2glo, ncoord);
+  copy_DtoH_sync<int>(loc2glo, h_loc2glo, ncoord);
 
   float4* h_xyzq = new float4[ncoord];
-  copy_DtoH<float4>(xyzq, h_xyzq, ncoord);
+  copy_DtoH_sync<float4>(xyzq, h_xyzq, ncoord);
 
   float rcut2 = rcut*rcut;
 
@@ -2913,10 +2913,10 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
   int* h_tile_indj = new int[n_tile];
   int* h_cell_patom = new int[ncell+1];
 
-  copy_DtoH<ientry_t>(ientry, h_ientry, n_ientry);
-  copy_DtoH<tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
-  copy_DtoH<int>(tile_indj, h_tile_indj, n_tile);
-  copy_DtoH<int>(cell_patom, h_cell_patom, ncell+1);
+  copy_DtoH_sync<ientry_t>(ientry, h_ientry, n_ientry);
+  copy_DtoH_sync<tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
+  copy_DtoH_sync<int>(tile_indj, h_tile_indj, n_tile);
+  copy_DtoH_sync<int>(cell_patom, h_cell_patom, ncell+1);
 
   //
   // Go through the cell neighbor list
@@ -3223,8 +3223,8 @@ void NeighborList<tilesize>::setup_top_excl(const int ncoord_glo, const int *ibl
   // Allocate GPU memory and copy results to GPU
   reallocate<int>(&atom_excl_pos, &atom_excl_pos_len, ncoord_glo+1, 1.1f);
   reallocate<int>(&atom_excl, &atom_excl_len, nexcl_tot, 1.1f);
-  copy_HtoD<int>(h_atom_excl_pos, atom_excl_pos, ncoord_glo+1);
-  copy_HtoD<int>(h_atom_excl, atom_excl, nexcl_tot);
+  copy_HtoD_sync<int>(h_atom_excl_pos, atom_excl_pos, ncoord_glo+1);
+  copy_HtoD_sync<int>(h_atom_excl, atom_excl, nexcl_tot);
   
   delete [] h_atom_excl;
   delete [] h_atom_excl_pos;
@@ -3442,9 +3442,9 @@ void NeighborList<tilesize>::split_dense_sparse(int npair_cutoff) {
   int *h_tile_indj_sparse = new int[n_tile];
   pairs_t<tilesize> *h_pairs = new pairs_t<tilesize>[n_tile];
 
-  copy_DtoH<ientry_t>(ientry, h_ientry, n_ientry);
-  copy_DtoH<int>(tile_indj, h_tile_indj, n_tile);
-  copy_DtoH< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
+  copy_DtoH_sync<ientry_t>(ientry, h_ientry, n_ientry);
+  copy_DtoH_sync<int>(tile_indj, h_tile_indj, n_tile);
+  copy_DtoH_sync< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
 
   int n_ientry_dense = 0;
   int n_tile_dense = 0;
@@ -3492,9 +3492,9 @@ void NeighborList<tilesize>::split_dense_sparse(int npair_cutoff) {
   n_ientry = n_ientry_dense;
   n_tile = n_tile_dense;
 
-  copy_HtoD<ientry_t>(h_ientry_dense, ientry, n_ientry);
-  copy_HtoD<int>(h_tile_indj_dense, tile_indj, n_tile);
-  copy_HtoD< tile_excl_t<tilesize> >(h_tile_excl_dense, tile_excl, n_tile);
+  copy_HtoD_sync<ientry_t>(h_ientry_dense, ientry, n_ientry);
+  copy_HtoD_sync<int>(h_tile_indj_dense, tile_indj, n_tile);
+  copy_HtoD_sync< tile_excl_t<tilesize> >(h_tile_excl_dense, tile_excl, n_tile);
 
   allocate<ientry_t>(&ientry_sparse, n_ientry_sparse);
   allocate<int>(&tile_indj_sparse, n_tile_sparse);
@@ -3503,9 +3503,9 @@ void NeighborList<tilesize>::split_dense_sparse(int npair_cutoff) {
   tile_indj_sparse_len = n_tile_sparse;
   pairs_len = n_tile_sparse;
 
-  copy_HtoD<ientry_t>(h_ientry_sparse, ientry_sparse, n_ientry_sparse);
-  copy_HtoD<int>(h_tile_indj_sparse, tile_indj_sparse, n_tile_sparse);
-  copy_HtoD< pairs_t<tilesize> >(h_pairs, pairs, n_tile_sparse);
+  copy_HtoD_sync<ientry_t>(h_ientry_sparse, ientry_sparse, n_ientry_sparse);
+  copy_HtoD_sync<int>(h_tile_indj_sparse, tile_indj_sparse, n_tile_sparse);
+  copy_HtoD_sync< pairs_t<tilesize> >(h_pairs, pairs, n_tile_sparse);
 
   delete [] h_ientry;
   delete [] h_tile_indj;
@@ -3535,9 +3535,9 @@ void NeighborList<tilesize>::remove_empty_tiles() {
   int *h_tile_indj_noempty = new int[n_tile];
   tile_excl_t<tilesize> *h_tile_excl_noempty = new tile_excl_t<tilesize>[n_tile];
 
-  copy_DtoH<ientry_t>(ientry, h_ientry, n_ientry);
-  copy_DtoH<int>(tile_indj, h_tile_indj, n_tile);
-  copy_DtoH< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
+  copy_DtoH_sync<ientry_t>(ientry, h_ientry, n_ientry);
+  copy_DtoH_sync<int>(tile_indj, h_tile_indj, n_tile);
+  copy_DtoH_sync< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
 
   int n_ientry_noempty = 0;
   int n_tile_noempty = 0;
@@ -3572,9 +3572,9 @@ void NeighborList<tilesize>::remove_empty_tiles() {
   n_ientry = n_ientry_noempty;
   n_tile = n_tile_noempty;
 
-  copy_HtoD<ientry_t>(h_ientry_noempty, ientry, n_ientry);
-  copy_HtoD<int>(h_tile_indj_noempty, tile_indj, n_tile);
-  copy_HtoD< tile_excl_t<tilesize> >(h_tile_excl_noempty, tile_excl, n_tile);
+  copy_HtoD_sync<ientry_t>(h_ientry_noempty, ientry, n_ientry);
+  copy_HtoD_sync<int>(h_tile_indj_noempty, tile_indj, n_tile);
+  copy_HtoD_sync< tile_excl_t<tilesize> >(h_tile_excl_noempty, tile_excl, n_tile);
 
   delete [] h_ientry;
   delete [] h_tile_indj;
@@ -3596,9 +3596,9 @@ void NeighborList<tilesize>::analyze() {
   int *h_tile_indj = new int[n_tile];
   tile_excl_t<tilesize> *h_tile_excl = new tile_excl_t<tilesize>[n_tile];
 
-  copy_DtoH<ientry_t>(ientry, h_ientry, n_ientry);
-  copy_DtoH<int>(tile_indj, h_tile_indj, n_tile);
-  copy_DtoH< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
+  copy_DtoH_sync<ientry_t>(ientry, h_ientry, n_ientry);
+  copy_DtoH_sync<int>(tile_indj, h_tile_indj, n_tile);
+  copy_DtoH_sync< tile_excl_t<tilesize> >(tile_excl, h_tile_excl, n_tile);
 
   std::cout << "Number of i-tiles = " << n_ientry << ", total number of tiles = " 
 	    << n_tile << std::endl;
@@ -3702,9 +3702,9 @@ void NeighborList<tilesize>::load(const char *filename) {
   reallocate<int>(&tile_indj, &tile_indj_len, n_tile, 1.2f);
   reallocate< tile_excl_t<tilesize> >(&tile_excl, &tile_excl_len, n_tile, 1.2f);
 
-  copy_HtoD<ientry_t>(h_ientry, ientry, n_ientry);
-  copy_HtoD<int>(h_tile_indj, tile_indj, n_tile);
-  copy_HtoD< tile_excl_t<tilesize> >(h_tile_excl, tile_excl, n_tile);
+  copy_HtoD_sync<ientry_t>(h_ientry, ientry, n_ientry);
+  copy_HtoD_sync<int>(h_tile_indj, tile_indj, n_tile);
+  copy_HtoD_sync< tile_excl_t<tilesize> >(h_tile_excl, tile_excl, n_tile);
 
   delete [] h_ientry;
   delete [] h_tile_indj;

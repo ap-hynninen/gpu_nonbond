@@ -81,12 +81,14 @@ protected:
   int vdwparam_len;
   CT *vdwparam;
   bool use_tex_vdwparam;
+  cudaTextureObject_t vdwparam_tex;
 
   // VdW 1-4 parameters
   int nvdwparam14;
   int vdwparam14_len;
   CT *vdwparam14;
   bool use_tex_vdwparam14;
+  cudaTextureObject_t vdwparam14_tex;
 
   // 1-4 interaction and exclusion lists
   int nin14list;

@@ -311,7 +311,7 @@ public:
 		    const tile_excl_t<tilesize> *tile_excl_top,
 		    cudaStream_t stream=0);
 
-  void set_ientry(int n_ientry, ientry_t *h_ientry, cudaStream_t stream=0);
+  void set_ientry(int n_ientry, ientry_t *h_ientry);
 
   void split_dense_sparse(int npair_cutoff);
   void remove_empty_tiles();

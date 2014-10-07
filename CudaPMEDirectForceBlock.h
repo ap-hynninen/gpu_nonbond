@@ -26,6 +26,7 @@ template <typename AT, typename CT>
 
   // parameter (lambda) for each block pair, size nblock*(nblock+1)/2
   float *blockparam;
+  cudaTextureObject_t blockparam_tex;
 
  public:
 

@@ -38,9 +38,9 @@ Force<T>::Force(const char *filename) {
     this->resize(nforce);
 
     // Copy coordinates from CPU to GPU
-    copy_HtoD_sync<T>(xyz_cpu.x(), this->xyz(), nforce);
-    copy_HtoD_sync<T>(xyz_cpu.y(), this->xyz()+this->stride(), nforce);
-    copy_HtoD_sync<T>(xyz_cpu.z(), this->xyz()+this->stride()*2, nforce);
+    copy_HtoD_sync<T>(xyz_cpu.x(), this->x(), nforce);
+    copy_HtoD_sync<T>(xyz_cpu.y(), this->y(), nforce);
+    copy_HtoD_sync<T>(xyz_cpu.z(), this->z(), nforce);
 
   } else {
     std::cerr<<"Error opening file "<<filename<<std::endl;
@@ -59,8 +59,8 @@ bool Force<T>::compare(Force<T>& force, const double tol, double& max_diff) {
 
   hostXYZ<T> xyz1(this->size(), NON_PINNED);
   hostXYZ<T> xyz2(force.size(), NON_PINNED);
-  xyz1.set_data_sync(force.size(), force.xyz(), force.xyz()+force.stride(), force.xyz()+2*force.stride());
-  xyz2.set_data_sync(this->size(), this->xyz(), this->xyz()+this->stride(), this->xyz()+2*this->stride());
+  xyz1.set_data_sync(force.size(), force.x(), force.y(), force.z());
+  xyz2.set_data_sync(this->size(), this->x(), this->y(), this->z());
 
   bool ok = true;
 

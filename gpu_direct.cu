@@ -68,8 +68,8 @@ void test() {
 				   159.656334638202, 57272.9410562695, 894.635309171291,
 				   483.080609561938, 894.635309171288, 56639.3675265570};
   const double ref_vir = 57553.5284132295;
-  const double ref_energy_vdw = 8198.14425;
-  const double ref_energy_elec = -73396.45998;
+  //const double ref_energy_vdw = 8198.14425;
+  //const double ref_energy_elec = -73396.45998;
 
   Force<float> force_main("test_data/force_direct_main.txt");
   Force<float> force_total("test_data/force_direct.txt");
@@ -110,11 +110,8 @@ void test() {
   nlist_ref.analyze();
   std::cout << "=======================================" << std::endl;
 
-  //int *loc2glo_ind = new int[ncoord];
-  //load_ind<int>(1, "test_data/loc2glo.txt", ncoord, loc2glo_ind);
-  //for (int i=0;i < ncoord;i++) loc2glo_ind[i]--;
-
   int zone_patom[8] = {23558, 23558, 23558, 23558, 23558, 23558, 23558, 23558};
+  /*
   float3 min_xyz[8], max_xyz[8];
   min_xyz[0].x = -31.74800;
   min_xyz[0].y = -31.77600;
@@ -122,18 +119,21 @@ void test() {
   max_xyz[0].x = 31.73900;
   max_xyz[0].y = 31.80500;
   max_xyz[0].z = 31.80300;
+  */
 
+  /*
   int *h_loc2glo = new int[ncoord];
   for (int i=0;i < ncoord;i++) h_loc2glo[i] = i;
   int *loc2glo = NULL;
   allocate<int>(&loc2glo, ncoord);
-  copy_HtoD<int>(h_loc2glo, loc2glo, ncoord);
+  copy_HtoD_sync<int>(h_loc2glo, loc2glo, ncoord);
   delete [] h_loc2glo;
 
   NeighborList<32> nlist(ncoord, iblo14, inb14);
   //nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
   nlist.sort(zone_patom, xyzq_unsorted.xyzq, xyzq_sorted.xyzq, loc2glo);
   nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq, loc2glo);
+  cudaCheck(cudaDeviceSynchronize());
   nlist.test_build(zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq, loc2glo);
 
   std::cout << "================ nlist ================" << std::endl;
@@ -141,10 +141,7 @@ void test() {
   std::cout << "=======================================" << std::endl;
 
   deallocate<int>(&loc2glo);
-
-  //tol = 7.71e-4;
-  //if (!xyzq_sorted_ref.compare(xyzq_sorted, tol, max_diff)) {
-  //}
+  */
 
   // ------------------- Non-bonded -----------------
 
@@ -154,6 +151,7 @@ void test() {
   dir.set_vdwtype(ncoord, "test_data/vdwtype.txt");
   dir.calc_force(xyzq.xyzq, nlist_ref, false, false, force_fp.stride(), force_fp.xyz());
   force_fp.convert(force);
+  cudaCheck(cudaDeviceSynchronize());
   tol = 7.71e-4;
   if (!force_main.compare(force, tol, max_diff)) {
     std::cout<<"Non-bonded (main) force comparison FAILED"<<std::endl;
@@ -166,6 +164,7 @@ void test() {
   dir.set_14_list(nin14list, nex14list, in14list, ex14list);
   dir.calc_14_force(xyzq.xyzq, false, false, force_fp.stride(), force_fp.xyz());
   force_fp.convert(force);
+  cudaCheck(cudaDeviceSynchronize());
   tol = 7.71e-4;
   if (!force_total.compare(force, tol, max_diff)) {
     std::cout<<"Non-bonded (total) force comparison FAILED"<<std::endl;
@@ -174,6 +173,7 @@ void test() {
     std::cout<<"(tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
 
+  /*
   // Check energy and virial
   force_fp.clear();
   dir.clear_energy_virial();
@@ -185,6 +185,7 @@ void test() {
   double energy_excl;
   double virtensor[9];
   dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
+  cudaCheck(cudaDeviceSynchronize());
   double vir = (virtensor[0] + virtensor[4] + virtensor[8])/3.0;
   std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
   std::cout << "vir = " << vir << " virtensor=" << std::endl;
@@ -206,6 +207,7 @@ void test() {
   std::cout << "max_diff(vir_tensor) = " << max_diff << std::endl;
   std::cout << "max_diff(vir) = " << fabs(vir - ref_vir) << std::endl;
 
+  /*
   //--------------- Non-bonded using GPU build neighborlist -----------
   force_fp.clear();
   dir.clear_energy_virial();
@@ -213,15 +215,15 @@ void test() {
   dir.calc_virial(ncoord, xyzq_sorted.xyzq, force_fp.stride(), force_fp.xyz());
 
   dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
+  cudaCheck(cudaDeviceSynchronize());
   vir = (virtensor[0] + virtensor[4] + virtensor[8])/3.0;
   std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
 
   // -------------------- END -----------------
+  */
 
   delete [] in14list;
   delete [] ex14list;
-
-  //delete [] loc2glo_ind;
 
   delete [] iblo14;
   delete [] inb14;

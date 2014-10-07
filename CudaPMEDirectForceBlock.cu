@@ -8,20 +8,8 @@
 #include "NeighborList.h"
 #include "CudaPMEDirectForceBlock.h"
 
-// Settings for direct computation in device memory
-static __constant__ DirectSettings_t d_setup;
-
-// Energy and virial in device memory
-static __device__ DirectEnergyVirial_t d_energy_virial;
-
-// VdW parameter texture reference
-static texture<float2, 1, cudaReadModeElementType> vdwparam_texref;
-static bool vdwparam_texref_bound = false;
-static texture<float2, 1, cudaReadModeElementType> vdwparam14_texref;
-static bool vdwparam14_texref_bound = false;
-
-// Block parameter texture reference
-static texture<float, 1, cudaReadModeElementType> blockparam_texref;
+extern __constant__ DirectSettings_t d_setup;
+extern __device__ DirectEnergyVirial_t d_energy_virial;
 
 #define USE_BLOCK
 #include "CudaDirectForce_util.h"
@@ -39,17 +27,32 @@ CudaPMEDirectForceBlock<AT, CT>::CudaPMEDirectForceBlock(int nblock) {
   assert(nblock >= 1);
   blocktype_len = 0;
   blocktype = NULL;
+  blockparam_tex = 0;
   allocate<float>(&blockparam, nblock*(nblock+1)/2);
+
+  cudaResourceDesc resDesc;
+  memset(&resDesc, 0, sizeof(resDesc));
+  resDesc.resType = cudaResourceTypeLinear;
+  resDesc.res.linear.devPtr = blockparam;
+  resDesc.res.linear.desc.f = cudaChannelFormatKindFloat;
+  resDesc.res.linear.desc.x = sizeof(CT)*8;
+  resDesc.res.linear.sizeInBytes = nblock*(nblock+1)/2*sizeof(CT);
+
+  cudaTextureDesc texDesc;
+  memset(&texDesc, 0, sizeof(texDesc));
+  texDesc.readMode = cudaReadModeElementType;
+  cudaCreateTextureObject(&blockparam_tex, &resDesc, &texDesc, NULL);
+
   // Bind blockparam texture
-  blockparam_texref.normalized = 0;
-  blockparam_texref.filterMode = cudaFilterModePoint;
-  blockparam_texref.addressMode[0] = cudaAddressModeClamp;
-  blockparam_texref.channelDesc.x = 32;
-  blockparam_texref.channelDesc.y = 0;
-  blockparam_texref.channelDesc.z = 0;
-  blockparam_texref.channelDesc.w = 0;
-  blockparam_texref.channelDesc.f = cudaChannelFormatKindFloat;
-  cudaCheck(cudaBindTexture(NULL, blockparam_texref, blockparam, nblock*(nblock+1)/2*sizeof(float)));
+  //blockparam_texref.normalized = 0;
+  //blockparam_texref.filterMode = cudaFilterModePoint;
+  //blockparam_texref.addressMode[0] = cudaAddressModeClamp;
+  //blockparam_texref.channelDesc.x = 32;
+  //blockparam_texref.channelDesc.y = 0;
+  //blockparam_texref.channelDesc.z = 0;
+  //blockparam_texref.channelDesc.w = 0;
+  //blockparam_texref.channelDesc.f = cudaChannelFormatKindFloat;
+  //cudaCheck(cudaBindTexture(NULL, blockparam_texref, blockparam, nblock*(nblock+1)/2*sizeof(float)));
 }
 
 //
@@ -58,8 +61,9 @@ CudaPMEDirectForceBlock<AT, CT>::CudaPMEDirectForceBlock(int nblock) {
 template <typename AT, typename CT>
 CudaPMEDirectForceBlock<AT, CT>::~CudaPMEDirectForceBlock() {
   if (blocktype != NULL) deallocate<int>(&blocktype);
+  if (blockparam_tex != 0) cudaDestroyTextureObject(blockparam_tex);
   // Unbind texture
-  cudaCheck(cudaUnbindTexture(blockparam_texref));
+  //cudaCheck(cudaUnbindTexture(blockparam_texref));
   deallocate<float>(&blockparam);
 }
 
@@ -87,11 +91,11 @@ void CudaPMEDirectForceBlock<AT, CT>::set_blockparam(const CT *h_blockparam) {
 //
 template <typename AT, typename CT>
 void CudaPMEDirectForceBlock<AT, CT>::calc_14_force(const float4 *xyzq,
-					const bool calc_energy, const bool calc_virial,
-					const int stride, AT *force, cudaStream_t stream) {
+						    const bool calc_energy, const bool calc_virial,
+						    const int stride, AT *force, cudaStream_t stream) {
 
-  if (!vdwparam_texref_bound) {
-    std::cerr << "CudaPMEDirectForceBlock<AT, CT>::calc_14_force, vdwparam14_texref must be bound" << std::endl;
+  if (this->vdwparam14_tex == 0) {
+    std::cerr << "CudaPMEDirectForceBlock<AT, CT>::calc_14_force, vdwparam14_tex must be created" << std::endl;
     exit(1);
   }
 
@@ -108,7 +112,7 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_14_force(const float4 *xyzq,
   int elec_model_loc = this->calc_elec ? this->elec_model : NONE;
   if (elec_model_loc == NONE && vdw_model_loc == NONE) return;
 
-  CREATE_KERNELS(CREATE_KERNEL14, calc_14_force_kernel,
+  CREATE_KERNELS(CREATE_KERNEL14, calc_14_force_kernel, this->vdwparam14_tex,
 		 this->nin14list, this->nex14list, nin14block, this->in14list, this->ex14list,
 		 this->vdwtype, this->vdwparam14, xyzq, stride, force);
 
@@ -120,15 +124,20 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_14_force(const float4 *xyzq,
 //
 template <typename AT, typename CT>
 void CudaPMEDirectForceBlock<AT, CT>::calc_force(const float4 *xyzq,
-				     const NeighborList<32> *nlist,
-				     const bool calc_energy,
-				     const bool calc_virial,
-				     const int stride, AT *force, cudaStream_t stream) {
+						 const NeighborList<32> *nlist,
+						 const bool calc_energy,
+						 const bool calc_virial,
+						 const int stride, AT *force, cudaStream_t stream) {
 
   const int tilesize = 32;
 
-  if (!vdwparam_texref_bound) {
-    std::cerr << "CudaPMEDirectForceBlock<AT, CT>::calc_force, vdwparam_texref must be bound" << std::endl;
+  if (this->vdwparam_tex == 0) {
+    std::cerr << "CudaPMEDirectForceBlock<AT, CT>::calc_force, vdwparam_tex must be created" << std::endl;
+    exit(1);
+  }
+
+  if (blockparam_tex == 0) {
+    std::cerr << "CudaPMEDirectForceBlock<AT, CT>::calc_force, blockparam_tex must be created" << std::endl;
     exit(1);
   }
 
@@ -167,10 +176,10 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_force(const float4 *xyzq,
     int nblock = (nblock_tot > max_nblock) ? max_nblock : nblock_tot;
     nblock_tot -= nblock;
 
-    CREATE_KERNELS(CREATE_KERNEL, calc_force_kernel,
+    CREATE_KERNELS(CREATE_KERNEL, calc_force_kernel, this->vdwparam_tex,
 		   base, nlist->n_ientry, nlist->ientry, nlist->tile_indj,
 		   nlist->tile_excl, stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
-		   this->blocktype, force);
+		   this->blocktype, blockparam_tex, force);
 
     base += (nthread/warpsize)*nblock;
 

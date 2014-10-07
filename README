@@ -1,0 +1,33 @@
+Multi-GPU molecular dynamics engine for NVIDIA GPU cards.
+(c) Antti-Pekka Hynninen, 2013-2014
+
+Requirements:
+--------------
+* GNU/Intel C++ compiler
+* MPI library for multi-GPU support
+* CUDA 5.0 or newer
+* Compute capability 3.0 (Kepler) or higher NVIDIA GPU
+
+Compiling:
+-----------
+make
+
+Running tests:
+---------------
+
+gpu_direct
+- Test direct space non-bonded force calculation
+
+gpu_bonded
+- Test bonded force calculation
+
+gpu_recip
+- Test reciprocal space non-bonded force calculation
+
+gpu_const
+- Test holonomic constraints (i.e. "SHAKE")
+
+gpu_dyna
+- Test molecular dynamics run
+- Uses MPI for multi-GPU support
+
