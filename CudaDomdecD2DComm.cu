@@ -21,7 +21,7 @@ CudaDomdecD2DComm::CudaDomdecD2DComm(Domdec& domdec, CudaMPI& cudaMPI) :
   h_sendbuf_len = 0;
   h_sendbuf = NULL;
 
-  z_send_loc.resize(nz_comm);
+  z_send_loc0.resize(nz_comm);
   
   // Recv
   recvbuf_len = 0;
@@ -80,9 +80,6 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 
   const int COUNT_TAG = 1, DATA_TAG = 2;
   
-  // Size of each buffer elements
-  const int buf_elem_size = update ? (sizeof(int) + 3*sizeof(double)) : (3*sizeof(double));
-
   // Resize arrays
   if (nx_comm + ny_comm + nz_comm > 0 && update) {
     atom_pick.resize(coord.size()+1);
@@ -119,16 +116,16 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	z_nsend.at(i) = atom_pos[coord.size()];
 	z_psend.at(i+1) = z_psend.at(i) + z_nsend.at(i);
 
-	z_send_loc.at(i).resize(z_nsend.at(i));
+	z_send_loc0.at(i).resize(z_nsend.at(i));
 
 	// atom_pos[] now contains position to store each atom
 	// Scatter to produce packed atom index table
 	thrust::scatter_if(thrust::make_counting_iterator(0),
 			   thrust::make_counting_iterator(coord.size()),
 			   atom_pos.begin(), atom_pick.begin(),
-			   z_send_loc.at(i).begin());
+			   z_send_loc0.at(i).begin());
 	
-	// z_send_loc[i][] now contains the local indices of atoms
+	// z_send_loc0[i][] now contains the local indices of atoms
 
 	// Re-allocate sendbuf if needed
 	int req_sendbuf_len = pos + alignInt(z_nsend.at(i),2)*sizeof(int) + 
@@ -139,7 +136,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	thrust::device_ptr<int> sendbuf_ind_ptr((int *)&sendbuf[pos]);
 	
 	// Pack in atom global indices to sendbuf[]
-	thrust::gather(z_send_loc.at(i).begin(), z_send_loc.at(i).end(),
+	thrust::gather(z_send_loc0.at(i).begin(), z_send_loc0.at(i).end(),
 		       loc2glo.begin(), sendbuf_ind_ptr);
 
 	// Advance sendbuf position
@@ -151,15 +148,15 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 
       // Pack in coordinates to sendbuf[]
       thrust::device_ptr<double> x_ptr(coord.x());
-      thrust::gather(z_send_loc.at(i).begin(), z_send_loc.at(i).end(),
+      thrust::gather(z_send_loc0.at(i).begin(), z_send_loc0.at(i).end(),
 		     x_ptr, sendbuf_xyz_ptr);
 
       thrust::device_ptr<double> y_ptr(coord.y());
-      thrust::gather(z_send_loc.at(i).begin(), z_send_loc.at(i).end(),
+      thrust::gather(z_send_loc0.at(i).begin(), z_send_loc0.at(i).end(),
 		     y_ptr, sendbuf_xyz_ptr + z_nsend.at(i));
 
       thrust::device_ptr<double> z_ptr(coord.z());
-      thrust::gather(z_send_loc.at(i).begin(), z_send_loc.at(i).end(),
+      thrust::gather(z_send_loc0.at(i).begin(), z_send_loc0.at(i).end(),
 		     z_ptr, sendbuf_xyz_ptr + 2*z_nsend.at(i));
 
       pos += z_nsend[i]*3*sizeof(double);
@@ -197,7 +194,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       if (!cudaMPI.isCudaAware()) {
 	reallocate_host<char>(&h_recvbuf, &h_recvbuf_len, precv.at(nz_comm), 1.2f);
       }
-      z_recv_ind.resize(precv.at(nz_comm));
+      z_recv_glo.resize(precv.at(nz_comm));
       coord.resize(coord.size()+precv.at(nz_comm));
     }
 
@@ -229,10 +226,10 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       int pos = 0;
       int src_pos = precv.at(i);
       if (update) {
-	// Copy coordinates indices to z_recv_ind
+	// Copy coordinates indices to z_recv_glo
 	// format = indices[alignInt(nrecv.at(i),2) x int]
 	thrust::device_ptr<double> ind_ptr((double *)&recvbuf[src_pos]);
-	thrust::copy(ind_ptr, ind_ptr+z_nrecv.at(i), z_recv_ind.begin()+pos);
+	thrust::copy(ind_ptr, ind_ptr+z_nrecv.at(i), z_recv_glo.begin()+pos);
 	pos += z_nrecv.at(i);
 	src_pos += alignInt(z_nrecv.at(i),2)*sizeof(int);
       }
@@ -270,9 +267,110 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 }
 
 //
+// Updates (z_recv_loc)
+// Called after neighborlist update
+// glo2loc = global -> local mapping
+// loc2loc = local -> local re-indexing (this happens at neighborlist build)
+//
+void CudaDomdecD2DComm::update(int* glo2loc, int* loc2loc) {
+
+  thrust::device_ptr<int> glo2loc_ptr(glo2loc);
+  thrust::device_ptr<int> loc2loc_ptr(loc2loc);
+  
+  if (nz_comm > 0) {
+    // Re-allocate
+    z_recv_loc.resize(precv.at(nz_comm));
+    z_send_loc.resize(psend.at(nz_comm));
+    // Map: z_recv_glo => z_recv_loc
+    // z_recv_loc = glo2loc[z_recv_glo]
+    thrust::gather(z_recv_glo.begin(), z_recv_glo.end(), glo2loc_ptr, z_recv_loc.begin());
+    // Map: z_send_loc0 => z_send_loc
+    for (int i=0;i < nz_comm;i++) {
+      thrust::gather(z_send_loc0.at(i).begin(), z_send_loc0.at(i).begin(), loc2loc_ptr,
+		     z_send_loc.begin()+psend.at(i));
+    }
+  }
+  
+}
+
+//
 // Communicate forces
 //
 void CudaDomdecD2DComm::comm_force(Force<long long int>& force) {
+
+  const int DATA_TAG = 2;
+
+  // Double pointers to (recvbuf, sendbuf) to make address math easier
+  double* precvbuf = (double *)recvbuf;
+  double* psendbuf = (double *)sendbuf;
+  double* h_precvbuf = (double *)h_recvbuf;
+  double* h_psendbuf = (double *)h_sendbuf;
+
+  // Pack forces in z-direction: force => recvbuf
+  for (int i=0;i < nz_comm;i++) {
+    // Get double pointer to recv buffer
+    thrust::device_ptr<double> recvbuf_xyz_ptr(&precvbuf[3*z_precv.at(i)]);
+
+    // Pack forces to recvbuf[]
+    thrust::device_ptr<double> x_ptr((double *)force.x());
+    thrust::gather(z_recv_loc.begin()+z_precv.at(i), z_recv_loc.begin()+z_precv.at(i+1),
+		   x_ptr, recvbuf_xyz_ptr);
+
+    thrust::device_ptr<double> y_ptr((double *)force.y());
+    thrust::gather(z_recv_loc.begin()+z_precv.at(i), z_recv_loc.begin()+z_precv.at(i+1),
+		   y_ptr, recvbuf_xyz_ptr + z_nrecv.at(i));
+
+    thrust::device_ptr<double> z_ptr((double *)force.z());
+    thrust::gather(z_recv_loc.begin()+z_precv.at(i), z_recv_loc.begin()+z_precv.at(i+1),
+		   z_ptr, recvbuf_xyz_ptr + 2*z_nrecv.at(i));
+  }
+
+  // Send & Recv data in z-direction
+  for (int i=0;i < nz_comm;i++) {
+    if (z_nsend.at(i) > 0 && z_nrecv.at(i) > 0) {
+      MPICheck(cudaMPI.Sendrecv(&precvbuf[3*z_precv.at(i)], 3*z_nrecv.at(i)*sizeof(double),
+				z_recv_node.at(i), DATA_TAG,
+				&psendbuf[3*z_psend.at(i)], 3*z_nsend.at(i)*sizeof(double),
+				z_send_node.at(i), DATA_TAG, MPI_STATUS_IGNORE,
+				&h_precvbuf[3*z_precv.at(i)], &h_psendbuf[3*z_psend.at(i)]));      
+    } else if (z_nrecv.at(i) > 0) {
+      MPICheck(cudaMPI.Send(&precvbuf[3*z_precv.at(i)], 3*z_nrecv.at(i)*sizeof(double),
+			    z_recv_node.at(i), DATA_TAG, &h_precvbuf[3*z_precv.at(i)]));
+    } else if (z_nsend.at(i) > 0) {
+      MPICheck(cudaMPI.Recv(&psendbuf[3*z_psend.at(i)], 3*z_nsend.at(i)*sizeof(double),
+			    z_send_node.at(i), DATA_TAG, MPI_STATUS_IGNORE,
+			    &h_psendbuf[3*z_psend.at(i)]));
+    }
+  }    
+
+  // Unpack force in z-direction: sendbuf => force
+  for (int i=0;i < nz_comm;i++) {
+    // format = X[z_nsend.at(i) x double] | Y[z_nsend.at(i) x double] | Z[z_nsend.at(i) x double]
+    thrust::device_ptr<double> x_src_ptr(&psendbuf[3*z_psend.at(i)]);
+    thrust::device_ptr<double> x_dst_ptr((double *)force.x());
+    thrust::permutation_iterator< thrust::device_vector<double>::iterator,
+				  thrust::device_vector<int>::iterator >
+      x_dst_iter(x_dst_ptr, z_send_loc.begin()+z_precv.at(i));
+    thrust::transform(x_src_ptr, x_src_ptr+z_nrecv.at(i),
+		      x_dst_iter, x_dst_iter, thrust::plus<double>());
+
+    thrust::device_ptr<double> y_src_ptr(&psendbuf[3*z_psend.at(i) + z_nsend.at(i)]);
+    thrust::device_ptr<double> y_dst_ptr((double *)force.y());
+    thrust::permutation_iterator< thrust::device_vector<double>::iterator,
+				  thrust::device_vector<int>::iterator >
+      y_dst_iter(y_dst_ptr, z_send_loc.begin()+z_precv.at(i));
+    thrust::transform(y_src_ptr, y_src_ptr+z_nrecv.at(i),
+		      y_dst_iter, y_dst_iter, thrust::plus<double>());
+
+    thrust::device_ptr<double> z_src_ptr(&psendbuf[3*z_psend.at(i) + 2*z_nsend.at(i)]);
+    thrust::device_ptr<double> z_dst_ptr((double *)force.z());
+    thrust::permutation_iterator< thrust::device_vector<double>::iterator,
+				  thrust::device_vector<int>::iterator >
+      z_dst_iter(z_dst_ptr, z_send_loc.begin()+z_precv.at(i));
+    thrust::transform(z_src_ptr, z_src_ptr+z_nrecv.at(i),
+		      z_dst_iter, z_dst_iter, thrust::plus<double>());
+
+  }
 
 }
 

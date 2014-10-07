@@ -260,6 +260,13 @@ void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStrea
 }
 
 //
+// Update communication (we're updating the local receive indices)
+//
+void CudaDomdec::comm_update(int* glo2loc, int* loc2loc, cudaStream_t stream) {
+  D2Dcomm.update(glo2loc, loc2loc);
+}
+
+//
 // Communicate forces
 //
 void CudaDomdec::comm_force(Force<long long int>& force, cudaStream_t stream) {

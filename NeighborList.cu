@@ -37,7 +37,7 @@ static int BitCount_ref(unsigned int u) {
 //
 template <bool IvsI>
 __device__
-void get_cell_bounds_z(const int izone, const int jzone, const int icell, const int ncell,
+void get_cell_bounds_z(const int icell, const int ncell, const float minx,
 		       const float x0, const float x1, const float* __restrict__ bx,
 		       const float rcut, int& jcell0, int& jcell1) {
 
@@ -50,10 +50,9 @@ void get_cell_bounds_z(const int izone, const int jzone, const int icell, const 
       // set the left cell boundary (jcell0) to 1 and start looking for the right
       // boundary from 1
       jcell_start_left = -1;         // with this value, we don't look for cells on the left
-      jcell_start_right = 0;         // start looking for cells at right from 1
+      jcell_start_right = 0;         // start looking for cells at right from 0
       jcell0 = 0;                    // left boundary set to minimum value
       jcell1 = -1;                   // set to "no cells" value
-      //      dist[1] = 0.0f;
     } else if (icell >= ncell) {
       // This is one of the image cells on the right =>
       // set the right cell boundary (icell1) to ncell and start looking for the left
@@ -62,40 +61,36 @@ void get_cell_bounds_z(const int izone, const int jzone, const int icell, const 
       jcell_start_right = ncell;     // with this value, we don't look for cells on the right
       jcell0 = ncell;                // set to "no cells" value
       jcell1 = ncell-1;              // right boundary set to maximum value
-      //      dist[ncell] = 0.0f;
     } else {
       jcell_start_left = icell - 1;
       jcell_start_right = icell + 1;
       jcell0 = icell;
       jcell1 = icell;
-      //      dist[icell] = 0.0f;
     }
   } else {
-    /*
     // Search between two different zones
-    if (bx(0) >= x1 || (bx(0) < x1 && bx(0) > x0)) {
+    if (bx[0] >= x1 || (bx[0] < x1 && bx[0] > x0)) {
       // j-zone is to the right of i-zone
-      // => no left search, start right search from 1
-      jcell_start_left = 0;
-      jcell_start_right = 1;
-      jcell0 = 1;
-      jcell1 = 0;
+      // => no left search, start right search from 0
+      jcell_start_left = -1;
+      jcell_start_right = 0;
+      jcell0 = 0;
+      jcell1 = -1;
     } else if (bx[ncell] <= x0 || (bx[ncell] > x0 && bx[ncell] < x1)) {
       // j-zone is to the left of i-zone
       // => no right search, start left search from ncell
-      jcell_start_left = ncell;
-      jcell_start_right = ncell + 1;
-      jcell0 = ncell + 1;
-      jcell1 = ncell;
+      jcell_start_left = ncell-1;
+      jcell_start_right = ncell;
+      jcell0 = ncell;
+      jcell1 = ncell-1;
     } else {
       // i-zone is between j-zones
       // => safe choice is to search the entire range
-      jcell_start_left = ncell;
-      jcell_start_right = 1;
-      jcell0 = ncell;
-      jcell1 = 1;
+      jcell_start_left = ncell-1;
+      jcell_start_right = 0;
+      jcell0 = ncell-1;
+      jcell1 = 0;
     }
-    */
   }
 
   //
@@ -107,7 +102,6 @@ void get_cell_bounds_z(const int izone, const int jzone, const int icell, const 
   for (int j=jcell_start_left;j >= 0;j--) {
     float d = x0 - bx[j];
     if (d > rcut) break;
-    //dist[j] = max(0.0f, d);
     jcell0 = j;
   }
 
@@ -118,15 +112,13 @@ void get_cell_bounds_z(const int izone, const int jzone, const int icell, const 
   // Cell left boundary is at bx[i-1]
   //
   for (int j=jcell_start_right;j < ncell;j++) {
-    float bx_j = (j > 0) ? bx[j-1] : d_nlist_param.min_xyz[jzone].z;
+    float bx_j = (j > 0) ? bx[j-1] : minx;
     float d = bx_j - x1;
     if (d > rcut) break;
-    //dist[j] = max(0.0f, d);
     jcell1 = j;
   }
 
   // Cell bounds are jcell0:jcell1
-      
 }
 
 //
@@ -135,8 +127,7 @@ void get_cell_bounds_z(const int izone, const int jzone, const int icell, const 
 //
 template <bool IvsI>
 __device__
-void get_cell_bounds_xy(const int izone, const int jzone, const int icell,
-			const int ncell,
+void get_cell_bounds_xy(const int icell, const int ncell, const float minx,
 			const float x0, const float x1,
 			const float dx, const float rcut,
 			int& jcell0, int& jcell1) {
@@ -152,7 +143,7 @@ void get_cell_bounds_xy(const int izone, const int jzone, const int icell,
     // portion inside i-cell is (x0-bx)
     // => what is left of rcut on the left of i-cell is rcut-(x0-bx)
     //
-    float bx = d_nlist_param.min_xyz[0].x + icell*dx;
+    float bx = minx + icell*dx;
     jcell0 = max(0, icell - (int)ceilf((rcut - (x0 - bx))/dx));
 
     //
@@ -163,7 +154,7 @@ void get_cell_bounds_xy(const int izone, const int jzone, const int icell,
     // portion inside i-cell is (bx-x1)
     // => what is left of rcut on the right of i-cell is rcut-(bx-x1)
     //
-    bx = d_nlist_param.min_xyz[0].x + (icell+1)*dx;
+    bx = minx + (icell+1)*dx;
     jcell1 = min(ncell-1, icell + (int)ceilf((rcut - (bx - x1))/dx));
 
     //
@@ -172,59 +163,26 @@ void get_cell_bounds_xy(const int izone, const int jzone, const int icell,
     if (icell < 0) jcell0 = 0;
     if (icell >= ncell) jcell1 = ncell - 1;
 
-    /*
-    if (icell < 0) {
-      // This is one of the image cells on the left =>
-      // set the left cell boundary (jcell0) to 1 and start looking for the right
-      // boundary from 1
-      jcell_start_left = 0;       // with this value, we don't look for cells on the left
-      jcell_start_right = 1;      // start looking for cells at right from 1
-      jcell0 = 1;                  // left boundary set to minimum value
-      jcell1 = 0;                    // set to "no cells" value
-      dist[1] = 0.0f;
-    } else if (icell >= ncell) {
-      // This is one of the image cells on the right =>
-      // set the right cell boundary (icell1) to ncell and start looking for the left
-      // boundary from ncell
-      jcell_start_left = ncell;      // start looking for cells at left from ncell
-      jcell_start_right = ncell + 1; // with this value, we don't look for cells on the right
-      jcell0 = ncell + 1;            // set to "no cells" value
-      jcell1 = ncell;                // right boundary set to maximum value
-      dist[ncell] = 0.0f;
-    } else {
-      jcell_start_left = icell - 1;
-      jcell_start_right = icell + 1;
-      jcell0 = icell;
-      jcell1 = icell;
-      dist[icell] = 0.0f;
-    }
-    */
-
   } else {
-    /*
-    if (bx(0) >= x1 || (bx(0) < x1 && bx(0) > x0)) {
-      // j-zone is to the right of i-zone
-      // => no left search, start right search from 1
-      jcell_start_left = 0;
-      jcell_start_right = 1;
-      jcell0 = 1;
-      jcell1 = 0;
-    } else if (bx[ncell] <= x0 || (bx[ncell] > x0 && bx[ncell] < x1)) {
-      // j-zone is to the left of i-zone
-      // => no right search, start left search from ncell
-      jcell_start_left = ncell;
-      jcell_start_right = ncell + 1;
-      jcell0 = ncell + 1;
-      jcell1 = ncell;
-    } else {
-      // i-zone is between j-zones
-      // => safe choice is to search the entire range
-      jcell_start_left = ncell;
-      jcell_start_right = 1;
-      jcell0 = ncell;
-      jcell1 = 1;
-    }
-    */
+    //
+    // Search between zones izone and jzone
+    // (x0, x1) are for izone
+    // (dx, minx, ncell) are for jzone
+    //
+
+    //
+    // jzone left boundaries are given by: minx + jcell*dx
+    // jzone right boundaries are given by: minx + (jcell+1)*dx
+    //
+    // izone overlap region is: x0-rcut ... x1+rcut
+    //
+
+    // Find first left boundary that is < x0-rcut
+    jcell0 = max(0, (int)floorf((x0-rcut-minx)/dx));
+
+    // Find first right boundary that is > x1+rcut
+    jcell1 = min(ncell-1, (int)ceilf((x1+rcut-minx)/dx) - 1);
+
   }
 
 
@@ -1403,12 +1361,12 @@ void build_kernel(const int max_nexcl,
   // Calculate shared memory pointers:
   //
   // Total memory requirement:
-  // (blockDim.x/warpsize)*( (~IvsI)*n_jzone*sizeof(int4) + n_jlist_max*sizeof(int) 
+  // (blockDim.x/warpsize)*( (!IvsI)*n_jzone*sizeof(int2) + n_jlist_max*sizeof(int) 
   //                         + tilesize*sizeof(float3))
   //
   // Required space:
   // shflmem:  blockDim.x*sizeof(int)                           (Only for __CUDA_ARCH__ < 300)  
-  // jcellxy:  (blockDim.x/warpsize)*n_jzone*sizeof(int4)       (Only for IvsI = false)
+  // jcellxy:  (blockDim.x/warpsize)*n_jzone*sizeof(int2)       (Only for IvsI = false)
   // sh_jlist: (blockDim.x/warpsize)*n_jlist_max*sizeof(int)
   // sh_xyzi:  (blockDim.x/warpsize)*tilesize*sizeof(float3)
   // sh_atomj: blockDim.x*sizeof(int)
@@ -1420,9 +1378,9 @@ void build_kernel(const int max_nexcl,
   shbuf_pos += blockDim.x*sizeof(int);
 #endif
 
-  volatile int4 *sh_jcellxy = (int4 *)&shbuf[shbuf_pos + 
-					     (threadIdx.x/warpsize)*n_jzone*sizeof(int4)];
-  if (!IvsI) shbuf_pos += (blockDim.x/warpsize)*n_jzone*sizeof(int4);
+  volatile int2 *sh_jcellxy_min = (int2 *)&shbuf[shbuf_pos + 
+						 (threadIdx.x/warpsize)*n_jzone*sizeof(int2)];
+  if (!IvsI) shbuf_pos += (blockDim.x/warpsize)*n_jzone*sizeof(int2);
 
   // Temporary j-cell list. Each warp has its own jlist
   volatile int *sh_jlist = (int *)&shbuf[shbuf_pos +
@@ -1509,8 +1467,9 @@ void build_kernel(const int max_nexcl,
     int n_jcellx = 0;
     int jcellx_min, jcellx_max;
     if (IvsI) {
-      get_cell_bounds_xy<IvsI>(0, 0, icellx + imx*d_nlist_param.ncellx[0],
-			       d_nlist_param.ncellx[0], imbbx0-ibb.wx, imbbx0+ibb.wx,
+      get_cell_bounds_xy<true>(icellx + imx*d_nlist_param.ncellx[0],
+			       d_nlist_param.ncellx[0], d_nlist_param.min_xyz[0].x,
+			       imbbx0-ibb.wx, imbbx0+ibb.wx,
 			       d_nlist_param.celldx[0], rcut, jcellx_min, jcellx_max);
       n_jcellx = max(0, jcellx_max - jcellx_min + 1);
       if (n_jcellx == 0) continue;
@@ -1518,12 +1477,12 @@ void build_kernel(const int max_nexcl,
       if (wid < n_jzone) {
 	int jzone = d_nlist_param.int_zone[izone][wid];
 	int jcellx0_t, jcellx1_t;
-	get_cell_bounds_xy<IvsI>(izone, jzone, icellx + imx*d_nlist_param.ncellx[izone],
-				 d_nlist_param.ncellx[jzone], imbbx0-ibb.wx, imbbx0+ibb.wx,
-				 d_nlist_param.celldx[jzone], rcut, jcellx0_t, jcellx1_t);
+	get_cell_bounds_xy<false>(icellx + imx*d_nlist_param.ncellx[izone],
+				  d_nlist_param.ncellx[jzone], d_nlist_param.min_xyz[jzone].x,
+				  imbbx0-ibb.wx, imbbx0+ibb.wx,
+				  d_nlist_param.celldx[jzone], rcut, jcellx0_t, jcellx1_t);
 	n_jcellx = max(0, jcellx1_t-jcellx0_t+1);
-	sh_jcellxy[wid].x = jcellx0_t;
-	sh_jcellxy[wid].y = jcellx1_t;
+	sh_jcellxy_min[wid].x = jcellx0_t;
       }
       if (__all(n_jcellx == 0)) continue;
     }
@@ -1533,8 +1492,9 @@ void build_kernel(const int max_nexcl,
       int n_jcelly = 0;
       int jcelly_min, jcelly_max;
       if (IvsI) {
-	get_cell_bounds_xy<IvsI>(0, 0, icelly + imy*d_nlist_param.ncelly[0],
-				 d_nlist_param.ncelly[0], imbby0-ibb.wy, imbby0+ibb.wy,
+	get_cell_bounds_xy<true>(icelly + imy*d_nlist_param.ncelly[0],
+				 d_nlist_param.ncelly[0], d_nlist_param.min_xyz[0].y,
+				 imbby0-ibb.wy, imbby0+ibb.wy,
 				 d_nlist_param.celldy[0], rcut, jcelly_min, jcelly_max);
 	n_jcelly = max(0, jcelly_max - jcelly_min + 1);
 	if (n_jcelly == 0) continue;
@@ -1542,12 +1502,12 @@ void build_kernel(const int max_nexcl,
 	if (wid < n_jzone) {
 	  int jzone = IvsI ? 0 : d_nlist_param.int_zone[izone][wid];
 	  int jcelly0_t, jcelly1_t;
-	  get_cell_bounds_xy<IvsI>(izone, jzone, icelly + imy*d_nlist_param.ncelly[izone],
-				   d_nlist_param.ncelly[jzone], imbby0-ibb.wy, imbby0+ibb.wy,
-				   d_nlist_param.celldy[jzone], rcut, jcelly0_t, jcelly1_t);
+	  get_cell_bounds_xy<false>(icelly + imy*d_nlist_param.ncelly[izone],
+				    d_nlist_param.ncelly[jzone], d_nlist_param.min_xyz[jzone].y,
+				    imbby0-ibb.wy, imbby0+ibb.wy,
+				    d_nlist_param.celldy[jzone], rcut, jcelly0_t, jcelly1_t);
 	  n_jcelly = max(0, jcelly1_t-jcelly0_t+1);
-	  sh_jcellxy[wid].z = jcelly0_t;
-	  sh_jcellxy[wid].w = jcelly1_t;
+	  sh_jcellxy_min[wid].y = jcelly0_t;
 	}
 	if (__all(n_jcelly == 0)) continue;
       }
@@ -1562,8 +1522,25 @@ void build_kernel(const int max_nexcl,
 
 	int n_jlist = 0;
 
-	if (IvsI) {
-	  int total_xy = n_jcellx*n_jcelly;
+	int jzone_counter;
+	if (!IvsI) jzone_counter = 0;
+	do {
+	  int n_jcellx_t = n_jcellx;
+	  int n_jcelly_t = n_jcelly;
+	  int jzone;
+	  if (!IvsI) {
+#if __CUDA_ARCH__ >= 300
+	    n_jcellx_t = bcast_shfl(n_jcellx_t, jzone_counter);
+	    n_jcelly_t = bcast_shfl(n_jcelly_t, jzone_counter);
+#else
+	    n_jcellx_t = bcast_shmem(n_jcellx_t, jzone_counter, wid, shflmem);
+	    n_jcelly_t = bcast_shmem(n_jcelly_t, jzone_counter, wid, shflmem);
+#endif
+	    jcellx_min = sh_jcellxy_min[jzone_counter].x;
+	    jcelly_min = sh_jcellxy_min[jzone_counter].y;
+	    jzone = d_nlist_param.int_zone[izone][jzone_counter];
+	  }
+	  int total_xy = n_jcellx_t*n_jcelly_t;
 	  int jcellz_min = 1<<30;
 	  int jcellz_max = 0;
 	  for (int ibase=0;ibase < total_xy;ibase+=warpsize) {
@@ -1571,14 +1548,15 @@ void build_kernel(const int max_nexcl,
 	    int jcellz0_t = 1<<30;
 	    int jcellz1_t = 0;
 	    if (i < total_xy) {
-	      int jcelly = i/n_jcellx;
-	      int jcellx = i - jcelly*n_jcellx;
+	      int jcelly = i/n_jcellx_t;
+	      int jcellx = i - jcelly*n_jcellx_t;
 	      jcellx += jcellx_min;
 	      jcelly += jcelly_min;
-	      int jcol = jcellx + jcelly*d_nlist_param.ncellx[0];
+	      int jcol = jcellx + jcelly*d_nlist_param.ncellx[IvsI ? 0 : jzone];
 	      int cell0 = col_cell[jcol];
-	      get_cell_bounds_z<IvsI>(0, 0, icellz + imz*col_ncellz[jcol],
-				      col_ncellz[jcol], imbbz0-ibb.wz, imbbz0+ibb.wz,
+	      get_cell_bounds_z<IvsI>(icellz + imz*col_ncellz[jcol], col_ncellz[jcol],
+				      d_nlist_param.min_xyz[IvsI ? 0 : jzone].z,
+				      imbbz0-ibb.wz, imbbz0+ibb.wz,
 				      &cell_bz[cell0], rcut, jcellz0_t, jcellz1_t);
 	    }
 #if __CUDA_ARCH__ >= 300
@@ -1614,7 +1592,7 @@ void build_kernel(const int max_nexcl,
 	      jcelly += jcelly_min;
 	      jcellz += jcellz_min;
 	      // Calculate column index "jcol" and final cell index "jcell"
-	      int jcol = jcellx + jcelly*d_nlist_param.ncellx[0];
+	      int jcol = jcellx + jcelly*d_nlist_param.ncellx[IvsI ? 0 : jzone];
 	      jcell = col_cell[jcol] + jcellz;
 	      // NOTE: jcellz can be out of bounds here, so we need to check
 	      if (icell <= jcell && jcellz >= 0 && jcellz < col_ncellz[jcol]) {
@@ -1698,20 +1676,8 @@ void build_kernel(const int max_nexcl,
 				  );
 	  }
 
-	} else {
-	  int n_jcellx_tot = n_jcellx;
-	  int n_jcelly_tot = n_jcelly;
-#if __CUDA_ARCH__ >= 300
-	  n_jcellx_tot = sum_shfl(n_jcellx_tot);
-	  n_jcelly_tot = sum_shfl(n_jcelly_tot);
-#else
-	  n_jcellx_tot = sum_shmem(n_jcellx_tot, wid, shflmem);
-	  n_jcelly_tot = sum_shmem(n_jcelly_tot, wid, shflmem);
-#endif
-	  // Total amount of work
-	  int total = n_jcellx_tot*n_jcelly_tot*n_jzone;
-	}
-
+	  if (!IvsI) jzone_counter++;
+	} while (!IvsI && (jzone_counter < n_jzone));
 
       } // for (int imz=imz_lo;imz <= imz_hi;imz++)
     } // for (int imy=imy_lo;imy <= imy_hi;imy++)
@@ -2413,7 +2379,7 @@ void NeighborList<tilesize>::get_tile_ientry_est(int *n_int_zone, int int_zone[]
 }
 
 //
-// Sorts atoms
+// Sorts atoms, when minimum and maximum coordinate values are known
 //
 template <int tilesize>
 void NeighborList<tilesize>::sort(const int *zone_patom,
@@ -2794,15 +2760,16 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
   reallocate<int>(&excl_atom_heap, &excl_atom_heap_len, ncell_max*tilesize*max_nexcl, 1.2f);
 
   // Shared memory requirements:
-  // (blockDim.x/warpsize)*( (~IvsI)*n_jzone*sizeof(int4) + n_jlist_max*sizeof(int) 
+  // (blockDim.x/warpsize)*( (!IvsI)*n_jzone*sizeof(int2) + n_jlist_max*sizeof(int) 
   //                         + tilesize*sizeof(float3))
 
+  // I vs. I
   nthread = 512;
   nblock = (ncell_max-1)/(nthread/warpsize) + 1;
   shmem_size = (nthread/warpsize)*( n_jlist_max*sizeof(int) + tilesize*sizeof(float3)) + 
     nthread*sizeof(int);
   if (get_cuda_arch() < 300) shmem_size += nthread*sizeof(int);
-  // For !IvsI, shmem_size += (nthread/warpsize)*n_int_zone_max*sizeof(int4)
+  // For !IvsI, shmem_size += (nthread/warpsize)*n_int_zone_max*sizeof(int2)
   //std::cout << "NeighborList::build, shmem_size = " << shmem_size << std::endl;
   build_kernel<tilesize, true>
     <<< nblock, nthread, shmem_size, stream >>>
@@ -2810,6 +2777,23 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
      atom_excl_pos, atom_excl, xyzq, boxx, boxy, boxz, rcut, rcut*rcut, bb, excl_atom_heap,
      tile_indj, tile_excl, ientry);
   cudaCheck(cudaGetLastError());
+
+  /*
+  // Rest
+  nthread = 512;
+  nblock = (ncell_max-1)/(nthread/warpsize) + 1;
+  shmem_size = (nthread/warpsize)*( n_jlist_max*sizeof(int) + tilesize*sizeof(float3)) + 
+    nthread*sizeof(int);
+  if (get_cuda_arch() < 300) shmem_size += nthread*sizeof(int);
+  shmem_size += (nthread/warpsize)*n_int_zone_max*sizeof(int2)
+  //std::cout << "NeighborList::build, shmem_size = " << shmem_size << std::endl;
+  build_kernel<tilesize, false>
+    <<< nblock, nthread, shmem_size, stream >>>
+    (max_nexcl, cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom, loc2glo, glo2loc,
+     atom_excl_pos, atom_excl, xyzq, boxx, boxy, boxz, rcut, rcut*rcut, bb, excl_atom_heap,
+     tile_indj, tile_excl, ientry);
+  cudaCheck(cudaGetLastError());
+  */
 
   cudaCheck(cudaDeviceSynchronize());
   get_nlist_param();

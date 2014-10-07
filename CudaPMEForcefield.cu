@@ -190,8 +190,6 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // NOTE: Builds rest of domdec.loc2glo and domdec.xyz_shift
     domdec.comm_coord(coord, true);
 
-    //return;
-
     // Copy: coord => xyzq_copy
     // NOTE: coord and xyz_shift are already in the order determined by domdec.loc2glo,
     //       however, glo_q is in the original global order.
@@ -246,6 +244,8 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Re-order coordinates (coord) and copy to reference coordinates (ref_coord)
     domdec.reorder_coord(coord, ref_coord, nlist.get_ind_sorted());
     coord.set_data(ref_coord);
+
+    domdec.comm_update(nlist.get_glo2loc(), nlist.get_ind_sorted());
 
   } else {
     neighborlist_updated = false;

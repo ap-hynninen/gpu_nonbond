@@ -19,11 +19,17 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
   thrust::device_vector<unsigned char> atom_pick;
   thrust::device_vector<int> atom_pos;
   
-  // Local indices
-  std::vector< thrust::device_vector<int> > z_send_loc;
+  // Local indices that we send
+  // Initial version
+  std::vector< thrust::device_vector<int> > z_send_loc0;
+  // Final version, built after neighborlist has re-ordered coordinates
+  thrust::device_vector<int> z_send_loc;  
 
-  // coordinate indices we receive from +z direction
-  thrust::device_vector<int> z_recv_ind;
+  // Local indices that we receive from +z direction
+  thrust::device_vector<int> z_recv_loc;
+
+  // Global coordinate indices we receive from +z direction
+  thrust::device_vector<int> z_recv_glo;
 
   // Sending buffer
   int sendbuf_len;
@@ -63,6 +69,7 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
 
   void comm_coord(cudaXYZ<double>& coord, thrust::device_vector<int>& loc2glo,
 		  const bool update);
+  void update(int* glo2loc, int* loc2loc);
   void comm_force(Force<long long int>& force);
 };
 

@@ -73,10 +73,16 @@ private:
   int stride() {return _stride;}
   int size() {return _size;}
   T* xyz() {return _xyz;}
+  T* x() {return &_xyz[0];}
+  T* y() {return &_xyz[_stride];}
+  T* z() {return &_xyz[_stride*2];}
 
   int stride() const {return _stride;}
   int size() const {return _size;}
   const T* xyz() const {return _xyz;}
+  const T* x() const {return &_xyz[0];}
+  const T* y() const {return &_xyz[_stride];}
+  const T* z() const {return &_xyz[_stride*2];}
 
   template <typename T2> void convert(Force<T2>& force, cudaStream_t stream=0);
   template <typename T2> void convert(cudaStream_t stream=0);
