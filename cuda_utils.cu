@@ -340,7 +340,7 @@ void start_gpu(int numnode, int mynode) {
     //}
   cudaCheck(cudaSetDevice(gpu_ind));
 
-  cudaCheck(cudaThreadSynchronize());
+  cudaCheck(cudaDeviceSynchronize());
   
   cudaCheck(cudaGetDeviceProperties(&gpu_prop, gpu_ind));
 

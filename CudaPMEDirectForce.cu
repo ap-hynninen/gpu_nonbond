@@ -14,6 +14,19 @@ static __constant__ DirectSettings_t d_setup;
 // Energy and virial in device memory
 static __device__ DirectEnergyVirial_t d_energy_virial;
 
+#ifndef USE_TEXTURE_OBJECTS
+// VdW parameter texture reference
+static texture<float2, 1, cudaReadModeElementType> vdwparam_texref;
+static bool vdwparam_texref_bound = false;
+static texture<float2, 1, cudaReadModeElementType> vdwparam14_texref;
+static bool vdwparam14_texref_bound = false;
+#endif
+
+#ifndef USE_TEXTURE_OBJECTS
+#define VDWPARAM_TEXREF vdwparam_texref
+#define VDWPARAM14_TEXREF vdwparam14_texref
+#endif
+
 #include "CudaDirectForce_util.h"
 
 //
@@ -249,13 +262,19 @@ CudaPMEDirectForce<AT, CT>::CudaPMEDirectForce() {
   nvdwparam = 0;
   vdwparam_len = 0;
   use_tex_vdwparam = true;
+#ifdef USE_TEXTURE_OBJECTS
   vdwparam_tex = 0;
+#endif
+  vdwparam_texref_bound = false;
 
   vdwparam14 = NULL;
   nvdwparam14 = 0;
   vdwparam14_len = 0;
   use_tex_vdwparam14 = true;
+#ifdef USE_TEXTURE_OBJECTS
   vdwparam14_tex = 0;
+#endif
+  vdwparam14_texref_bound = false;
 
   nin14list = 0;
   in14list_len = 0;
@@ -285,15 +304,26 @@ CudaPMEDirectForce<AT, CT>::CudaPMEDirectForce() {
 //
 template <typename AT, typename CT>
 CudaPMEDirectForce<AT, CT>::~CudaPMEDirectForce() {
+#ifdef USE_TEXTURE_OBJECTS
   if (vdwparam_tex != 0) {
     cudaCheck(cudaDestroyTextureObject(vdwparam_tex));
     vdwparam_tex = 0;
   }
-  if (vdwparam != NULL) deallocate<CT>(&vdwparam);
   if (vdwparam14_tex != 0) {
     cudaCheck(cudaDestroyTextureObject(vdwparam14_tex));
     vdwparam14_tex = 0;
   }
+#else
+  if (vdwparam_texref_bound) {
+    cudaCheck(cudaUnbindTexture(VDWPARAM_TEXREF));
+    vdwparam_texref_bound = false;
+  }
+  if (vdwparam14_texref_bound) {
+    cudaCheck(cudaUnbindTexture(VDWPARAM14_TEXREF));
+    vdwparam14_texref_bound = false;
+  }
+#endif
+  if (vdwparam != NULL) deallocate<CT>(&vdwparam);
   if (vdwparam14 != NULL) deallocate<CT>(&vdwparam14);
   if (in14list != NULL) deallocate<xx14list_t>(&in14list);
   if (ex14list != NULL) deallocate<xx14list_t>(&ex14list);
@@ -445,17 +475,17 @@ void CudaPMEDirectForce<AT, CT>::setup_vdwparam(const int type, const int h_nvdw
   copy_HtoD_sync<CT>(h_vdwparam_fixed, *vdwparam_loc, *nvdwparam_loc);
   delete [] h_vdwparam_fixed;
 
-  bool *use_tex_vdwparam_loc;
-  cudaTextureObject_t *tex;
-  if (type == VDW_MAIN) {
-    use_tex_vdwparam_loc = &this->use_tex_vdwparam;
-    tex = &vdwparam_tex;
-  } else {
-    use_tex_vdwparam_loc = &this->use_tex_vdwparam14;
-    tex = &vdwparam14_tex;
-  }
+  bool *use_tex_vdwparam_loc = (type == VDW_MAIN) ? &this->use_tex_vdwparam : &this->use_tex_vdwparam14;
+#ifdef USE_TEXTURE_OBJECTS
+  cudaTextureObject_t *tex = (type == VDW_MAIN) ? &vdwparam_tex : &vdwparam14_tex;
+#else
+  bool *vdwparam_texref_bound_loc = (type == VDW_MAIN) ? &vdwparam_texref_bound : &vdwparam14_texref_bound;
+  texture<float2, 1, cudaReadModeElementType> *vdwparam_texref_loc = 
+    (type == VDW_MAIN) ? &VDWPARAM_TEXREF : &VDWPARAM14_TEXREF;
+#endif
 
   if (*use_tex_vdwparam_loc && vdwparam_reallocated) {
+#ifdef USE_TEXTURE_OBJECTS
     if (*tex != 0) {
       cudaDestroyTextureObject(*tex);
       *tex = 0;
@@ -472,9 +502,28 @@ void CudaPMEDirectForce<AT, CT>::setup_vdwparam(const int type, const int h_nvdw
     cudaTextureDesc texDesc;
     memset(&texDesc, 0, sizeof(texDesc));
     texDesc.readMode = cudaReadModeElementType;
-    cudaCreateTextureObject(tex, &resDesc, &texDesc, NULL);
+    cudaCheck(cudaCreateTextureObject(tex, &resDesc, &texDesc, NULL));
+#else
+    // Unbind texture
+    if (*vdwparam_texref_bound_loc) {
+      cudaCheck(cudaUnbindTexture(*vdwparam_texref_loc));
+      *vdwparam_texref_bound_loc = false;
+    }
+    // Bind texture
+    memset(vdwparam_texref_loc, 0, sizeof(*vdwparam_texref_loc));
+    vdwparam_texref_loc->normalized = 0;
+    vdwparam_texref_loc->filterMode = cudaFilterModePoint;
+    vdwparam_texref_loc->addressMode[0] = cudaAddressModeClamp;
+    vdwparam_texref_loc->channelDesc.x = sizeof(CT)*8;
+    vdwparam_texref_loc->channelDesc.y = sizeof(CT)*8;
+    vdwparam_texref_loc->channelDesc.z = 0;
+    vdwparam_texref_loc->channelDesc.w = 0;
+    vdwparam_texref_loc->channelDesc.f = cudaChannelFormatKindFloat;
+    cudaCheck(cudaBindTexture(NULL, *vdwparam_texref_loc, *vdwparam_loc, 
+			      (*nvdwparam_loc)*sizeof(CT)));
+    *vdwparam_texref_bound_loc = true;
+#endif
   }
-
 }
 
 //
@@ -542,7 +591,7 @@ void CudaPMEDirectForce<AT, CT>::set_vdwparam14(const int nvdwparam, const char 
 //
 template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::set_vdwtype(const int ncoord, const int *glo_vdwtype,
-				      const int *loc2glo, cudaStream_t stream) {
+					     const int *loc2glo, cudaStream_t stream) {
   // Align ncoord to warpsize
   int ncoord_aligned = ((ncoord-1)/warpsize+1)*warpsize;
   reallocate<int>(&vdwtype, &vdwtype_len, ncoord_aligned, 1.2f);
@@ -699,11 +748,17 @@ template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::calc_14_force(const float4 *xyzq,
 					       const bool calc_energy, const bool calc_virial,
 					       const int stride, AT *force, cudaStream_t stream) {
-
+#ifdef USE_TEXTURE_OBJECTS
   if (vdwparam14_tex == 0) {
     std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam14_tex must be created" << std::endl;
     exit(1);
   }
+#else
+  if (!vdwparam14_texref_bound) {
+    std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam14_texref must be bound" << std::endl;
+    exit(1);
+  }
+#endif
 
   int nthread = 512;
   //int nblock = (nin14list + nex14list - 1)/nthread + 1;
@@ -719,10 +774,16 @@ void CudaPMEDirectForce<AT, CT>::calc_14_force(const float4 *xyzq,
   int elec_model_loc = calc_elec ? elec_model : NONE;
   if (elec_model_loc == NONE && vdw_model_loc == NONE) return;
 
+#ifdef USE_TEXTURE_OBJECTS
   CREATE_KERNELS(CREATE_KERNEL14, calc_14_force_kernel, vdwparam14_tex,
 		 this->nin14list, this->nex14list, nin14block, this->in14list, this->ex14list,
 		 this->vdwtype, this->vdwparam14, xyzq, stride, force);
-  
+#else
+  CREATE_KERNELS(CREATE_KERNEL14, calc_14_force_kernel,
+		 this->nin14list, this->nex14list, nin14block, this->in14list, this->ex14list,
+		 this->vdwtype, this->vdwparam14, xyzq, stride, force);
+#endif
+
   cudaCheck(cudaGetLastError());
 }
 
@@ -738,10 +799,17 @@ void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
 
   const int tilesize = 32;
 
+#ifdef USE_TEXTURE_OBJECTS
   if (vdwparam_tex == 0) {
-    std::cerr << "CudaPMEDirectForce<AT, CT>::calc_force, vdwparam_tex must be created" << std::endl;
+    std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam_tex must be created" << std::endl;
     exit(1);
   }
+#else
+  if (!vdwparam_texref_bound) {
+    std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam_texref must be bound" << std::endl;
+    exit(1);
+  }
+#endif
 
   if (nlist.n_ientry == 0) return;
   int vdw_model_loc = calc_vdw ? vdw_model : NONE;
@@ -778,10 +846,17 @@ void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
     int nblock = (nblock_tot > max_nblock) ? max_nblock : nblock_tot;
     nblock_tot -= nblock;
 
+#ifdef USE_TEXTURE_OBJECTS
     CREATE_KERNELS(CREATE_KERNEL, calc_force_kernel, vdwparam_tex,
 		   base, nlist.n_ientry, nlist.ientry, nlist.tile_indj,
 		   nlist.tile_excl, stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
 		   force);
+#else
+    CREATE_KERNELS(CREATE_KERNEL, calc_force_kernel,
+		   base, nlist.n_ientry, nlist.ientry, nlist.tile_indj,
+		   nlist.tile_excl, stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
+		   force);
+#endif
 
     base += (nthread/warpsize)*nblock;
 
@@ -871,3 +946,8 @@ void CudaPMEDirectForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool p
 // Explicit instances of CudaPMEDirectForce
 //
 template class CudaPMEDirectForce<long long int, float>;
+
+#ifndef USE_TEXTURE_OBJECTS
+#undef VDWPARAM_TEXREF
+#undef VDWPARAM14_TEXREF
+#endif

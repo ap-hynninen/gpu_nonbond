@@ -1,0 +1,1 @@
+gpu_direct -test sometimes fails when CudaPMEDirectForceBlock is compiled in

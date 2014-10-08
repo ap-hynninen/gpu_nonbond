@@ -236,7 +236,10 @@ float pair_elec_force_14(const float r2, const float r, const float rinv,
 //
 template <typename AT, typename CT, int vdw_model, int elec_model, 
 	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
-__device__ void calc_in14_force_device(const cudaTextureObject_t tex,
+__device__ void calc_in14_force_device(
+#ifdef USE_TEXTURE_OBJECTS
+				       const cudaTextureObject_t tex,
+#endif
 				       const int pos, const xx14list_t* in14list,
 				       const int* vdwtype, const float* vdwparam14,
 				       const float4* xyzq, const int stride, AT *force,
@@ -268,14 +271,13 @@ __device__ void calc_in14_force_device(const cudaTextureObject_t tex,
     int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
     //c6 = __ldg(&vdwparam14[ivdw]);
     //c12 = __ldg(&vdwparam14[ivdw+1]);
+#ifdef USE_TEXTURE_OBJECTS
     float2 c6c12 = tex1Dfetch<float2>(tex, ivdw);
+#else
+    float2 c6c12 = tex1Dfetch(VDWPARAM14_TEXREF, ivdw);
+#endif
     c6  = c6c12.x;
     c12 = c6c12.y;
-    //c6 = vdwparam14[ivdw*2];
-    //c12 = vdwparam14[ivdw*2+1];
-    //if (c6 != c6c12.x || c12 != c6c12.y) {
-    //  printf("ivdw=%d c6=%f c6c12.x=%f c12=%f c6c12.y=%f\n",ivdw,c6,c6c12.x,c12,c6c12.y);
-    // }
   } else {
     int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2);
     c6 = vdwparam14[ivdw];
@@ -363,7 +365,10 @@ __device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list
 //
 template <typename AT, typename CT, int vdw_model, int elec_model, 
 	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
-__global__ void calc_14_force_kernel(const cudaTextureObject_t tex,
+__global__ void calc_14_force_kernel(
+#ifdef USE_TEXTURE_OBJECTS
+				     const cudaTextureObject_t tex,
+#endif
 				     const int nin14list, const int nex14list,
 				     const int nin14block,
 				     const xx14list_t* in14list, const xx14list_t* ex14list,
@@ -383,7 +388,11 @@ __global__ void calc_14_force_kernel(const cudaTextureObject_t tex,
     int pos = threadIdx.x + blockIdx.x*blockDim.x;
     if (pos < nin14list) {
       calc_in14_force_device<AT, CT, vdw_model, elec_model, calc_energy, calc_virial, tex_vdwparam>
-	(tex, pos, in14list, vdwtype, vdwparam14, xyzq, stride, force, vdw_pot, elec_pot);
+	(
+#ifdef USE_TEXTURE_OBJECTS
+	 tex,
+#endif
+	 pos, in14list, vdwtype, vdwparam14, xyzq, stride, force, vdw_pot, elec_pot);
     }
 
     if (calc_energy) {
@@ -439,7 +448,11 @@ __global__ void calc_14_force_kernel(const cudaTextureObject_t tex,
 //
 template <typename AT, typename CT, int tilesize, int vdw_model, int elec_model,
 	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
-__global__ void calc_force_kernel(const cudaTextureObject_t tex, const int base,
+__global__ void calc_force_kernel(
+#ifdef USE_TEXTURE_OBJECTS
+				  const cudaTextureObject_t tex,
+#endif
+				  const int base,
 				  const int n_ientry, const ientry_t* __restrict__ ientry,
 				  const int* __restrict__ tile_indj,
 				  const tile_excl_t<tilesize>* __restrict__ tile_excl,
@@ -448,7 +461,9 @@ __global__ void calc_force_kernel(const cudaTextureObject_t tex, const int base,
 				  const float4* __restrict__ xyzq, const int* __restrict__ vdwtype,
 #ifdef USE_BLOCK
 				  const int* __restrict__ blocktype,
+#ifdef USE_TEXTURE_OBJECTS
 				  const cudaTextureObject_t block_tex,
+#endif
 #endif
 				  AT* __restrict__ force) {
 
@@ -661,7 +676,11 @@ __global__ void calc_force_kernel(const cudaTextureObject_t tex, const int base,
 	  int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
 	  //c6 = __ldg(&vdwparam[ivdw]);
 	  //c12 = __ldg(&vdwparam[ivdw+1]);
+#ifdef USE_TEXTURE_OBJECTS
 	  float2 c6c12 = tex1Dfetch<float2>(tex, ivdw);
+#else
+	  float2 c6c12 = tex1Dfetch(VDWPARAM_TEXREF, ivdw);
+#endif
 	  c6  = c6c12.x;
 	  c12 = c6c12.y;
 	} else {
@@ -679,7 +698,11 @@ __global__ void calc_force_kernel(const cudaTextureObject_t tex, const int base,
 #ifdef USE_BLOCK
 	int bb = (jb > ib) ? jb : ib;      // bb = max(jb,ib)
 	int iblock = (bb*(bb-3) + 2*(jb + ib) - 2);
+#ifdef USE_TEXTURE_OBJECTS
 	float scale = tex1Dfetch<float>(block_tex, iblock);
+#else
+	float scale = tex1Dfetch(blockparam_texref, iblock);
+#endif
 	fij_vdw *= scale;
 	fij_elec *= scale;
 	if (calc_energy) {

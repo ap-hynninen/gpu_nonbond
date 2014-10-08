@@ -121,7 +121,6 @@ void test() {
   max_xyz[0].z = 31.80300;
   */
 
-  /*
   int *h_loc2glo = new int[ncoord];
   for (int i=0;i < ncoord;i++) h_loc2glo[i] = i;
   int *loc2glo = NULL;
@@ -141,7 +140,6 @@ void test() {
   std::cout << "=======================================" << std::endl;
 
   deallocate<int>(&loc2glo);
-  */
 
   // ------------------- Non-bonded -----------------
 
@@ -173,7 +171,6 @@ void test() {
     std::cout<<"(tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
 
-  /*
   // Check energy and virial
   force_fp.clear();
   dir.clear_energy_virial();
@@ -207,7 +204,6 @@ void test() {
   std::cout << "max_diff(vir_tensor) = " << max_diff << std::endl;
   std::cout << "max_diff(vir) = " << fabs(vir - ref_vir) << std::endl;
 
-  /*
   //--------------- Non-bonded using GPU build neighborlist -----------
   force_fp.clear();
   dir.clear_energy_virial();
@@ -220,7 +216,6 @@ void test() {
   std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
 
   // -------------------- END -----------------
-  */
 
   delete [] in14list;
   delete [] ex14list;

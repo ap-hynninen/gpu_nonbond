@@ -3,6 +3,10 @@
 #include <cuda.h>
 #include "Bonded_struct.h"
 
+// If this variable is set, we'll use texture objects.
+// Unset for now because of the problem with texture objects on GTX 750
+//#define USE_TEXTURE_OBJECTS
+
 //
 // Calculates direct non-bonded interactions on GPU
 //
@@ -81,14 +85,18 @@ protected:
   int vdwparam_len;
   CT *vdwparam;
   bool use_tex_vdwparam;
+#ifdef USE_TEXTURE_OBJECTS
   cudaTextureObject_t vdwparam_tex;
+#endif
 
   // VdW 1-4 parameters
   int nvdwparam14;
   int vdwparam14_len;
   CT *vdwparam14;
   bool use_tex_vdwparam14;
+#ifdef USE_TEXTURE_OBJECTS
   cudaTextureObject_t vdwparam14_tex;
+#endif
 
   // 1-4 interaction and exclusion lists
   int nin14list;

@@ -47,8 +47,9 @@ endif
 OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o Force.o reduce.o cuda_utils.o gpu_recip.o
 
 OBJS_DIRECT = XYZQ.o Force.o reduce.o cuda_utils.o CudaPMEDirectForce.o \
-	CudaPMEDirectForceBlock.o \
 	NeighborList.o BondedForce.o gpu_direct.o
+
+#	CudaPMEDirectForceBlock.o \
 
 OBJS_BONDED = XYZQ.o Force.o reduce.o cuda_utils.o BondedForce.o gpu_bonded.o
 
