@@ -257,11 +257,11 @@ __global__ void set_14_list_kernel(const int nin14_tbl, const int* __restrict__ 
 // Class creator
 //
 template <typename AT, typename CT>
-CudaPMEDirectForce<AT, CT>::CudaPMEDirectForce() {
+CudaPMEDirectForce<AT, CT>::CudaPMEDirectForce() : 
+  use_tex_vdwparam(true), use_tex_vdwparam14(true) {
   vdwparam = NULL;
   nvdwparam = 0;
   vdwparam_len = 0;
-  use_tex_vdwparam = true;
 #ifdef USE_TEXTURE_OBJECTS
   vdwparam_tex = 0;
 #endif
@@ -270,7 +270,6 @@ CudaPMEDirectForce<AT, CT>::CudaPMEDirectForce() {
   vdwparam14 = NULL;
   nvdwparam14 = 0;
   vdwparam14_len = 0;
-  use_tex_vdwparam14 = true;
 #ifdef USE_TEXTURE_OBJECTS
   vdwparam14_tex = 0;
 #endif
@@ -475,7 +474,7 @@ void CudaPMEDirectForce<AT, CT>::setup_vdwparam(const int type, const int h_nvdw
   copy_HtoD_sync<CT>(h_vdwparam_fixed, *vdwparam_loc, *nvdwparam_loc);
   delete [] h_vdwparam_fixed;
 
-  bool *use_tex_vdwparam_loc = (type == VDW_MAIN) ? &this->use_tex_vdwparam : &this->use_tex_vdwparam14;
+  const bool *use_tex_vdwparam_loc = (type == VDW_MAIN) ? &this->use_tex_vdwparam : &this->use_tex_vdwparam14;
 #ifdef USE_TEXTURE_OBJECTS
   cudaTextureObject_t *tex = (type == VDW_MAIN) ? &vdwparam_tex : &vdwparam14_tex;
 #else
@@ -748,17 +747,19 @@ template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::calc_14_force(const float4 *xyzq,
 					       const bool calc_energy, const bool calc_virial,
 					       const int stride, AT *force, cudaStream_t stream) {
+  if (use_tex_vdwparam14) {
 #ifdef USE_TEXTURE_OBJECTS
-  if (vdwparam14_tex == 0) {
-    std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam14_tex must be created" << std::endl;
-    exit(1);
-  }
+    if (vdwparam14_tex == 0) {
+      std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam14_tex must be created" << std::endl;
+      exit(1);
+    }
 #else
-  if (!vdwparam14_texref_bound) {
-    std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam14_texref must be bound" << std::endl;
-    exit(1);
-  }
+    if (!vdwparam14_texref_bound) {
+      std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam14_texref must be bound" << std::endl;
+      exit(1);
+    }
 #endif
+  }
 
   int nthread = 512;
   //int nblock = (nin14list + nex14list - 1)/nthread + 1;
@@ -799,17 +800,19 @@ void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
 
   const int tilesize = 32;
 
+  if (use_tex_vdwparam) {
 #ifdef USE_TEXTURE_OBJECTS
-  if (vdwparam_tex == 0) {
-    std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam_tex must be created" << std::endl;
-    exit(1);
-  }
+    if (vdwparam_tex == 0) {
+      std::cerr << "CudaPMEDirectForce<AT, CT>::calc_force, vdwparam_tex must be created" << std::endl;
+      exit(1);
+    }
 #else
-  if (!vdwparam_texref_bound) {
-    std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam_texref must be bound" << std::endl;
-    exit(1);
-  }
+    if (!vdwparam_texref_bound) {
+      std::cerr << "CudaPMEDirectForce<AT, CT>::calc_force, vdwparam_texref must be bound" << std::endl;
+      exit(1);
+    }
 #endif
+  }
 
   if (nlist.n_ientry == 0) return;
   int vdw_model_loc = calc_vdw ? vdw_model : NONE;
@@ -832,7 +835,7 @@ void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
   // (sh_fix, sh_fiy, sh_fiz)
   shmem_size += (nthread/warpsize)*warpsize*sizeof(AT)*3;
   // If no texture fetch for vdwparam:
-  //shmem_size += nvdwparam*sizeof(float);
+  if (!use_tex_vdwparam) shmem_size += nvdwparam*sizeof(float);
 
   if (calc_energy) shmem_size = max(shmem_size, (int)(nthread*sizeof(double)*2));
   if (calc_virial) shmem_size = max(shmem_size, (int)(nthread*sizeof(double)*3));

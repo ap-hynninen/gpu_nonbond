@@ -2,6 +2,8 @@
 // CUDA device functions for direct force calculation
 //
 
+#define USE_TEXTURES true
+
 #define CREATE_KERNEL(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, CALC_ENERGY, CALC_VIRIAL, TEX_VDWPARAM, ...) \
   {									\
     KERNEL_NAME <AT, CT, tilesize, VDW_MODEL, ELEC_MODEL, CALC_ENERGY, CALC_VIRIAL, TEX_VDWPARAM> \
@@ -21,15 +23,15 @@
   {									\
     if (calc_energy) {							\
       if (calc_virial) {						\
-	KERNEL_CREATOR(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, true, true, true, __VA_ARGS__); \
+	KERNEL_CREATOR(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, true, true, USE_TEXTURES, __VA_ARGS__); \
       } else {								\
-	KERNEL_CREATOR(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, true, false, true, __VA_ARGS__); \
+	KERNEL_CREATOR(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, true, false, USE_TEXTURES, __VA_ARGS__); \
       }									\
     } else {								\
       if (calc_virial) {						\
-	KERNEL_CREATOR(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, false, true, true, __VA_ARGS__); \
+	KERNEL_CREATOR(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, false, true, USE_TEXTURES, __VA_ARGS__); \
       } else {								\
-	KERNEL_CREATOR(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, false, false, true, __VA_ARGS__); \
+	KERNEL_CREATOR(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, false, false, USE_TEXTURES, __VA_ARGS__); \
       }									\
     }									\
   }

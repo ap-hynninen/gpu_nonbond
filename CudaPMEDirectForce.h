@@ -84,7 +84,7 @@ protected:
   int nvdwparam;
   int vdwparam_len;
   CT *vdwparam;
-  bool use_tex_vdwparam;
+  const bool use_tex_vdwparam;
 #ifdef USE_TEXTURE_OBJECTS
   cudaTextureObject_t vdwparam_tex;
 #endif
@@ -93,7 +93,7 @@ protected:
   int nvdwparam14;
   int vdwparam14_len;
   CT *vdwparam14;
-  bool use_tex_vdwparam14;
+  const bool use_tex_vdwparam14;
 #ifdef USE_TEXTURE_OBJECTS
   cudaTextureObject_t vdwparam14_tex;
 #endif

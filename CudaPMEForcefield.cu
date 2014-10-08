@@ -90,6 +90,7 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecGroups& domde
   cudaCheck(cudaEventCreate(&done_in14_event));
   cudaCheck(cudaEventCreate(&done_bonded_event));
   cudaCheck(cudaEventCreate(&done_calc_event));
+  cudaCheck(cudaEventCreate(&done_force_clear_event));
 
   // Set energy term flags
   calc_bond = true;
@@ -144,6 +145,7 @@ CudaPMEForcefield::~CudaPMEForcefield() {
   cudaCheck(cudaEventDestroy(done_in14_event));
   cudaCheck(cudaEventDestroy(done_bonded_event));
   cudaCheck(cudaEventDestroy(done_calc_event));
+  cudaCheck(cudaEventDestroy(done_force_clear_event));
 }
 
 //
@@ -301,6 +303,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   }
 
   force.clear(direct_stream[0]);
+  cudaCheck(cudaEventRecord(done_force_clear_event, direct_stream[0]));
 
   // Clear energy and virial variables
   if (calc_energy || calc_virial) {
@@ -315,11 +318,15 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   cudaCheck(cudaEventRecord(done_direct_event, direct_stream[0]));
 
   // 1-4 interactions
+  // NOTE: we make GPU wait until force.cleap() is done
+  //cudaCheck(cudaDeviceSynchronize());
+  cudaCheck(cudaStreamWaitEvent(in14_stream, done_force_clear_event, 0));
   dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force.stride(), force.xyz(),
 		    in14_stream);
   cudaCheck(cudaEventRecord(done_in14_event, in14_stream));
 
   // Bonded forces
+  cudaCheck(cudaStreamWaitEvent(bonded_stream, done_force_clear_event, 0));
   bonded.calc_force(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
   		    calc_energy, calc_virial, force.stride(), force.xyz(),
 		    calc_bond, calc_ureyb, calc_angle, calc_dihe, calc_imdihe, calc_cmap,
@@ -331,6 +338,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
     if (recipComm.get_num_recip() == 1) {
       if (recipComm.get_num_direct() == 1) {
 	// Single Direct+Recip node => add to total force and be done
+	cudaCheck(cudaStreamWaitEvent(recip_stream, done_force_clear_event, 0));
 	recip->calc(domdec.get_inv_boxx(), domdec.get_inv_boxy(), domdec.get_inv_boxz(),
 		    xyzq.xyzq, xyzq.ncoord,
 		    calc_energy, calc_virial, force);
@@ -350,7 +358,6 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
       exit(1);
     }
   }
-
   cudaCheck(cudaEventRecord(done_recip_event, recip_stream));
 
   // Make GPU wait until all computation is done

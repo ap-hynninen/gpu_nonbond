@@ -114,6 +114,7 @@ private:
   cudaEvent_t done_in14_event;
   cudaEvent_t done_bonded_event;
   cudaEvent_t done_calc_event;
+  cudaEvent_t done_force_clear_event;
 
   // ------------------------------------------------------------
   // Flags for energy terms that are included in the calculation
