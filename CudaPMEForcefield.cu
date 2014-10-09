@@ -186,11 +186,16 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // NOTE: Builds domdec.loc2glo
     domdec.update_homezone(coord, prev_step);
 
-    fprintf(stderr,"%d: domdec.get_ncoord()=%d\n",domdec.get_mynode(),domdec.get_ncoord());
-
     // Communicate coordinates
     // NOTE: Builds rest of domdec.loc2glo and domdec.xyz_shift
     domdec.comm_coord(coord, true);
+
+    fprintf(stderr,"%d: domdec.get_ncoord()=%d domdec.get_ncoord_tot()=%d\n",
+	    domdec.get_mynode(),domdec.get_ncoord(),domdec.get_ncoord_tot());
+
+    // Re-allocate (xyzq, xyzq_copy)
+    xyzq.realloc(domdec.get_ncoord_tot());
+    xyzq_copy.realloc(domdec.get_ncoord_tot());
 
     // Copy: coord => xyzq_copy
     // NOTE: coord and xyz_shift are already in the order determined by domdec.loc2glo,
@@ -205,6 +210,8 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Build neighborlist
     nlist.build(domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), domdec.get_rnl(),
 		xyzq.xyzq, domdec.get_loc2glo_ptr());
+    cudaCheck(cudaDeviceSynchronize());
+    //return;
 
     //nlist.test_build(domdec.get_zone_pcoord(), domdec.get_boxx(), domdec.get_boxy(),
     //domdec.get_boxz(), domdec.get_rnl(), xyzq.xyzq, domdec.get_loc2glo());
@@ -290,9 +297,9 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
 	recipComm.send_ncoord(domdec.get_ncoord());
       }
     }
-    // Resize recip_xyzq and recip_force if needed
+    // Re-allocate recip_xyzq and recip_force if needed
     if (recipComm.get_isRecip() && recipComm.get_num_direct() > 1) {
-      recip_xyzq.resize(recipComm.get_ncoord());
+      recip_xyzq.realloc(recipComm.get_ncoord());
     }
     reallocate<float3>(&recip_force, &recip_force_len, recipComm.get_ncoord(), 1.0f);
     // Send coordinates
@@ -444,11 +451,11 @@ void CudaPMEForcefield::assignCoordToNodes(hostXYZ<double>& coord, std::vector<i
   // Copy loc2glo to h_loc2glo
   h_loc2glo.resize(domdec.get_ncoord());
   copy_DtoH<int>(domdec.get_loc2glo_ptr(), h_loc2glo.data(), domdec.get_ncoord());
-  // Resize coordinate arrays to the new homezone size
-  ref_coord.resize(domdec.get_ncoord());
+  // Re-allocate coordinate arrays to the new homezone size
+  ref_coord.realloc(domdec.get_ncoord());
   ref_coord.clear();
-  xyzq.resize(domdec.get_ncoord());
-  xyzq_copy.resize(domdec.get_ncoord());
+  xyzq.realloc(domdec.get_ncoord());
+  xyzq_copy.realloc(domdec.get_ncoord());
 }
 
 //

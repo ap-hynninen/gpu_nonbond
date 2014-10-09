@@ -46,7 +46,7 @@ private:
     _stride = 0;
     _capacity = 0;
     _xyz = NULL;
-    this->resize(size);
+    this->realloc(size);
   }
 
   Force(const char *filename);
@@ -62,7 +62,8 @@ private:
 
   bool compare(Force<T>& force, const double tol, double& max_diff);
 
-  void resize(int size, float fac=1.0f) {
+  // Re-allocates array, does not preserve content
+  void realloc(int size, float fac=1.0f) {
     this->_size = size;
     // Returns stride that aligns with 256 byte boundaries
     this->_stride = (( (size-1+32)*sizeof(T) - 1)/256 + 1)*256/sizeof(T);

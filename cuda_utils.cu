@@ -55,6 +55,37 @@ void reallocate_host_T(void **pp, int *curlen, const int newlen, const float fac
 
 //----------------------------------------------------------------------------------------
 //
+// Allocate & re-allocate page-locked host memory, preserves content
+//
+void resize_host_T(void **pp, int *curlen, const int cur_size, const int new_size,
+		   const float fac, const size_t sizeofT) {
+
+  char *old = NULL;
+
+  if (*pp != NULL && *curlen < new_size) {
+    old = new char[cur_size*sizeofT];
+    memcpy(old, *pp, cur_size*sizeofT);
+    cudaCheck(cudaFreeHost((void *)(*pp)));
+    *pp = NULL;
+  }
+
+  if (*pp == NULL) {
+    if (fac > 1.0f) {
+      *curlen = (int)(((double)(new_size))*(double)fac);
+    } else {
+      *curlen = new_size;
+    }
+    allocate_host_T(pp, *curlen, sizeofT);
+    if (old != NULL) {
+      memcpy(*pp, old, cur_size*sizeofT);
+      delete [] old;
+    }
+  }
+
+}
+
+//----------------------------------------------------------------------------------------
+//
 // Deallocate gpu memory
 // pp = memory pointer
 //
@@ -101,6 +132,39 @@ void reallocate_T(void **pp, int *curlen, const int newlen, const float fac, con
   }
 
 }
+
+//----------------------------------------------------------------------------------------
+//
+// Allocate & re-allocate page-locked host memory, preserves content
+//
+void resize_T(void **pp, int *curlen, const int cur_size, const int new_size,
+	      const float fac, const size_t sizeofT) {
+
+  void *old = NULL;
+
+  if (*pp != NULL && *curlen < new_size) {
+    allocate_T(&old, cur_size, sizeofT);
+    copy_DtoD_T(*pp, old, cur_size, sizeofT);
+    cudaCheck(cudaDeviceSynchronize());       //Make sure D-D copy is done
+    cudaCheck(cudaFree((void *)(*pp)));
+    *pp = NULL;
+  }
+
+  if (*pp == NULL) {
+    if (fac > 1.0f) {
+      *curlen = (int)(((double)(new_size))*(double)fac);
+    } else {
+      *curlen = new_size;
+    }
+    allocate_T(pp, *curlen, sizeofT);
+    if (old != NULL) {
+      copy_DtoD_T(old, *pp, cur_size, sizeofT);
+      deallocate_T(&old);
+    }
+  }
+
+}
+
 //----------------------------------------------------------------------------------------
 //
 // Copies memory Host -> Device

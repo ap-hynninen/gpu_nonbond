@@ -27,7 +27,7 @@ public:
  hostXYZ() : _type(PINNED) {}
 
  hostXYZ(int size, int type=PINNED) : _type(type) {
-    this->resize(size);
+    this->realloc(size);
   }
   
  hostXYZ(int size, int capacity, T *x, T *y, T *z, int type=PINNED) : 
@@ -35,7 +35,7 @@ public:
 
   template <typename P>
     hostXYZ(cudaXYZ<P> &xyz, int type=PINNED) : _type(type) {
-    this->resize(xyz.size());
+    this->realloc(xyz.size());
     this->set_data_sync(xyz);
   }
 
@@ -55,22 +55,48 @@ public:
     }
   }
 
-  void realloc_array(T** array, int* capacity, float fac) {
+  void realloc_array(T** array, int* capacity, int size, float fac) {
     if (this->_type == PINNED) {
-      reallocate_host<T>(array, capacity, this->_size, fac);
+      reallocate_host<T>(array, capacity, size, fac);
     } else {
-      if (*array != NULL && this->_capacity < *capacity) {
+      if (*array != NULL && *capacity < size) {
 	delete [] *array;
 	*array = NULL;
       }
       if (*array == NULL) {
 	if (fac > 1.0f) {
-	  *capacity = (int)(((double)(this->_size))*(double)(fac));
+	  *capacity = (int)(((double)(size))*(double)(fac));
 	} else {
-	  *capacity = this->_size;
+	  *capacity = size;
 	}
 	*array = new T[*capacity];
       }      
+    }
+  }
+
+  void resize_array(T** array, int* capacity, int size, int new_size, float fac) {
+    if (this->_type == PINNED) {
+      resize_host<T>(array, capacity, size, new_size, fac);
+    } else {
+      T* old = NULL;
+      if (*array != NULL && *capacity < size) {
+	old = new T[size];
+	memcpy(old, *array, size*sizeof(T));
+	delete [] *array;
+	*array = NULL;
+      }
+      if (*array == NULL) {
+	if (fac > 1.0f) {
+	  *capacity = (int)(((double)(size))*(double)(fac));
+	} else {
+	  *capacity = size;
+	}
+	*array = new T[*capacity];
+	if (old != NULL) {
+	  memcpy(*array, old, size*sizeof(T));
+	  delete [] old;
+	}
+      }
     }
   }
 

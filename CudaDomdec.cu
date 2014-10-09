@@ -149,9 +149,8 @@ CudaDomdec::~CudaDomdec() {
 // NOTE: Used only in the beginning of dynamics
 //
 void CudaDomdec::build_homezone(hostXYZ<double>& coord) {
-  this->zone_ncoord[0] = homezone.build(coord);
-  for (int i=1;i < 8;i++) zone_ncoord[i] = 0;
-  this->update_zone_pcoord();
+  this->clear_zone_ncoord();
+  this->set_zone_ncoord(I, homezone.build(coord));
 }
 
 //
@@ -161,9 +160,8 @@ void CudaDomdec::build_homezone(hostXYZ<double>& coord) {
 //
 void CudaDomdec::update_homezone(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream) {
   if (numnode > 1) {
-    this->zone_ncoord[0] = homezone.update(coord, coord2, stream);
-    for (int i=1;i < 8;i++) zone_ncoord[i] = 0;
-    this->update_zone_pcoord();
+    this->clear_zone_ncoord();
+    this->set_zone_ncoord(I, homezone.update(coord, coord2, stream));
   }
 }
 
@@ -178,80 +176,20 @@ void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStrea
   if (update) {
     int nthread, nblock;
 
-    /*
-    // ---------------- Z -------------------
-    int nreq = 0;
-    for (int i=0;i < nz_comm;i++) {
-      if (z_recv_count[i] > 0) {
-	cuda_irecv(z_recv_buf[i], z_recv_count[i], z_recv_node[i], &reqbuf[nreq]);
-	nreq++;
-      }
-    }
-
-    for (int i=0;i < nz_comm;i++)
-      h_z_boundary[i] = get_fz_boundary(homeix, homeiy, homeiz-i, rnl, r_bonded);
-
-    nthread = 512;
-    nblock = (zone_ncoord[0] - 1)/nthread + 1;
-    choose_z_coord_kernel<<< nblock, nthread, 0, stream >>>
-      (zone_ncoord[0], z_boundary, rnl/boxz, coord->data, coord_tags);
-
-    if (mpi_cuda_aware) {
-      for (int i=0;i < nz_comm;i++) {
-	if (z_send_count[i] > 0) {
-	  cuda_isend(z_send_buf[i], z_send_count[i], z_send_node[i], &reqbuf[nreq]);
-	  nreq++;
-	}
-      }
-    } else {
-      for (int i=0;i < nz_comm;i++) {
-	if (z_send_count[i] > 0) {
-	}
-      }
-    }
-
-    cuda_waitall(nreq, reqbuf);
-
-    // ---------------- Y -------------------
-
-    for (int i=0;i < ny_comm;i++)
-      h_y_boundary[i] = get_fy_boundary(homeix, homeiy-i, homeiz, rnl, r_bonded);
-
-    for (int i=0;i < ny_comm;i++)
-      get_ex_boundary(homeix, homeiy-i, homeiz, yf, zf, &
-		      z_bonded, q_checkbonded, cut, rcut_bonded);
-
-    // ---------------- X -------------------
-
-    for (int i=0;i < nx_comm;i++)
-      get_fx_boundary(homeix-i, xf);
-
-    for (int i=0;i < nx_comm;i++)
-      get_ez_boundary(homeix-i, homeiy, xf, yf, y_bonded, q_checkbonded);
-
-    for (int i=0;i < nx_comm;i++)
-      get_ey_boundary(homeix-i, homeiy, homeiz, xf, zf, z_bonded, q_checkbonded, cut);
-
-    for (int i=0;i < nx_comm;i++) {
-      get_c_boundary(homeix-i, homeiy, homeiz, xf, yf, zf, &
-			  y_bonded, z_bonded, q_checkbonded);
-      get_z0_for_c(homeix-i, homeiy, homeiz, z0);
-    }
-    */
-
     // Calculate xyz shift
     double x0 = 0.0;
     double y0 = 0.0;
     double z0 = 0.0;
 
+    // Re-allocate (xyz_shift0, xyz_shift1)
     float fac = (numnode > 1) ? 1.2f : 1.0f;
-    reallocate<float3>(&xyz_shift0, &xyz_shift0_len, zone_pcoord[7], fac);
-    reallocate<float3>(&xyz_shift1, &xyz_shift1_len, zone_pcoord[7], fac);
-    
+    reallocate<float3>(&xyz_shift0, &xyz_shift0_len, this->get_ncoord_tot(), fac);
+    reallocate<float3>(&xyz_shift1, &xyz_shift1_len, this->get_ncoord_tot(), fac);    
+
     nthread = 512;
-    nblock = (zone_pcoord[7] - 1)/nthread + 1;
+    nblock = (this->get_ncoord_tot() - 1)/nthread + 1;
     calc_xyz_shift<<< nblock, nthread, 0, stream >>>
-      (zone_pcoord[7], coord.x(), coord.y(), coord.z(),
+      (this->get_ncoord_tot(), coord.x(), coord.y(), coord.z(),
        x0, y0, z0, this->get_inv_boxx(), this->get_inv_boxy(), this->get_inv_boxz(),
        this->get_loc2glo_ptr(), xyz_shift0, coordLoc);
     cudaCheck(cudaGetLastError());
@@ -279,13 +217,13 @@ void CudaDomdec::comm_force(Force<long long int>& force, cudaStream_t stream) {
 void CudaDomdec::reorder_coord(cudaXYZ<double>& coord_src, cudaXYZ<double>& coord_dst,
 			       const int* ind_sorted, cudaStream_t stream) {
   assert(coord_src.match(coord_dst));
-  assert(zone_pcoord[7] == coord_src.size());
+  assert(this->get_ncoord_tot() == coord_src.size());
 
   if (numnode == 1) {
     int nthread = 512;
-    int nblock = (zone_pcoord[7] - 1)/nthread + 1;
+    int nblock = (this->get_ncoord_tot() - 1)/nthread + 1;
     reorder_coord_kernel<<< nblock, nthread, 0, stream >>>
-      (zone_pcoord[7], ind_sorted, coord_src.x(), coord_src.y(), coord_src.z(),
+      (this->get_ncoord_tot(), ind_sorted, coord_src.x(), coord_src.y(), coord_src.z(),
        coord_dst.x(), coord_dst.y(), coord_dst.z());
     cudaCheck(cudaGetLastError());
   } else {
@@ -301,9 +239,9 @@ void CudaDomdec::reorder_coord(cudaXYZ<double>& coord_src, cudaXYZ<double>& coor
 void CudaDomdec::reorder_xyz_shift(const int* ind_sorted, cudaStream_t stream) {
 
   int nthread = 512;
-  int nblock = (zone_pcoord[7] - 1)/nthread + 1;
+  int nblock = (this->get_ncoord_tot() - 1)/nthread + 1;
   reorder_xyz_shift_kernel<<< nblock, nthread, 0, stream >>>
-    (zone_pcoord[7], ind_sorted, xyz_shift0, xyz_shift1);
+    (this->get_ncoord_tot(), ind_sorted, xyz_shift0, xyz_shift1);
   cudaCheck(cudaGetLastError());
 
   float3 *p = xyz_shift0;
@@ -320,13 +258,14 @@ void CudaDomdec::reorder_xyz_shift(const int* ind_sorted, cudaStream_t stream) {
 //
 void CudaDomdec::reorder_mass(float *mass, const int* ind_sorted, cudaStream_t stream) {
 
-  reallocate<float>(&mass_tmp, &mass_tmp_len, zone_pcoord[7], 1.2f);
+  float fac = (numnode > 1) ? 1.2f : 1.0f;
+  reallocate<float>(&mass_tmp, &mass_tmp_len, this->get_ncoord_tot(), fac);
 
   int nthread = 512;
-  int nblock = (zone_pcoord[7] - 1)/nthread + 1;
+  int nblock = (this->get_ncoord_tot() - 1)/nthread + 1;
   reorder_mass_kernel<<< nblock, nthread, 0, stream >>>
-    (zone_pcoord[7], ind_sorted, mass, mass_tmp);
+    (this->get_ncoord_tot(), ind_sorted, mass, mass_tmp);
   cudaCheck(cudaGetLastError());
 
-  copy_DtoD<float>(mass_tmp, mass, zone_pcoord[7], stream);
+  copy_DtoD<float>(mass_tmp, mass, this->get_ncoord_tot(), stream);
 }

@@ -1,8 +1,6 @@
 #include <stdio.h>
 #include <iostream>
 #include <fstream>
-//#include <thrust/device_ptr.h>
-//#include <thrust/scan.h>
 #include "gpu_utils.h"
 #include "cuda_utils.h"
 #include "NeighborList.h"
@@ -461,7 +459,7 @@ __global__ void calc_z_column_index_kernel(const float4* __restrict__ xyzq,
   
   int ind0 = 0;
   for (int izone=0;izone < 8;izone++) {
-    if (i < d_nlist_param.zone_patom[izone]) {
+    if (i < d_nlist_param.zone_patom[izone+1]) {
       float4 xyzq_val = xyzq[i];
       float x = xyzq_val.x;
       float y = xyzq_val.y;
@@ -512,7 +510,7 @@ __global__ void calc_z_column_pos_kernel(const int ncol_tot,
     int2 tmpval;
     tmpval.x = (i < ncol_tot) ? col_natom[i] : 0;  // Number of atoms in this column
     tmpval.y = (i < ncol_tot) ? (tmpval.x - 1)/tilesize + 1 : 0; // Number of z-cells in this column
-    col_ncellz[i] = tmpval.y;                      // Set col_ncellz[icol]
+    if (i < ncol_tot) col_ncellz[i] = tmpval.y;    // Set col_ncellz[icol]
     shpos2[threadIdx.x] = tmpval;
     if (i < ncol_tot) col_natom[i] = 0;
     __syncthreads();
@@ -546,10 +544,10 @@ __global__ void calc_z_column_pos_kernel(const int ncol_tot,
       // col_xy_zone[icol].z = zone for each column
       int4 cell_xyz_zone_val;
       int3 col_xy_zone_val = col_xy_zone[i];
-      cell_xyz_zone_val.x = col_xy_zone_val.x;
-      cell_xyz_zone_val.y = col_xy_zone_val.y;
-      cell_xyz_zone_val.z = 0;
-      cell_xyz_zone_val.w = col_xy_zone_val.z;
+      cell_xyz_zone_val.x = col_xy_zone_val.x;   // icellx
+      cell_xyz_zone_val.y = col_xy_zone_val.y;   // icelly
+      cell_xyz_zone_val.z = 0;                   // icellz (set in the loop below)
+      cell_xyz_zone_val.w = col_xy_zone_val.z;   // izone
       for (int icell=icell0;icell < icell1;icell++,iatom+=tilesize,cell_xyz_zone_val.z++) {
 	cell_patom[icell] = iatom;
 	cell_xyz_zone[icell] = cell_xyz_zone_val;
@@ -1312,7 +1310,8 @@ __device__ void flush_jlist(const int wid, const int istart, const int iend,
 //
 // NOTE: One warp takes care of one cell
 //
-template < int tilesize, bool IvsI >
+//template < int tilesize, bool IvsI >
+template < int tilesize >
 __global__
 void build_kernel(const int max_nexcl,
 		  const int4* __restrict__ cell_xyz_zone,
@@ -1348,7 +1347,9 @@ void build_kernel(const int max_nexcl,
   int icellx = icell_xyz_zone.x;
   int icelly = icell_xyz_zone.y;
   int icellz = icell_xyz_zone.z;
-  int izone  = IvsI ? 0 : icell_xyz_zone.w;
+  //int izone  = IvsI ? 0 : icell_xyz_zone.w;
+  int izone  = icell_xyz_zone.w;
+  bool IvsI = (izone == 0) ? true : false;
 
   int n_jzone = IvsI ? 1 : d_nlist_param.n_int_zone[izone];
   
@@ -1554,10 +1555,17 @@ void build_kernel(const int max_nexcl,
 	      jcelly += jcelly_min;
 	      int jcol = jcellx + jcelly*d_nlist_param.ncellx[IvsI ? 0 : jzone];
 	      int cell0 = col_cell[jcol];
-	      get_cell_bounds_z<IvsI>(icellz + imz*col_ncellz[jcol], col_ncellz[jcol],
-				      d_nlist_param.min_xyz[IvsI ? 0 : jzone].z,
-				      imbbz0-ibb.wz, imbbz0+ibb.wz,
-				      &cell_bz[cell0], rcut, jcellz0_t, jcellz1_t);
+	      if (IvsI) {
+		get_cell_bounds_z<true>(icellz + imz*col_ncellz[jcol], col_ncellz[jcol],
+					d_nlist_param.min_xyz[IvsI ? 0 : jzone].z,
+					imbbz0-ibb.wz, imbbz0+ibb.wz,
+					&cell_bz[cell0], rcut, jcellz0_t, jcellz1_t);
+	      } else {
+		get_cell_bounds_z<false>(icellz + imz*col_ncellz[jcol], col_ncellz[jcol],
+					 d_nlist_param.min_xyz[IvsI ? 0 : jzone].z,
+					 imbbz0-ibb.wz, imbbz0+ibb.wz,
+					 &cell_bz[cell0], rcut, jcellz0_t, jcellz1_t);
+	      }
 	    }
 #if __CUDA_ARCH__ >= 300
 	    jcellz_min = min_shfl(jcellz0_t);
@@ -2106,6 +2114,7 @@ void NeighborList<tilesize>::set_cell_sizes(const int *zone_natom,
       celldx[izone] = xsize/(float)(ncellx[izone]);
       celldy[izone] = ysize/(float)(ncelly[izone]);
       celldz_min[izone] = ysize/(float)(ncellz_max[izone]);
+      std::cerr << izone << ": " << min_xyz[izone].x << " ... " << max_xyz[izone].x << std::endl;
     } else {
       ncellx[izone] = 0;
       ncelly[izone] = 0;
@@ -2138,7 +2147,7 @@ bool NeighborList<tilesize>::test_z_columns(const int* zone_patom,
 					    const float4* xyzq, const float4* xyzq_sorted,
 					    const int* col_patom) {
 
-  int ncoord = zone_patom[7];
+  int ncoord = zone_patom[8];
   float4 *h_xyzq = new float4[ncoord];
   copy_DtoH_sync<float4>(xyzq, h_xyzq, ncoord);
   float4 *h_xyzq_sorted = new float4[ncoord];
@@ -2157,13 +2166,8 @@ bool NeighborList<tilesize>::test_z_columns(const int* zone_patom,
   try {
     int ind0 = 0;
     for (izone=0;izone < 8;izone++) {
-      int istart, iend;
-      if (izone > 0) {
-	istart = zone_patom[izone-1];
-      } else {
-	istart = 0;
-      }
-      iend = zone_patom[izone] - 1;
+      int istart = zone_patom[izone];
+      int iend   = zone_patom[izone+1] - 1;
       if (iend >= istart) {
 	float x0 = min_xyz[izone].x;
 	float y0 = min_xyz[izone].y;
@@ -2224,7 +2228,7 @@ bool NeighborList<tilesize>::test_sort(const int* zone_patom,
 				       const float4* xyzq, const float4* xyzq_sorted,
 				       const int* col_patom, const int* cell_patom) {
 
-  int ncoord = zone_patom[7];
+  int ncoord = zone_patom[8];
   float4 *h_xyzq = new float4[ncoord];
   copy_DtoH_sync<float4>(xyzq, h_xyzq, ncoord);
   float4 *h_xyzq_sorted = new float4[ncoord];
@@ -2254,13 +2258,8 @@ bool NeighborList<tilesize>::test_sort(const int* zone_patom,
 
     int ind0 = 0;
     for (izone=0;izone < 8;izone++) {
-      int istart, iend;
-      if (izone > 0) {
-	istart = zone_patom[izone-1];
-      } else {
-	istart = 0;
-      }
-      iend = zone_patom[izone] - 1;
+      int istart = zone_patom[izone];
+      int iend   = zone_patom[izone+1] - 1;
       if (iend >= istart) {
 	float x0 = min_xyz[izone].x;
 	float y0 = min_xyz[izone].y;
@@ -2388,7 +2387,7 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
 				  float4 *xyzq_sorted,
 				  int *loc2glo,
 				  cudaStream_t stream) {
-  int ncoord = zone_patom[7];
+  int ncoord = zone_patom[8];
   int ncol_tot;
 
   if (ncoord > ncoord_glo) {
@@ -2431,7 +2430,7 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
 				  float4 *xyzq_sorted,
 				  int *loc2glo,
 				  cudaStream_t stream) {
-  const int ncoord = zone_patom[7];
+  const int ncoord = zone_patom[8];
   int ncol_tot;
 
   if (ncoord > ncoord_glo) {
@@ -2451,8 +2450,8 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
   set_nlist_param(stream);
 
   for (int izone=0;izone < 8;izone++) {
-    int nstart = (izone > 0) ? zone_patom[izone-1] : 0;
-    int ncoord_zone = zone_patom[izone] - nstart;
+    int nstart = zone_patom[izone];
+    int ncoord_zone = zone_patom[izone+1] - nstart;
     if (ncoord_zone > 0) {
       int nthread = 512;
       int nblock = (ncoord_zone-1)/nthread+1;
@@ -2461,8 +2460,8 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
 	(ncoord_zone, izone, &xyzq[nstart]);
     }
   }
+  cudaCheck(cudaStreamSynchronize(stream));
 
-  cudaCheck(cudaDeviceSynchronize());
   get_nlist_param();
 
   /*
@@ -2518,13 +2517,7 @@ void NeighborList<tilesize>::sort_setup(const int *zone_patom,
   //
   // zone_natom[izone] = number of atoms in zone "izone"
   for (int izone=0;izone < 8;izone++) {
-    int nstart;
-    if (izone > 0) {
-      nstart = zone_patom[izone-1];
-    } else {
-      nstart = 0;
-    }
-    zone_natom[izone] = zone_patom[izone] - nstart;
+    zone_natom[izone] = zone_patom[izone+1] - zone_patom[izone];
   }
 
   set_int_zone(zone_natom, h_nlist_param->n_int_zone, h_nlist_param->int_zone);
@@ -2547,6 +2540,7 @@ void NeighborList<tilesize>::sort_setup(const int *zone_patom,
     h_nlist_param->min_xyz[izone].z = min_xyz[izone].z;
   }
   h_nlist_param->ncol[8] = ncol;
+  h_nlist_param->zone_patom[8] = zone_patom[8];
 
   // Copy h_nlist_param => d_nlist_param
   set_nlist_param(stream);
@@ -2744,7 +2738,14 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
   int nthread, nblock, shmem_size;
 
   get_nlist_param();
-  //std::cout << "ncell = " << h_nlist_param->ncell << " ncell_max = " << ncell_max << std::endl;
+  std::cout << "ncell = " << h_nlist_param->ncell << " ncell_max = " << ncell_max << std::endl;
+
+  for (int izone=0;izone < 8;izone++) {
+    std::cout << izone << ": " << h_nlist_param->ncellx[izone]
+	      << " " << h_nlist_param->ncelly[izone]
+	      << " " << h_nlist_param->ncellz_max[izone]
+	      << std::endl;
+  }
 
   int n_tile_est, n_ientry_est;
   get_tile_ientry_est(h_nlist_param->n_int_zone, h_nlist_param->int_zone,
@@ -2765,13 +2766,14 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
 
   // I vs. I
   nthread = 512;
-  nblock = (ncell_max-1)/(nthread/warpsize) + 1;
+  //nblock = (ncell_max-1)/(nthread/warpsize) + 1;
+  nblock = (h_nlist_param->ncell-1)/(nthread/warpsize) + 1;
   shmem_size = (nthread/warpsize)*( n_jlist_max*sizeof(int) + tilesize*sizeof(float3)) + 
     nthread*sizeof(int);
   if (get_cuda_arch() < 300) shmem_size += nthread*sizeof(int);
   // For !IvsI, shmem_size += (nthread/warpsize)*n_int_zone_max*sizeof(int2)
   //std::cout << "NeighborList::build, shmem_size = " << shmem_size << std::endl;
-  build_kernel<tilesize, true>
+  build_kernel<tilesize>
     <<< nblock, nthread, shmem_size, stream >>>
     (max_nexcl, cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom, loc2glo, glo2loc,
      atom_excl_pos, atom_excl, xyzq, boxx, boxy, boxz, rcut, rcut*rcut, bb, excl_atom_heap,
@@ -2829,7 +2831,7 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
   copy_DtoH_sync<int>(atom_excl_pos, h_atom_excl_pos, atom_excl_pos_len);
   copy_DtoH_sync<int>(atom_excl, h_atom_excl, atom_excl_len);
 
-  int ncoord = zone_patom[7];
+  int ncoord = zone_patom[8];
 
   int *h_loc2glo = new int[ncoord];
   copy_DtoH_sync<int>(loc2glo, h_loc2glo, ncoord);
@@ -2851,12 +2853,12 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
       if (izone == 2 && jzone != 1 && jzone != 6) continue;
       if (izone == 4 && jzone != 1 && jzone != 2 && jzone != 3) continue;
 
-      int istart = (izone > 0) ? istart = zone_patom[izone-1] : 0;
-      int jstart = (jzone > 0) ? jstart = zone_patom[jzone-1] : 0;
-      int iend = zone_patom[izone];
-      int jend = zone_patom[jzone];
+      int istart = zone_patom[izone];
+      int iend   = zone_patom[izone+1] - 1;
+      int jstart = zone_patom[jzone];
+      int jend   = zone_patom[jzone+1] - 1;
 
-      for (int i=istart;i < iend;i++) {
+      for (int i=istart;i <= iend;i++) {
 	float xi = h_xyzq[i].x;
 	float yi = h_xyzq[i].y;
 	float zi = h_xyzq[i].z;
@@ -2864,7 +2866,7 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 	int excl_start = h_atom_excl_pos[ig];
 	int excl_end   = h_atom_excl_pos[ig+1]-1;
 	if (izone == 0 && jzone == 0) jstart = i + 1;
-	for (int j=jstart;j < jend;j++) {
+	for (int j=jstart;j <= jend;j++) {
 	  float xj = h_xyzq[j].x;
 	  float yj = h_xyzq[j].y;
 	  float zj = h_xyzq[j].z;

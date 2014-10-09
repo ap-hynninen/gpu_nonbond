@@ -82,8 +82,9 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
   
   // Resize arrays
   if (nx_comm + ny_comm + nz_comm > 0 && update) {
-    atom_pick.resize(coord.size()+1);
-    atom_pos.resize(coord.size()+1);
+    // NOTE: Atoms are only picked from the homezone = first ncoord atoms in coord
+    atom_pick.resize(domdec.get_ncoord()+1);
+    atom_pos.resize(domdec.get_ncoord()+1);
   }
 
   if (nz_comm > 0) {
@@ -99,13 +100,13 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	get_fz_boundary(homeix, homeiy, homeiz-(i+1), rnl, rnl_grouped, zf);
 	//if (homeiz-(i+1) < 0) zf -= 1.0;
 
-	fprintf(stderr,"%d: homeiz=%d zf=%lf\n",domdec.get_mynode(),homeiz,zf);
+	//fprintf(stderr,"%d: homeiz=%d zf=%lf\n",domdec.get_mynode(),homeiz,zf);
 
 	// Get pointer to z coordinates
 	thrust::device_ptr<double> z_ptr(coord.z());
 
 	// Pick atoms that are in the communication region
-	thrust::transform(z_ptr, z_ptr + coord.size(), atom_pick.begin(),
+	thrust::transform(z_ptr, z_ptr + domdec.get_ncoord(), atom_pick.begin(),
 			  z_pick_functor(zf + rnl*inv_boxz, inv_boxz));
 
 	// atom_pick[] now contains atoms that are picked for z-communication
@@ -113,7 +114,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	thrust::exclusive_scan(atom_pick.begin(), atom_pick.end(), atom_pos.begin());
 	
 	// Count the number of atoms we are adding to the buffer
-	z_nsend.at(i) = atom_pos[coord.size()];
+	z_nsend.at(i) = atom_pos[domdec.get_ncoord()];
 	z_psend.at(i+1) = z_psend.at(i) + z_nsend.at(i);
 
 	z_send_loc0.at(i).resize(z_nsend.at(i));
@@ -121,7 +122,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	// atom_pos[] now contains position to store each atom
 	// Scatter to produce packed atom index table
 	thrust::scatter_if(thrust::make_counting_iterator(0),
-			   thrust::make_counting_iterator(coord.size()),
+			   thrust::make_counting_iterator(domdec.get_ncoord()),
 			   atom_pos.begin(), atom_pick.begin(),
 			   z_send_loc0.at(i).begin());
 	
@@ -194,8 +195,10 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       if (!cudaMPI.isCudaAware()) {
 	reallocate_host<char>(&h_recvbuf, &h_recvbuf_len, precv.at(nz_comm), 1.2f);
       }
-      z_recv_glo.resize(precv.at(nz_comm));
-      coord.resize(coord.size()+precv.at(nz_comm));
+      z_recv_glo.resize(z_precv.at(nz_comm));
+      coord.resize(domdec.get_ncoord()+z_precv.at(nz_comm));
+      // Re-allocate loc2glo
+      loc2glo.resize(domdec.get_ncoord() + z_precv.at(nz_comm));
     }
 
     // Send & Recv data
@@ -206,7 +209,6 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 				  &recvbuf[precv.at(i)], nrecv.at(i),
 				  z_recv_node.at(i), DATA_TAG, MPI_STATUS_IGNORE,
 				  &h_sendbuf[psend.at(i)], &h_recvbuf[precv.at(i)]));
-
       } else if (nsend.at(i) > 0) {
 	MPICheck(cudaMPI.Send(&sendbuf[psend.at(i)], nsend.at(i),
 			      z_send_node.at(i), DATA_TAG, &h_sendbuf[psend.at(i)]));
@@ -220,38 +222,40 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
     //----------------------------------------------------
     // Unpack data from +z-direction into correct arrays
     //----------------------------------------------------
-    // Position where we start adding coordinates
-    int cpos = domdec.get_zone_pcoord()[0];
     for (int i=0;i < nz_comm;i++) {
-      int pos = 0;
       int src_pos = precv.at(i);
       if (update) {
-	// Copy coordinates indices to z_recv_glo
+	// Copy global indices to z_recv_glo
 	// format = indices[alignInt(nrecv.at(i),2) x int]
-	thrust::device_ptr<double> ind_ptr((double *)&recvbuf[src_pos]);
-	thrust::copy(ind_ptr, ind_ptr+z_nrecv.at(i), z_recv_glo.begin()+pos);
-	pos += z_nrecv.at(i);
+	thrust::device_ptr<int> ind_ptr((int *)&recvbuf[src_pos]);
+	thrust::copy(ind_ptr, ind_ptr+z_nrecv.at(i), z_recv_glo.begin()+z_precv.at(i));
+	// Copy global indices to loc2glo
+	thrust::copy(ind_ptr, ind_ptr+z_nrecv.at(i), 
+		     loc2glo.begin()+domdec.get_zone_pcoord(Domdec::FZ)+z_precv.at(i));
 	src_pos += alignInt(z_nrecv.at(i),2)*sizeof(int);
       }
       // Unpack coordinates
-      // format = X[nrecv.at(i) x double] | Y[nrecv.at(i) x double] | Z[nrecv.at(i) x double]
-      
+      // format = X[nrecv.at(i) x double] | Y[nrecv.at(i) x double] | Z[nrecv.at(i) x double]      
       thrust::device_ptr<double> x_src_ptr((double *)&recvbuf[src_pos]);
-      thrust::device_ptr<double> x_dst_ptr(coord.x() + cpos);
+      thrust::device_ptr<double> x_dst_ptr(coord.x() + domdec.get_zone_pcoord(Domdec::FZ) + z_precv.at(i));
       thrust::copy(x_src_ptr, x_src_ptr+z_nrecv.at(i), x_dst_ptr);
       src_pos += z_nrecv.at(i)*sizeof(double);
 
       thrust::device_ptr<double> y_src_ptr((double *)&recvbuf[src_pos]);
-      thrust::device_ptr<double> y_dst_ptr(coord.y() + cpos);
+      thrust::device_ptr<double> y_dst_ptr(coord.y() + domdec.get_zone_pcoord(Domdec::FZ) + z_precv.at(i));
       thrust::copy(y_src_ptr, y_src_ptr+z_nrecv.at(i), y_dst_ptr);
       src_pos += z_nrecv.at(i)*sizeof(double);
 
       thrust::device_ptr<double> z_src_ptr((double *)&recvbuf[src_pos]);
-      thrust::device_ptr<double> z_dst_ptr(coord.z() + cpos);
+      thrust::device_ptr<double> z_dst_ptr(coord.z() + domdec.get_zone_pcoord(Domdec::FZ) + z_precv.at(i));
       thrust::copy(z_src_ptr, z_src_ptr+z_nrecv.at(i), z_dst_ptr);
       src_pos += z_nrecv.at(i)*sizeof(double);
-      cpos += z_nrecv.at(i);
     }
+
+    if (update) {
+      domdec.set_zone_ncoord(Domdec::FZ, z_precv.at(nz_comm));
+    }
+
   } // if (nz_comm > 0)
   
   if (ny_comm > 0) {
@@ -279,8 +283,8 @@ void CudaDomdecD2DComm::update(int* glo2loc, int* loc2loc) {
   
   if (nz_comm > 0) {
     // Re-allocate
-    z_recv_loc.resize(precv.at(nz_comm));
-    z_send_loc.resize(psend.at(nz_comm));
+    z_recv_loc.resize(z_precv.at(nz_comm));
+    z_send_loc.resize(z_psend.at(nz_comm));
     // Map: z_recv_glo => z_recv_loc
     // z_recv_loc = glo2loc[z_recv_glo]
     thrust::gather(z_recv_glo.begin(), z_recv_glo.end(), glo2loc_ptr, z_recv_loc.begin());

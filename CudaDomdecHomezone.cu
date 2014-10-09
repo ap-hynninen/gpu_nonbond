@@ -421,9 +421,9 @@ int CudaDomdecHomezone::update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, 
   for (int i=0;i < nneigh;i++) {
     if (neighnode.at(i) != domdec.get_mynode()) {
       if (h_num_send[i] > 0 && num_recv.at(i) > 0) {
-	fprintf(stderr,"%d: nsend=%d nrecv=%d pos_send=%d pos_recv=%d\n",
-		domdec.get_mynode(),h_num_send[i],num_recv.at(i),
-		h_pos_send[i], pos_recv.at(i));
+	//fprintf(stderr,"%d: nsend=%d nrecv=%d pos_send=%d pos_recv=%d\n",
+	//	domdec.get_mynode(),h_num_send[i],num_recv.at(i),
+	//	h_pos_send[i], pos_recv.at(i));
 	MPICheck(cudaMPI.Sendrecv(&send[h_pos_send[i]], h_num_send[i]*sizeof(neighcomm_t), 
 				  neighnode.at(i), COORD_TAG,
 				  &recv[pos_recv.at(i)], num_recv.at(i)*sizeof(neighcomm_t),
@@ -440,8 +440,8 @@ int CudaDomdecHomezone::update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, 
       }
     } else if (num_recv.at(i) > 0) {
       // Copy data from local (home) sub-box
-      fprintf(stderr,"%d: copy, ncopy=%d pos_send=%d pos_recv=%d\n",
-	      domdec.get_mynode(), num_recv.at(i), h_pos_send[i], pos_recv.at(i));
+      //fprintf(stderr,"%d: copy, ncopy=%d pos_send=%d pos_recv=%d\n",
+      //domdec.get_mynode(), num_recv.at(i), h_pos_send[i], pos_recv.at(i));
       copy_DtoD_sync<neighcomm_t>(&send[h_pos_send[i]], &recv[pos_recv.at(i)], num_recv.at(i));
     }
   }
@@ -499,9 +499,9 @@ int CudaDomdecHomezone::update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, 
   }
   */
 
-  // Resize coord and coord2 if needed
-  coord.resize(num_recv_tot);
-  coord2.resize(num_recv_tot);
+  // Re-allocate coord and coord2 if needed
+  coord.realloc(num_recv_tot);
+  coord2.realloc(num_recv_tot);
 
   // Unpack data on GPU
   unpack_recv_kernel<<< nblock, nthread, 0, stream >>>

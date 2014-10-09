@@ -35,7 +35,7 @@ Force<T>::Force(const char *filename) {
     while (file >> xyz_cpu.x()[i] >> xyz_cpu.y()[i] >> xyz_cpu.z()[i]) i++;
 
     // Allocate GPU memory
-    this->resize(nforce);
+    this->realloc(nforce);
 
     // Copy coordinates from CPU to GPU
     copy_HtoD_sync<T>(xyz_cpu.x(), this->x(), nforce);

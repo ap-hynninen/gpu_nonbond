@@ -557,7 +557,7 @@ void test() {
     leapfrog.set_step_buffers(dx, dy, dz);
     leapfrog.set_force_buffers(fx, fy, fz);
     leapfrog.set_timestep(2.0);
-    int nstep = 100;
+    int nstep = 1;
     leapfrog.run(nstep);
 
     if (nstep == 100 || (nstep == 1 && !holoconst_on)) {
@@ -602,7 +602,7 @@ void test() {
 
     cudaCheck(cudaStreamDestroy(integrator_stream));
 
-    if (holoconst_on) {
+    if (nstep != 1 && holoconst_on) {
       check_holoconst(x, y, z,
 		      npair, h_pair_indtype, h_pair_constr, 
 		      ntrip, h_trip_indtype, h_trip_constr,

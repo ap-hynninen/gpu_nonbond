@@ -71,7 +71,7 @@ struct NeighborListParam_t {
   float* cellbx[8];
 
   // Interaction zones
-  int zone_patom[8];
+  int zone_patom[9];
   int n_int_zone[8];
   int int_zone[8][8];
 

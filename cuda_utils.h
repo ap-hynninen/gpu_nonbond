@@ -16,10 +16,14 @@
 void deallocate_host_T(void **pp);
 void allocate_host_T(void **pp, const int len, const size_t sizeofT);
 void reallocate_host_T(void **pp, int *curlen, const int newlen, const float fac, const size_t sizeofT);
+void resize_host_T(void **pp, int *curlen, const int cur_size, const int new_size,
+		   const float fac, const size_t sizeofT);
 
 void deallocate_T(void **pp);
 void allocate_T(void **pp, const int len, const size_t sizeofT);
 void reallocate_T(void **pp, int *curlen, const int newlen, const float fac, const size_t sizeofT);
+void resize_T(void **pp, int *curlen, const int cur_size, const int new_size,
+	      const float fac, const size_t sizeofT);
 
 #ifdef __CUDACC__
 void copy_HtoD_async_T(const void *h_array, void *d_array, int array_len, cudaStream_t stream,
@@ -108,6 +112,22 @@ void reallocate_host(T **pp, int *curlen, const int newlen, const float fac=1.0f
 
 //----------------------------------------------------------------------------------------
 //
+// Allocate & re-allocate host memory, preserves content
+// pp = memory pointer
+// curlen = current length of the array
+// cur_size = current size of the data content
+// new_size = new size
+// fac = extra space allocation factor: in case of re-allocation new length will be fac*new_size
+//
+#ifdef __cplusplus
+template <class T>
+void resize_host(T **pp, int *curlen, const int cur_size, const int new_size, const float fac=1.0f) {
+  resize_host_T((void **)pp, curlen, cur_size, new_size, fac, sizeof(T));
+}
+#endif
+
+//----------------------------------------------------------------------------------------
+//
 // Deallocate gpu memory
 // pp = memory pointer
 //
@@ -142,6 +162,22 @@ void allocate(T **pp, const int len) {
 template <class T>
 void reallocate(T **pp, int *curlen, const int newlen, const float fac=1.0f) {
   reallocate_T((void **)pp, curlen, newlen, fac, sizeof(T));
+}
+#endif
+
+//----------------------------------------------------------------------------------------
+//
+// Allocate & re-allocate GPU memory, preserves content
+// pp = memory pointer
+// curlen = current length of the array
+// cur_size = current size of the data content
+// new_size = new size
+// fac = extra space allocation factor: in case of re-allocation new length will be fac*new_size
+//
+#ifdef __cplusplus
+template <class T>
+void resize(T **pp, int *curlen, const int cur_size, const int new_size, const float fac=1.0f) {
+  resize_T((void **)pp, curlen, cur_size, new_size, fac, sizeof(T));
 }
 #endif
 

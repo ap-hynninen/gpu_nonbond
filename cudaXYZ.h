@@ -23,12 +23,12 @@ public:
   cudaXYZ() { }
 
   cudaXYZ(int size){
-    this->resize(size);
+    this->realloc(size);
   }
 
   template <typename P>
     cudaXYZ(hostXYZ<P> &xyz){
-    this->resize(xyz.size());
+    this->realloc(xyz.size());
     this->set_data(xyz);
   }
 
@@ -40,8 +40,12 @@ public:
     if (this->_z != NULL) deallocate<T>(&this->_z);
   }
 
-  void realloc_array(T** array, int* capacity, float fac) {
-    reallocate<T>(array, capacity, this->_size, fac);
+  void realloc_array(T** array, int* capacity, int size, float fac) {
+    reallocate<T>(array, capacity, size, fac);
+  }
+
+  void resize_array(T** array, int* capacity, int size, int new_size, float fac) {
+    resize<T>(array, capacity, size, new_size, fac);
   }
 
   // Clears the data array

@@ -68,6 +68,7 @@ __global__ void set_xyzq_shift_kernel(const int ncoord,
     xyzq_val.y = (float)(y[tid] + ((double)shift.y)*boxy);
     xyzq_val.z = (float)(z[tid] + ((double)shift.z)*boxz);
     xyzq_val.w = q[loc2glo[tid]];
+    //if (isnan(xyzq_val.x)) printf("NAN at tid=%d x=%lf shift=%f\n",tid,x[tid],shift.x);
     xyzq[tid] = xyzq_val;
   }
 }
@@ -175,9 +176,9 @@ XYZQ::~XYZQ() {
 }
 
 //
-// Resize
+// Re-allocates array, does not preserve content
 //
-void XYZQ::resize(int ncoord, float fac) {
+void XYZQ::realloc(int ncoord, float fac) {
   this->ncoord = ncoord;
   int req_xyzq_len = get_xyzq_len();
   
@@ -196,10 +197,13 @@ void XYZQ::set_xyzq(int ncopy, float4 *h_xyzq, size_t offset, cudaStream_t strea
 // Copies x,y,z,q (on device) into the coordinate slots
 //
 void XYZQ::set_xyzq(const cudaXYZ<double>& coord, const float *q, cudaStream_t stream) {
+  assert(ncoord == coord.size());
+
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
-  set_xyzq_kernel<<< nblock, nthread, 0, stream >>>(coord.size(), coord.x(), coord.y(), coord.z(), q, xyzq);
+  set_xyzq_kernel<<< nblock, nthread, 0, stream >>>
+    (coord.size(), coord.x(), coord.y(), coord.z(), q, xyzq);
 
   cudaCheck(cudaGetLastError());
 }
@@ -210,11 +214,14 @@ void XYZQ::set_xyzq(const cudaXYZ<double>& coord, const float *q, cudaStream_t s
 void XYZQ::set_xyzq(const cudaXYZ<double>& coord, const float *q, const int *loc2glo,
 		    const float3 *xyz_shift,
 		    const double boxx, const double boxy, const double boxz, cudaStream_t stream) {
+  assert(ncoord == coord.size());
+
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
-  set_xyzq_shift_kernel<<< nblock, nthread, 0, stream >>>(coord.size(), coord.x(), coord.y(), coord.z(), q,
-							  loc2glo, xyz_shift, boxx, boxy, boxz, xyzq);
+  set_xyzq_shift_kernel<<< nblock, nthread, 0, stream >>>
+    (coord.size(), coord.x(), coord.y(), coord.z(), q,
+     loc2glo, xyz_shift, boxx, boxy, boxz, xyzq);
 
   cudaCheck(cudaGetLastError());
 }
@@ -223,10 +230,13 @@ void XYZQ::set_xyzq(const cudaXYZ<double>& coord, const float *q, const int *loc
 // Copies x,y,z (on device) into the coordinate slots
 //
 void XYZQ::set_xyz(const cudaXYZ<double>& coord, cudaStream_t stream) {
+  assert(ncoord == coord.size());
+
   int nthread = 512;
   int nblock = (ncoord-1)/nthread+1;
 
-  set_xyz_kernel<<< nblock, nthread, 0, stream >>>(coord.size(), coord.x(), coord.y(), coord.z(), xyzq);
+  set_xyz_kernel<<< nblock, nthread, 0, stream >>>
+    (coord.size(), coord.x(), coord.y(), coord.z(), xyzq);
 
   cudaCheck(cudaGetLastError());
 }
@@ -236,6 +246,7 @@ void XYZQ::set_xyz(const cudaXYZ<double>& coord, cudaStream_t stream) {
 //
 void XYZQ::set_xyz(const cudaXYZ<double>& coord, const int start, const int end, const float3 *xyz_shift,
 		   const double boxx, const double boxy, const double boxz, cudaStream_t stream) {
+  assert(ncoord == coord.size());
   assert(start >= 0);
   assert(end < ncoord);
   assert(end < coord.size());
@@ -247,8 +258,9 @@ void XYZQ::set_xyz(const cudaXYZ<double>& coord, const int start, const int end,
   int nthread = 512;
   int nblock = (nset-1)/nthread+1;
 
-  set_xyz_shift_kernel<<< nblock, nthread, 0, stream >>>(nset, coord.x()+start, coord.y()+start, coord.z()+start,
-							 &xyz_shift[start], boxx, boxy, boxz, &xyzq[start]);
+  set_xyz_shift_kernel<<< nblock, nthread, 0, stream >>>
+    (nset, coord.x()+start, coord.y()+start, coord.z()+start,
+     &xyz_shift[start], boxx, boxy, boxz, &xyzq[start]);
 
   cudaCheck(cudaGetLastError());
 }

@@ -58,21 +58,36 @@ protected:
     std::swap(this->_capacity, xyz._capacity);
   }
 
-  // Resizes array to contain n entries with reallocation factor "fac"
-  //virtual void resize(int new_size, float fac=1.0f) = 0;
+  // capacity = current capacity
+  // size     = desired size
+  virtual void realloc_array(T** array, int* capacity, int size, float fac) = 0;
+  virtual void resize_array(T** array, int* capacity, int size, int new_size, float fac) = 0;
 
-  virtual void realloc_array(T** array, int* capacity, float fac) = 0;
-
+  // Resize array, preserves content
   void resize(int size, float fac=1.0f) {
-    this->_size = size;
     int x_capacity = this->_capacity;
     int y_capacity = this->_capacity;
     int z_capacity = this->_capacity;
-    realloc_array(&this->_x, &x_capacity, fac);
-    realloc_array(&this->_y, &y_capacity, fac);
-    realloc_array(&this->_z, &z_capacity, fac);
+    resize_array(&this->_x, &x_capacity, this->_size, size, fac);
+    resize_array(&this->_y, &y_capacity, this->_size, size, fac);
+    resize_array(&this->_z, &z_capacity, this->_size, size, fac);
     assert(x_capacity == y_capacity);
     assert(x_capacity == z_capacity);
+    this->_size = size;
+    this->_capacity = x_capacity;
+  }
+
+  // Re-allocates array, does not preserve content
+  void realloc(int size, float fac=1.0f) {
+    int x_capacity = this->_capacity;
+    int y_capacity = this->_capacity;
+    int z_capacity = this->_capacity;
+    realloc_array(&this->_x, &x_capacity, size, fac);
+    realloc_array(&this->_y, &y_capacity, size, fac);
+    realloc_array(&this->_z, &z_capacity, size, fac);
+    assert(x_capacity == y_capacity);
+    assert(x_capacity == z_capacity);
+    this->_size = size;
     this->_capacity = x_capacity;
   }
 
