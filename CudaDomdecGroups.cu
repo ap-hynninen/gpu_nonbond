@@ -70,6 +70,8 @@ CudaDomdecGroups::CudaDomdecGroups(const CudaDomdec& domdec) : domdec(domdec) {
   groupDataStart = NULL;
   groupData = NULL;
   groupTablePos = NULL;
+
+  h_groupTablePos = NULL;
 }
 
 //
@@ -80,6 +82,7 @@ CudaDomdecGroups::~CudaDomdecGroups() {
   if (groupDataStart != NULL) deallocate<int>(&groupDataStart);
   if (groupData != NULL) deallocate<int>(&groupData);
   if (groupTablePos != NULL) deallocate<int>(&groupTablePos);
+  if (h_groupTablePos != NULL) deallocate_host<int>(&h_groupTablePos);
 }
 
 //
@@ -108,6 +111,7 @@ void CudaDomdecGroups::finishGroups() {
   allocate<int*>(&groupTable, atomGroups.size());
   copy_HtoD_sync<int*>(h_groupTable.data(), groupTable, atomGroups.size());
   allocate<int>(&groupTablePos, atomGroups.size());
+  allocate_host<int>(&h_groupTablePos, atomGroups.size());
   //--------------------------------
   // Build groupData etc.
   //--------------------------------
@@ -119,7 +123,7 @@ void CudaDomdecGroups::finishGroups() {
   std::vector<int> h_groupDataStart(domdec.get_ncoord_glo()+1);
   std::vector<int> h_groupData;
   h_groupData.reserve(groupDataLen);
-  // Loop through atoms and copy into contiguous data strcuture in h_groupData
+  // Loop through atoms and copy into contiguous data structure in h_groupData
   for (int i=0;i < domdec.get_ncoord_glo();i++) {
     h_groupDataStart.at(i) = h_groupData.size();
     h_groupData.insert(h_groupData.end(), regGroups.at(i).begin(), regGroups.at(i).end());
@@ -151,6 +155,21 @@ void CudaDomdecGroups::build_tbl(cudaStream_t stream) {
       (domdec.get_ncoord_tot(), domdec.get_loc2glo_ptr(),
        groupDataStart, groupData, domdec.get_coordLoc(), groupTablePos, groupTable);
     cudaCheck(cudaGetLastError());
+
+    cudaCheck(cudaStreamSynchronize(stream));
+    copy_DtoH_sync<int>(groupTablePos, h_groupTablePos, atomGroups.size());
+
+    for (std::map<int, AtomGroupBase*>::iterator it=atomGroups.begin();it != atomGroups.end();it++) {
+      AtomGroupBase* p = it->second;
+      int i = p->get_type();
+      //std::cerr << i << " " << p->get_numTable() << " " << h_groupTablePos[i] << std::endl;
+      p->set_numTable(h_groupTablePos[i]);
+    }
+
+    //    for (int i=0;i < atomGroups.size();i++) {
+    //std::cerr << h_groupTablePos[i] << std::endl;
+    //}
+    //exit(1);
 
     tbl_upto_date = true;
   }

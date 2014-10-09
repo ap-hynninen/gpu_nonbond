@@ -13,6 +13,9 @@ __global__ void calc_xyz_shift(const int ncoord,
 			       const double x0, const double y0, const double z0,
 			       const double inv_boxx, const double inv_boxy, const double inv_boxz,
 			       const int* __restrict__ loc2glo,
+			       const float lox, const float hix,
+			       const float loy, const float hiy,
+			       const float loz, const float hiz,
 			       float3* __restrict__ xyz_shift,
 			       char* __restrict__ coordLoc) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
@@ -30,7 +33,8 @@ __global__ void calc_xyz_shift(const int ncoord,
     float zf = (float)zi + shift.z;
     // (xf, yf, zf) is in range (0...1)
     int iglo = loc2glo[i];
-    coordLoc[iglo] = 7;
+    int loca = (xf >= lox && xf < hix) | ((yf >= loy && yf < hiy) << 1) | ((zf >= loz && zf < hiz) << 2);
+    coordLoc[iglo] = (char)loca;
   }
 }
 
@@ -68,6 +72,7 @@ __global__ void reorder_xyz_shift_kernel(const int ncoord,
   }
 }
 
+/*
 //
 // Re-order mass
 //
@@ -81,32 +86,7 @@ __global__ void reorder_mass_kernel(const int ncoord,
     mass_out[i] = mass_in[j];
   }
 }
-
-//
-// Choose z coordinates
-//
-__global__ void choose_z_coord_kernel(const int ncoord, const float* __restrict__ zbound_f,
-				      const float rcut_f, const float invz, const float* __restrict__ shz,
-				      const double* __restrict__ coord,
-				      unsigned char* __restrict__ coord_tags) {
-  const int tid = threadIdx.x + blockDim.x*blockIdx.x;
-  const int izone = tid/ncoord;
-  const int i = tid - izone*ncoord;
-
-  float z = ((float)coord[i])*invz + 0.5f;
-  z -= floor(z);
-  z += shz[izone] - zbound_f[izone];
-  z = max(0.0f, z);
-  unsigned char tag;
-  if (z < rcut_f) {
-    // In the zone
-    tag = 1;
-  } else {
-    tag = 0;
-  }
-  coord_tags[i + izone*ncoord] = tag;
-}
-
+*/
 
 //#############################################################################################
 //#############################################################################################
@@ -191,7 +171,9 @@ void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStrea
     calc_xyz_shift<<< nblock, nthread, 0, stream >>>
       (this->get_ncoord_tot(), coord.x(), coord.y(), coord.z(),
        x0, y0, z0, this->get_inv_boxx(), this->get_inv_boxy(), this->get_inv_boxz(),
-       this->get_loc2glo_ptr(), xyz_shift0, coordLoc);
+       this->get_loc2glo_ptr(),
+       
+       xyz_shift0, coordLoc);
     cudaCheck(cudaGetLastError());
   }
 
@@ -253,6 +235,7 @@ void CudaDomdec::reorder_xyz_shift(const int* ind_sorted, cudaStream_t stream) {
   xyz_shift1_len = t;
 }
 
+/*
 //
 // Re-order mass
 //
@@ -269,3 +252,4 @@ void CudaDomdec::reorder_mass(float *mass, const int* ind_sorted, cudaStream_t s
 
   copy_DtoD<float>(mass_tmp, mass, this->get_ncoord_tot(), stream);
 }
+*/

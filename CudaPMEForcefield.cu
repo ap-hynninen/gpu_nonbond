@@ -254,6 +254,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     domdec.reorder_coord(coord, ref_coord, nlist.get_ind_sorted());
     coord.set_data(ref_coord);
 
+    // Create 
     domdec.comm_update(nlist.get_glo2loc(), nlist.get_ind_sorted());
 
   } else {

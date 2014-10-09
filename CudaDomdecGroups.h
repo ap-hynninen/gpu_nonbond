@@ -24,6 +24,8 @@ class CudaDomdecGroups {
   int* groupData;
   int* groupTablePos;
 
+  int* h_groupTablePos;
+
   bool tbl_upto_date;
 
   // Storage vector used for registering groups

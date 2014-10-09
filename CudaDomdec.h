@@ -75,7 +75,7 @@ class CudaDomdec : public Domdec {
 
   void reorder_xyz_shift(const int* ind_sorted, cudaStream_t stream=0);
 
-  void reorder_mass(float *mass, const int* ind_sorted, cudaStream_t stream=0);
+  //void reorder_mass(float *mass, const int* ind_sorted, cudaStream_t stream=0);
 
 };
 
