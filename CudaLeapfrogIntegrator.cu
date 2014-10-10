@@ -167,20 +167,24 @@ void CudaLeapfrogIntegrator::spec_init(const double *x, const double *y, const d
   CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
   p->assignCoordToNodes(h_prev_coord, h_loc2glo);
 
+  ncoord = h_loc2glo.size();
+  // For now we set ncoord_tot = ncoord, this will change if there are imported atoms
+  ncoord_tot = ncoord;
+
   // Realloc and set arrays
-  step.realloc(h_loc2glo.size());
+  step.realloc(ncoord);
   step.clear();
 
-  prev_step.realloc(h_loc2glo.size());
+  prev_step.realloc(ncoord);
   prev_step.set_data_sync(h_loc2glo, dx, dy, dz);
 
-  coord.realloc(h_loc2glo.size());
+  coord.realloc(ncoord);
   coord.clear();
 
-  prev_coord.realloc(h_loc2glo.size());
+  prev_coord.realloc(ncoord);
   prev_coord.set_data_sync(h_loc2glo, x, y, z);
 
-  force.realloc(h_loc2glo.size());
+  force.realloc(ncoord);
 
   // Make global mass array
   float *h_mass_f = new float[ncoord_glo];
@@ -190,12 +194,6 @@ void CudaLeapfrogIntegrator::spec_init(const double *x, const double *y, const d
   allocate<float>(&global_mass, ncoord_glo);
   copy_HtoD<float>(h_mass_f, global_mass, ncoord_glo);
   delete [] h_mass_f;
-
-  // Host versions of coordinate, step, and force arrays
-  // NOTE: These are used for copying coordinates, so they must be global size
-  h_coord.realloc(ncoord_glo);
-  h_step.realloc(ncoord_glo);
-  h_force.realloc(ncoord_glo);
 
 }
 
@@ -241,7 +239,11 @@ void CudaLeapfrogIntegrator::take_step() {
 // Calculate step
 //
 void CudaLeapfrogIntegrator::calc_step() {
-  assert(prev_coord.match(step));
+  assert(prev_step.match(step));
+  assert(ncoord == step.size());
+  assert(ncoord == prev_step.size());
+  assert(ncoord <= force.size());
+  assert(ncoord_tot == force.size());
 
   int nthread = 512;
   int nblock = (step.size() - 1)/nthread + 1;
@@ -249,7 +251,7 @@ void CudaLeapfrogIntegrator::calc_step() {
   double dtsq = timestep_akma*timestep_akma;
 
   calc_step_kernel<<< nblock, nthread, 0, stream >>>
-    (step.size(), force.stride(), dtsq, (double *)force.xyz(), 
+    (ncoord, force.stride(), dtsq, (double *)force.xyz(), 
      prev_step.x(), prev_step.y(), prev_step.z(), mass,
      step.x(), step.y(), step.z());
   
@@ -259,13 +261,21 @@ void CudaLeapfrogIntegrator::calc_step() {
 //
 // Calculate forces
 //
-
 void CudaLeapfrogIntegrator::pre_calc_force() {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
     //cudaCheck(cudaStreamWaitEvent(stream, done_integrate_event, 0));
     cudaCheck(cudaStreamSynchronize(stream));
     p->pre_calc(coord, prev_step);
+    // Get (possibly) new ncoord and ncoord_tot
+    // NOTE: these change with neighborlist update
+    ncoord = prev_step.size();
+    ncoord_tot = coord.size();
+    // Re-allocate rest of the arrays if necessary
+    prev_coord.realloc(ncoord_tot);
+    step.realloc(ncoord);
+    reallocate<float>(&mass, &mass_len, ncoord);
+    force.realloc(ncoord_tot);
   }
 }
 
@@ -279,7 +289,6 @@ void CudaLeapfrogIntegrator::calc_force(const bool calc_energy, const bool calc_
 void CudaLeapfrogIntegrator::post_calc_force() {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    reallocate<float>(&mass, &mass_len, coord.size());
     p->post_calc(global_mass, mass, holoconst);
     p->wait_calc(stream);
   }
@@ -296,6 +305,9 @@ void CudaLeapfrogIntegrator::stop_calc_force() {
 // Calculate temperature
 //
 void CudaLeapfrogIntegrator::calc_temperature() {
+  assert(ncoord == step.size());
+  assert(ncoord == prev_step.size());
+
   // Clear kinetic energy accumulator
   h_CudaLeapfrogIntegrator_storage->kine = 0.0;
   cudaCheck(cudaMemcpyToSymbolAsync(d_CudaLeapfrogIntegrator_storage,
@@ -304,11 +316,11 @@ void CudaLeapfrogIntegrator::calc_temperature() {
 				    0, cudaMemcpyHostToDevice, stream));
   // Calculate kinetic energy
   int nthread = 512;
-  int nblock = (step.size() - 1)/nthread + 1;
+  int nblock = (ncoord - 1)/nthread + 1;
   int shmem_size = nthread*sizeof(double);
   double fac = 0.5/timestep_akma;
   calc_kine_kernel<<< nblock, nthread, shmem_size, stream >>>
-    (step.size(), fac, mass, 
+    (ncoord, fac, mass, 
      prev_step.x(), prev_step.y(), prev_step.z(),
      step.x(), step.y(), step.z());
   cudaCheck(cudaGetLastError());
@@ -339,14 +351,15 @@ void CudaLeapfrogIntegrator::do_holoconst() {
 //
 void CudaLeapfrogIntegrator::add_coord(cudaXYZ<double> &b, cudaXYZ<double> &c,
 				       cudaXYZ<double> &a) {
-  assert(b.match(c));
-  assert(b.match(a));
+  assert(ncoord <= a.size());
+  assert(ncoord <= b.size());
+  assert(ncoord <= c.size());
 
   int nthread = 512;
-  int nblock = (a.size() - 1)/nthread + 1;
+  int nblock = (ncoord - 1)/nthread + 1;
 
   add_coord_kernel<<< nblock, nthread, 0, stream >>>
-    (a.size(), b.x(), b.y(), b.z(), c.x(), c.y(), c.z(), a.x(), a.y(), a.z() );
+    (ncoord, b.x(), b.y(), b.z(), c.x(), c.y(), c.z(), a.x(), a.y(), a.z() );
 
   cudaCheck(cudaGetLastError());
 }
@@ -356,14 +369,15 @@ void CudaLeapfrogIntegrator::add_coord(cudaXYZ<double> &b, cudaXYZ<double> &c,
 //
 void CudaLeapfrogIntegrator::sub_coord(cudaXYZ<double> &b, cudaXYZ<double> &c,
 				       cudaXYZ<double> &a) {
-  assert(b.match(c));
-  assert(b.match(a));
+  assert(ncoord <= a.size());
+  assert(ncoord <= b.size());
+  assert(ncoord <= c.size());
 
   int nthread = 512;
-  int nblock = (a.size() - 1)/nthread + 1;
+  int nblock = (ncoord - 1)/nthread + 1;
 
   sub_coord_kernel<<< nblock, nthread, 0, stream >>>
-    (a.size(), b.x(), b.y(), b.z(), c.x(), c.y(), c.z(), a.x(), a.y(), a.z());
+    (ncoord, b.x(), b.y(), b.z(), c.x(), c.y(), c.z(), a.x(), a.y(), a.z());
 
   cudaCheck(cudaGetLastError());
 }
@@ -403,17 +417,16 @@ void CudaLeapfrogIntegrator::do_print_energy(int step) {
 void CudaLeapfrogIntegrator::get_restart_data(double *x, double *y, double *z,
 					      double *dx, double *dy, double *dz,
 					      double *fx, double *fy, double *fz) {
-
   if (forcefield != NULL) {
-    h_coord.set_data_sync(coord);
-    h_step.set_data_sync(step);
-    h_force.set_data_sync(force.size(),
-			  (double *)(force.xyz()),
-			  (double *)(force.xyz()+force.stride()),
-			  (double *)(force.xyz()+2*force.stride()));
+    // Re-allocate host versions of coordinate, step, and force arrays
+    //h_coord.realloc(ncoord);
+    //h_step.realloc(ncoord);
+    //h_force.realloc(ncoord);
+    // Copy to host memory
+    //h_coord.set_data_sync(ncoord, coord);
+    //h_step.set_data_sync(ncoord, step);
+    //h_force.set_data_sync(ncoord, (double *)force.x(), (double *)force.y(), (double *)force.z());
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    p->get_restart_data(h_coord, h_step, h_force, x, y, z, dx, dy, dz, fx, fy, fz);
+    p->get_restart_data(coord, step, force, x, y, z, dx, dy, dz, fx, fy, fz);
   }
-  
 }
-

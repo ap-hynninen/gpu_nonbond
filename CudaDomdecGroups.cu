@@ -41,13 +41,16 @@ __global__ void buildGroupTable_kernel(const int ncoord,
       int type = (size_type & 0xffff);
       // Group index
       int bi  = groupData[j++];
-      int loc = 0;
+      int loc_or = 0;
+      int loc_and = 0;
       for (int k=0;k < size;k++) {
 	int icoord = groupData[j++];
-	loc |= (int)coordLoc[icoord];
+	int loc = (int)coordLoc[icoord];
+	loc_or |= loc;
+	loc_and &= loc;
       }
       // 7 = binary 111
-      if (loc == 7) {
+      if (loc_or == 7 && loc_and != 0) {
 	int p = atomicAdd(&groupTablePos[type], 1);
 	groupTable[type][p] = bi;
       }
@@ -143,7 +146,7 @@ void CudaDomdecGroups::finishGroups() {
 //
 // Build tables
 //
-void CudaDomdecGroups::build_tbl(cudaStream_t stream) {
+void CudaDomdecGroups::buildGroupTables(cudaStream_t stream) {
 
   if (domdec.get_numnode() > 1 || !tbl_upto_date) {
     
@@ -156,20 +159,23 @@ void CudaDomdecGroups::build_tbl(cudaStream_t stream) {
        groupDataStart, groupData, domdec.get_coordLoc(), groupTablePos, groupTable);
     cudaCheck(cudaGetLastError());
 
+    copy_DtoH<int>(groupTablePos, h_groupTablePos, atomGroups.size(), stream);
+
+  }
+}
+
+//
+// Synchronizes and sets group table sizes in host memory
+//
+void CudaDomdecGroups::syncGroupTables(cudaStream_t stream) {
+  if (domdec.get_numnode() > 1 || !tbl_upto_date) {
     cudaCheck(cudaStreamSynchronize(stream));
-    copy_DtoH_sync<int>(groupTablePos, h_groupTablePos, atomGroups.size());
 
     for (std::map<int, AtomGroupBase*>::iterator it=atomGroups.begin();it != atomGroups.end();it++) {
       AtomGroupBase* p = it->second;
       int i = p->get_type();
-      //std::cerr << i << " " << p->get_numTable() << " " << h_groupTablePos[i] << std::endl;
       p->set_numTable(h_groupTablePos[i]);
     }
-
-    //    for (int i=0;i < atomGroups.size();i++) {
-    //std::cerr << h_groupTablePos[i] << std::endl;
-    //}
-    //exit(1);
 
     tbl_upto_date = true;
   }

@@ -427,7 +427,7 @@ void test() {
     const int ntrip_type = 3;
     const int nquad_type = 2;
 
-    const bool holoconst_on = true;
+    const bool holoconst_on = false;
 
     double *h_pair_constr = new double[npair_type];
     double *h_pair_mass = new double[npair_type*2];
@@ -660,19 +660,6 @@ void test() {
     //-------------------------------------------------------------------------------------
 
     delete [] h_solvent_ind;
-
-    /*
-    delete [] pair_ind;
-    delete [] trip_ind;
-    delete [] quad_ind;
-
-    delete [] pair_constr;
-    delete [] pair_mass;
-    delete [] trip_constr;
-    delete [] trip_mass;
-    delete [] quad_constr;
-    delete [] quad_mass;
-    */
 
     delete [] h_pair_indtype;
     delete [] h_trip_indtype;

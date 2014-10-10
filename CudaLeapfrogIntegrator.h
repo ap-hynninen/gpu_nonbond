@@ -17,33 +17,40 @@ class CudaLeapfrogIntegrator : public LeapfrogIntegrator {
   //friend class LangevinPiston;
 
 private:
+  
+  // Number of coordinates in the homezone
+  int ncoord;
 
-  // Coordinates
+  // Total number of coordinates, including the import volume
+  int ncoord_tot;
+
+  // Coordinates (size ncoord_tot)
   cudaXYZ<double> coord;
 
-  // Previous step coordinates
+  // Previous step coordinates (size ncoord)
   cudaXYZ<double> prev_coord;
 
-  // Step vector
+  // Step vector (size ncoord)
   cudaXYZ<double> step;
 
-  // Previous step vector 
+  // Previous step vector (size ncoord)
   cudaXYZ<double> prev_step;
 
-  // Masses
+  // Global masses (size ncoord_glo)
   //int global_mass_len;
   float *global_mass;
 
+  // Local masses (size ncoord)
   int mass_len;
   float *mass;
 
-  // Force array
+  // Force array (size ncoord_tot)
   Force<long long int> force;
 
-  // Host memory versions of coordinates, step, and force arrays
-  hostXYZ<double> h_coord;
-  hostXYZ<double> h_step;
-  hostXYZ<double> h_force;
+  // Host memory versions of coordinates, step, and force arrays (size ncoord_glo)
+  //hostXYZ<double> h_coord;
+  //hostXYZ<double> h_step;
+  //hostXYZ<double> h_force;
 
   // Holonomic constraints
   HoloConst *holoconst;

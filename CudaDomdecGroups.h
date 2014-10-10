@@ -71,7 +71,8 @@ class CudaDomdecGroups {
 
   void finishGroups();
 
-  void build_tbl(cudaStream_t stream=0);
+  void buildGroupTables(cudaStream_t stream=0);
+  void syncGroupTables(cudaStream_t stream=0);
 
   template <typename T>
     T* getGroupList(const int id) {

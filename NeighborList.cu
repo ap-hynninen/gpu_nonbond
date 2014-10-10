@@ -19,6 +19,7 @@ static int BitCount(unsigned int u)
             & 030707070707) % 63;
  }
 
+/*
 static int BitCount_ref(unsigned int u) {
   unsigned int x = u;
   int res = 0;
@@ -28,6 +29,7 @@ static int BitCount_ref(unsigned int u) {
   }
   return res;
 }
+*/
 
 //
 // The entire warp enters here
@@ -2738,15 +2740,15 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
   int nthread, nblock, shmem_size;
 
   get_nlist_param();
-  std::cout << "ncell = " << h_nlist_param->ncell << " ncell_max = " << ncell_max << std::endl;
 
+  std::cout << "ncell = " << h_nlist_param->ncell << " ncell_max = " << ncell_max << std::endl;
   for (int izone=0;izone < 8;izone++) {
     std::cout << izone << ": " << h_nlist_param->ncellx[izone]
 	      << " " << h_nlist_param->ncelly[izone]
 	      << " " << h_nlist_param->ncellz_max[izone]
 	      << std::endl;
   }
-
+  
   int n_tile_est, n_ientry_est;
   get_tile_ientry_est(h_nlist_param->n_int_zone, h_nlist_param->int_zone,
 		      h_nlist_param->ncellx, h_nlist_param->ncelly, h_nlist_param->ncellz_max,
@@ -3055,7 +3057,7 @@ void NeighborList<tilesize>::test_build(const int *zone_patom,
 	    istart0 = h_tile_indj[jtile];
 	  }
 
-	  int jtile0 = h_ientry[ind].startj;
+	  //int jtile0 = h_ientry[ind].startj;
 
 	  int ish     = h_ientry[ind].ish;
 	  int ish_tmp = ish;

@@ -13,9 +13,9 @@ __global__ void calc_xyz_shift(const int ncoord,
 			       const double x0, const double y0, const double z0,
 			       const double inv_boxx, const double inv_boxy, const double inv_boxz,
 			       const int* __restrict__ loc2glo,
-			       const float lox, const float hix,
-			       const float loy, const float hiy,
-			       const float loz, const float hiz,
+			       const double lox, const double hix,
+			       const double loy, const double hiy,
+			       const double loz, const double hiz,
 			       float3* __restrict__ xyz_shift,
 			       char* __restrict__ coordLoc) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
@@ -23,23 +23,28 @@ __global__ void calc_xyz_shift(const int ncoord,
     double xi = x[i]*inv_boxx;
     double yi = y[i]*inv_boxy;
     double zi = z[i]*inv_boxz;
+    double shx = ceil(x0 - xi);
+    double shy = ceil(y0 - yi);
+    double shz = ceil(z0 - zi);
     float3 shift;
-    shift.x = ceilf(x0 - xi);
-    shift.y = ceilf(y0 - yi);
-    shift.z = ceilf(z0 - zi);
+    shift.x = (float)shx;
+    shift.y = (float)shy;
+    shift.z = (float)shz;
     xyz_shift[i] = shift;
-    float xf = (float)xi + shift.x;
-    float yf = (float)yi + shift.y;
-    float zf = (float)zi + shift.z;
+    double xf = xi + shx;
+    double yf = yi + shy;
+    double zf = zi + shz;
     // (xf, yf, zf) is in range (0...1)
     int iglo = loc2glo[i];
-    int loca = (xf >= lox && xf < hix) | ((yf >= loy && yf < hiy) << 1) | ((zf >= loz && zf < hiz) << 2);
+    int loca = (xf >= lox && xf < hix) | ((yf >= loy && yf < hiy) << 1) | 
+      ((zf >= loz && zf < hiz) << 2);
     coordLoc[iglo] = (char)loca;
   }
 }
 
 //
 // Re-order coordinates
+// x_dst[i] = x_src[ind_sorted[i]];
 //
 __global__ void reorder_coord_kernel(const int ncoord,
 				     const int* __restrict__ ind_sorted,
@@ -60,6 +65,7 @@ __global__ void reorder_coord_kernel(const int ncoord,
 
 //
 // Re-order xyz_shift
+// xyz_shift_out[i] = xyz_shift_in[ind_sorted[i]];
 //
 __global__ void reorder_xyz_shift_kernel(const int ncoord,
 					 const int* __restrict__ ind_sorted,
@@ -97,8 +103,8 @@ __global__ void reorder_mass_kernel(const int ncoord,
 //
 CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,
 		       int nx, int ny, int nz, int mynode, CudaMPI& cudaMPI) : 
-  Domdec(ncoord_glo, boxx, boxy, boxz, rnl, nx, ny, nz, mynode), homezone(*this, cudaMPI), 
-  D2Dcomm(*this, cudaMPI) {
+  Domdec(ncoord_glo, boxx, boxy, boxz, rnl, nx, ny, nz, mynode, cudaMPI.get_comm()),
+  homezone(*this, cudaMPI), D2Dcomm(*this, cudaMPI) {
 
   xyz_shift0_len = 0;
   xyz_shift0 = NULL;
@@ -166,13 +172,17 @@ void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStrea
     reallocate<float3>(&xyz_shift0, &xyz_shift0_len, this->get_ncoord_tot(), fac);
     reallocate<float3>(&xyz_shift1, &xyz_shift1_len, this->get_ncoord_tot(), fac);    
 
+    clear_gpu_array<char>(coordLoc, ncoord_glo, stream);
+
     nthread = 512;
     nblock = (this->get_ncoord_tot() - 1)/nthread + 1;
     calc_xyz_shift<<< nblock, nthread, 0, stream >>>
       (this->get_ncoord_tot(), coord.x(), coord.y(), coord.z(),
        x0, y0, z0, this->get_inv_boxx(), this->get_inv_boxy(), this->get_inv_boxz(),
        this->get_loc2glo_ptr(),
-       
+       this->get_lo_bx(), this->get_hi_bx(),
+       this->get_lo_by(), this->get_hi_by(),
+       this->get_lo_bz(), this->get_hi_bz(),
        xyz_shift0, coordLoc);
     cudaCheck(cudaGetLastError());
   }
@@ -196,23 +206,21 @@ void CudaDomdec::comm_force(Force<long long int>& force, cudaStream_t stream) {
 //
 // Re-order coordinates using ind_sorted: coord_src => coord_dst
 //
-void CudaDomdec::reorder_coord(cudaXYZ<double>& coord_src, cudaXYZ<double>& coord_dst,
-			       const int* ind_sorted, cudaStream_t stream) {
-  assert(coord_src.match(coord_dst));
-  assert(this->get_ncoord_tot() == coord_src.size());
+void CudaDomdec::reorder_homezone_coord(cudaXYZ<double>& coord_src, cudaXYZ<double>& coord_dst,
+					const int* ind_sorted, cudaStream_t stream) {
+  assert(this->get_ncoord() <= coord_src.size());
+  assert(this->get_ncoord() <= coord_dst.size());
 
-  if (numnode == 1) {
-    int nthread = 512;
-    int nblock = (this->get_ncoord_tot() - 1)/nthread + 1;
-    reorder_coord_kernel<<< nblock, nthread, 0, stream >>>
-      (this->get_ncoord_tot(), ind_sorted, coord_src.x(), coord_src.y(), coord_src.z(),
-       coord_dst.x(), coord_dst.y(), coord_dst.z());
-    cudaCheck(cudaGetLastError());
-  } else {
-    std::cerr << "CudaDomdec::reorder_coord, not ready for numnode > 1" << std::endl;
-    exit(1);
-  }
+  // Reorder: coord_src => coord_dst
+  int nthread = 512;
+  int nblock = (this->get_ncoord() - 1)/nthread + 1;
+  reorder_coord_kernel<<< nblock, nthread, 0, stream >>>
+    (this->get_ncoord(), ind_sorted, coord_src.x(), coord_src.y(), coord_src.z(),
+     coord_dst.x(), coord_dst.y(), coord_dst.z());
+  cudaCheck(cudaGetLastError());
 
+  // Copy: coord_dst => coord_src
+  coord_dst.set_data(this->get_ncoord(), coord_src, stream);
 }
 
 //
@@ -253,3 +261,4 @@ void CudaDomdec::reorder_mass(float *mass, const int* ind_sorted, cudaStream_t s
   copy_DtoD<float>(mass_tmp, mass, this->get_ncoord_tot(), stream);
 }
 */
+

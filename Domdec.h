@@ -2,6 +2,8 @@
 #define DOMDEC_H
 
 #include <cassert>
+#include <vector>
+#include <mpi.h>
 
 //
 // Base class for atom decompositors
@@ -9,16 +11,53 @@
 class Domdec {
 
 private:
+  // MPI communicator
+  MPI_Comm comm;
+
   // Number of coordinates in each zone
   // zone_ncoord[i] = number of coordinates in zone i
   // zone_pcoord[i] = zone i starting position in the coordinate arrays
   int zone_ncoord[8];
   int zone_pcoord[9];
 
+  // Fractional sizes of sub-boxes
+  std::vector<double> fx;
+  std::vector< std::vector<double> > fy;
+  std::vector< std::vector<std::vector<double> > > fz;
+
+  // Fractional borders of sub-boxes
+  std::vector<double> bx;
+  std::vector< std::vector<double> > by;
+  std::vector< std::vector<std::vector<double> > > bz;
+
   // Calculate zone_pcoord
   void update_zone_pcoord() {
     zone_pcoord[0] = 0;
     for (int i=1;i <= 8;i++) zone_pcoord[i] = zone_pcoord[i-1] + zone_ncoord[i-1];
+  }
+
+  // Calculates (bx, by, bz)
+  void update_bxyz() {
+    bx.at(0) = 0.0;
+    for (int ix=1;ix <= nx;ix++) {
+      bx.at(ix) = bx.at(ix-1) + fx.at(ix-1);
+    }
+
+    for (int ix=0;ix < nx;ix++) {
+      by.at(0).at(0) = 0.0;
+      for (int iy=1;iy <= ny;iy++) {
+	by.at(ix).at(iy) = by.at(ix).at(iy-1) + fy.at(ix).at(iy-1);
+      }
+    }
+
+    for (int ix=0;ix < nx;ix++) {
+      for (int iy=0;iy < ny;iy++) {
+	bz.at(0).at(0).at(0) = 0.0;
+	for (int iz=1;iz <= nz;iz++) {
+	  bz.at(ix).at(iy).at(iz) = bz.at(ix).at(iy).at(iz-1) + fz.at(ix).at(iy).at(iz-1);
+	}
+      }
+    }
   }
 
 protected:
@@ -51,20 +90,21 @@ protected:
   enum {I=0,FZ=1,FY=2,EX=3,FX=4,EZ=5,EY=6,C=7};
 
   Domdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,
-	 int nx, int ny, int nz, int mynode) : ncoord_glo(ncoord_glo),
-    boxx(boxx), boxy(boxy), boxz(boxz),
-    rnl(rnl), nx(nx), ny(ny), nz(nz), numnode(nx*ny*nz),
-    mynode(mynode) {
+	 int nx, int ny, int nz, int mynode, MPI_Comm comm);
 
-      // Setup (homeix, homeiy, homeiz)
-      int m = mynode;
-      homeiz = m/(nx*ny);
-      m -= homeiz*(nx*ny);
-      homeiy = m/nx;
-      m -= homeiy*nx;
-      homeix = m;
-
-    }
+  // Returns fractional boundaries for this node
+  double get_lo_bx() {return bx.at(homeix);}
+  double get_hi_bx() {return bx.at(homeix+1);}
+  double get_lo_by() {return by.at(homeix).at(homeiy);}
+  double get_hi_by() {return by.at(homeix).at(homeiy+1);}
+  double get_lo_bz() {return bz.at(homeix).at(homeiy).at(homeiz);}
+  double get_hi_bz() {return bz.at(homeix).at(homeiy).at(homeiz+1);}
+  double get_lo_bx() const {return bx.at(homeix);}
+  double get_hi_bx() const {return bx.at(homeix+1);}
+  double get_lo_by() const {return by.at(homeix).at(homeiy);}
+  double get_hi_by() const {return by.at(homeix).at(homeiy+1);}
+  double get_lo_bz() const {return bz.at(homeix).at(homeiy).at(homeiz);}
+  double get_hi_bz() const {return bz.at(homeix).at(homeiy).at(homeiz+1);}
 
   // Return the global total number of coordinates
   int get_ncoord_glo() {return ncoord_glo;}
@@ -144,23 +184,24 @@ protected:
 
   // Returns the node index for box (ix, iy, iz)
   // NOTE: deals correctly with periodic boundary conditions
-  int get_nodeind_pbc(const int ix, const int iy, const int iz) {
-    // ixt = 0...nx-1
-    //int ixt = (ix + (abs(ix)/nx)*nx) % nx;
-    //int iyt = (iy + (abs(iy)/ny)*ny) % ny;
-    //int izt = (iz + (abs(iz)/nz)*nz) % nz;
-    int ixt = ix;
-    while (ixt < 0) ixt += nx;
-    while (ixt >= nx) ixt -= nx;
-    int iyt = iy;
-    while (iyt < 0) iyt += ny;
-    while (iyt >= ny) iyt -= ny;
-    int izt = iz;
-    while (izt < 0) izt += nz;
-    while (izt >= nz) izt -= nz;
+  int get_nodeind_pbc(const int ix, const int iy, const int iz);
 
-    return ixt + iyt*nx + izt*nx*ny;
-  }
+  //
+  // Builds global loc2glo mapping:
+  // loc2glo_glo = mapping (size ncoord_glo)
+  // nrecv       = number of coordinates we receive from each node     (size numnode)
+  // precv       = exclusive cumulative sum of nrecv, used as postiion (size numnode)
+  //
+  void buildGlobal_loc2glo(int* loc2glo, int* loc2glo_glo, int* nrecv, int* precv);
+
+  //
+  // Combines data among all nodes using the global loc2glo mapping
+  // xrecvbuf = temporary receive buffer (size ncoord_glo)
+  // x        = send buffer (size ncoord)
+  // xglo     = final global buffer (size ncoord_glo)
+  //
+  void combineData(int* loc2glo_glo, int* nrecv, int* precv,
+		   double *xrecvbuf, double *x, double *xglo);
 
 };
 

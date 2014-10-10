@@ -164,8 +164,8 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
     } // for (int i=1;i < nz_comm;i++)
 
     // Compute byte positions
-    computeByteNumPos(nz_comm, z_nsend, nsend, psend, update);
-    if (pos != psend.at(nz_comm)) {
+    computeByteNumPos(nz_comm, z_nsend, nsendByte, psendByte, update);
+    if (pos != psendByte.at(nz_comm)) {
       std::cout << "CudaDomdecD2DComm::comm_coord, invalid pos (z)" << std::endl;
       exit(1);
     }
@@ -173,7 +173,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
     if (update) {
       // Re-allocate h_sendbuf if needed
       if (!cudaMPI.isCudaAware()) {
-	reallocate_host<char>(&h_sendbuf, &h_sendbuf_len, psend.at(nz_comm), 1.2f);
+	reallocate_host<char>(&h_sendbuf, &h_sendbuf_len, psendByte.at(nz_comm), 1.2f);
       }
       // Send & receive data counts
       for (int i=0;i < nz_comm;i++) {
@@ -187,13 +187,13 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
     }
 
     // Compute byte positions
-    computeByteNumPos(nz_comm, z_nrecv, nrecv, precv, update);
+    computeByteNumPos(nz_comm, z_nrecv, nrecvByte, precvByte, update);
 
     if (update) {
       // Re-allocate receive buffers
-      reallocate<char>(&recvbuf, &recvbuf_len, precv.at(nz_comm), 1.2f);
+      reallocate<char>(&recvbuf, &recvbuf_len, precvByte.at(nz_comm), 1.2f);
       if (!cudaMPI.isCudaAware()) {
-	reallocate_host<char>(&h_recvbuf, &h_recvbuf_len, precv.at(nz_comm), 1.2f);
+	reallocate_host<char>(&h_recvbuf, &h_recvbuf_len, precvByte.at(nz_comm), 1.2f);
       }
       z_recv_glo.resize(z_precv.at(nz_comm));
       coord.resize(domdec.get_ncoord()+z_precv.at(nz_comm));
@@ -203,19 +203,19 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 
     // Send & Recv data
     for (int i=0;i < nz_comm;i++) {
-      if (nsend.at(i) > 0 && nrecv.at(i) > 0) {
-	MPICheck(cudaMPI.Sendrecv(&sendbuf[psend.at(i)], nsend.at(i),
+      if (nsendByte.at(i) > 0 && nrecvByte.at(i) > 0) {
+	MPICheck(cudaMPI.Sendrecv(&sendbuf[psendByte.at(i)], nsendByte.at(i),
 				  z_send_node.at(i), DATA_TAG,
-				  &recvbuf[precv.at(i)], nrecv.at(i),
+				  &recvbuf[precvByte.at(i)], nrecvByte.at(i),
 				  z_recv_node.at(i), DATA_TAG, MPI_STATUS_IGNORE,
-				  &h_sendbuf[psend.at(i)], &h_recvbuf[precv.at(i)]));
-      } else if (nsend.at(i) > 0) {
-	MPICheck(cudaMPI.Send(&sendbuf[psend.at(i)], nsend.at(i),
-			      z_send_node.at(i), DATA_TAG, &h_sendbuf[psend.at(i)]));
-      } else if (nrecv.at(i) > 0) {
-	MPICheck(cudaMPI.Recv(&recvbuf[precv.at(i)], nrecv.at(i),
+				  &h_sendbuf[psendByte.at(i)], &h_recvbuf[precvByte.at(i)]));
+      } else if (nsendByte.at(i) > 0) {
+	MPICheck(cudaMPI.Send(&sendbuf[psendByte.at(i)], nsendByte.at(i),
+			      z_send_node.at(i), DATA_TAG, &h_sendbuf[psendByte.at(i)]));
+      } else if (nrecvByte.at(i) > 0) {
+	MPICheck(cudaMPI.Recv(&recvbuf[precvByte.at(i)], nrecvByte.at(i),
 			      z_recv_node.at(i), DATA_TAG, MPI_STATUS_IGNORE,
-			      &h_recvbuf[precv.at(i)]));
+			      &h_recvbuf[precvByte.at(i)]));
       }
     }    
 
@@ -223,10 +223,10 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
     // Unpack data from +z-direction into correct arrays
     //----------------------------------------------------
     for (int i=0;i < nz_comm;i++) {
-      int src_pos = precv.at(i);
+      int src_pos = precvByte.at(i);
       if (update) {
 	// Copy global indices to z_recv_glo
-	// format = indices[alignInt(nrecv.at(i),2) x int]
+	// format = indices[alignInt(z_nrecv.at(i),2) x int]
 	thrust::device_ptr<int> ind_ptr((int *)&recvbuf[src_pos]);
 	thrust::copy(ind_ptr, ind_ptr+z_nrecv.at(i), z_recv_glo.begin()+z_precv.at(i));
 	// Copy global indices to loc2glo
@@ -286,12 +286,19 @@ void CudaDomdecD2DComm::update(int* glo2loc, int* loc2loc) {
     z_recv_loc.resize(z_precv.at(nz_comm));
     z_send_loc.resize(z_psend.at(nz_comm));
     // Map: z_recv_glo => z_recv_loc
-    // z_recv_loc = glo2loc[z_recv_glo]
-    thrust::gather(z_recv_glo.begin(), z_recv_glo.end(), glo2loc_ptr, z_recv_loc.begin());
+    // z_recv_loc[i] = glo2loc[z_recv_glo[i]], for i=0,...,z_precv.at(nzcomm)-1
+    thrust::copy(thrust::make_permutation_iterator(glo2loc_ptr, z_recv_glo.begin()),
+		 thrust::make_permutation_iterator(glo2loc_ptr, z_recv_glo.end()),
+		 z_recv_loc.begin());
+    //thrust::gather(z_recv_glo.begin(), z_recv_glo.end(), glo2loc_ptr, z_recv_loc.begin());
     // Map: z_send_loc0 => z_send_loc
+    // z_send_loc = loc2loc[z_send_loc0]
     for (int i=0;i < nz_comm;i++) {
-      thrust::gather(z_send_loc0.at(i).begin(), z_send_loc0.at(i).begin(), loc2loc_ptr,
-		     z_send_loc.begin()+psend.at(i));
+      thrust::copy(thrust::make_permutation_iterator(loc2loc_ptr, z_send_loc0.at(i).begin()),
+		   thrust::make_permutation_iterator(loc2loc_ptr, z_send_loc0.at(i).end()),
+		   z_send_loc.begin()+z_psend.at(i));
+      //thrust::gather(z_send_loc0.at(i).begin(), z_send_loc0.at(i).begin(), loc2loc_ptr,
+      //z_send_loc.begin()+z_psend.at(i));
     }
   }
   
@@ -352,12 +359,28 @@ void CudaDomdecD2DComm::comm_force(Force<long long int>& force) {
     // format = X[z_nsend.at(i) x double] | Y[z_nsend.at(i) x double] | Z[z_nsend.at(i) x double]
     thrust::device_ptr<double> x_src_ptr(&psendbuf[3*z_psend.at(i)]);
     thrust::device_ptr<double> x_dst_ptr((double *)force.x());
-    thrust::permutation_iterator< thrust::device_vector<double>::iterator,
-				  thrust::device_vector<int>::iterator >
-      x_dst_iter(x_dst_ptr, z_send_loc.begin()+z_precv.at(i));
-    thrust::transform(x_src_ptr, x_src_ptr+z_nrecv.at(i),
-		      x_dst_iter, x_dst_iter, thrust::plus<double>());
+    //thrust::permutation_iterator< thrust::device_vector<double>::iterator,
+    //thrust::device_vector<int>::iterator >
+    //  x_dst_iter(x_dst_ptr, z_send_loc.begin()+z_precv.at(i));
+    //thrust::transform(x_src_ptr, x_src_ptr+z_nrecv.at(i),
+    //x_dst_iter, x_dst_iter, thrust::plus<double>());
 
+    /*
+    thrust::transform(x_src_ptr, x_src_ptr+z_nrecv.at(i),
+		      thrust::make_permutation_iterator(x_dst_ptr, z_send_loc.begin()+z_precv.at(i)),
+		      thrust::make_permutation_iterator(x_dst_ptr, z_send_loc.begin()+z_precv.at(i)),
+		      thrust::plus<double>());
+    */
+
+    thrust::copy(x_dst_ptr,
+		 x_dst_ptr+10,
+		 std::ostream_iterator<double>(std::cout, "\n"));
+
+    thrust::copy(z_send_loc.begin()+z_precv.at(i),
+		 z_send_loc.begin()+z_precv.at(i)+10,
+		 std::ostream_iterator<int>(std::cout, "\n"));
+
+    /*
     thrust::device_ptr<double> y_src_ptr(&psendbuf[3*z_psend.at(i) + z_nsend.at(i)]);
     thrust::device_ptr<double> y_dst_ptr((double *)force.y());
     thrust::permutation_iterator< thrust::device_vector<double>::iterator,
@@ -373,26 +396,26 @@ void CudaDomdecD2DComm::comm_force(Force<long long int>& force) {
       z_dst_iter(z_dst_ptr, z_send_loc.begin()+z_precv.at(i));
     thrust::transform(z_src_ptr, z_src_ptr+z_nrecv.at(i),
 		      z_dst_iter, z_dst_iter, thrust::plus<double>());
-
+    */
   }
 
 }
 
-void CudaDomdecD2DComm::computeByteNumPos(const int nc_comm, std::vector<int>& c_nsend,
-					  std::vector<int>& nsend, std::vector<int>& psend,
+void CudaDomdecD2DComm::computeByteNumPos(const int num_comm, std::vector<int>& ncomm,
+					  std::vector<int>& ncommByte, std::vector<int>& pcommByte,
 					  const bool update) {
-  nsend.resize(nc_comm);
-  psend.resize(nc_comm+1);
-  psend.at(0) = 0;
+  ncommByte.resize(num_comm);
+  pcommByte.resize(num_comm+1);
+  pcommByte.at(0) = 0;
   if (update) {
-    for (int i=0;i < nc_comm;i++) {
-      nsend.at(i) = alignInt(c_nsend.at(i),2)*sizeof(int) + c_nsend.at(i)*3*sizeof(double);
-      psend.at(i+1) = psend.at(i) + nsend.at(i);
+    for (int i=0;i < num_comm;i++) {
+      ncommByte.at(i) = alignInt(ncomm.at(i),2)*sizeof(int) + ncomm.at(i)*3*sizeof(double);
+      pcommByte.at(i+1) = pcommByte.at(i) + ncommByte.at(i);
     }
   } else {
-    for (int i=0;i < nc_comm;i++) {
-      nsend.at(i) = c_nsend.at(i)*3*sizeof(double);
-      psend.at(i+1) = psend.at(i) + nsend.at(i);
+    for (int i=0;i < num_comm;i++) {
+      ncommByte.at(i) = ncomm.at(i)*3*sizeof(double);
+      pcommByte.at(i+1) = pcommByte.at(i) + ncommByte.at(i);
     }
   }
 }

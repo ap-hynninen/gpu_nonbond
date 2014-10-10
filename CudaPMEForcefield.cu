@@ -119,8 +119,6 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecGroups& domde
   allocate<int>(&d_heuristic_flag, 1);
   allocate_host<int>(&h_heuristic_flag, 1);
 
-  h_loc2glo_len = 0;
-  h_loc2glo = NULL;
 }
 
 //
@@ -132,7 +130,6 @@ CudaPMEForcefield::~CudaPMEForcefield() {
   deallocate<float>(&glo_q);
   deallocate<int>(&glo_vdwtype);
   if (recip_force != NULL) deallocate<float3>(&recip_force);
-  if (h_loc2glo != NULL) delete [] h_loc2glo;
   // Destroy streams
   cudaCheck(cudaStreamDestroy(direct_stream[0]));
   cudaCheck(cudaStreamDestroy(direct_stream[1]));
@@ -185,6 +182,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Update homezone coordinates (coord) and step vector (prev_step)
     // NOTE: Builds domdec.loc2glo
     domdec.update_homezone(coord, prev_step);
+    ref_coord.realloc(domdec.get_ncoord());
 
     // Communicate coordinates
     // NOTE: Builds rest of domdec.loc2glo and domdec.xyz_shift
@@ -211,13 +209,10 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     nlist.build(domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), domdec.get_rnl(),
 		xyzq.xyzq, domdec.get_loc2glo_ptr());
     cudaCheck(cudaDeviceSynchronize());
-    //return;
-
-    //nlist.test_build(domdec.get_zone_pcoord(), domdec.get_boxx(), domdec.get_boxy(),
-    //domdec.get_boxz(), domdec.get_rnl(), xyzq.xyzq, domdec.get_loc2glo());
 
     // Build bonded tables
-    domdecGroups.build_tbl();
+    domdecGroups.buildGroupTables();
+    domdecGroups.syncGroupTables();
 
     // Setup bonded interaction lists
     bonded.setup_list(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
@@ -246,15 +241,13 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
 		    domdecGroups.getNumGroupTable(EX14), domdecGroups.getGroupTable(EX14),
 		    domdecGroups.getGroupList<xx14_t>(EX14));
 
-    // Re-order prev_step vector:
-    domdec.reorder_coord(prev_step, ref_coord, nlist.get_ind_sorted());
-    prev_step.set_data(ref_coord);
+    // Re-order prev_step vector
+    domdec.reorder_homezone_coord(prev_step, ref_coord, nlist.get_ind_sorted());
 
     // Re-order coordinates (coord) and copy to reference coordinates (ref_coord)
-    domdec.reorder_coord(coord, ref_coord, nlist.get_ind_sorted());
-    coord.set_data(ref_coord);
+    domdec.reorder_homezone_coord(coord, ref_coord, nlist.get_ind_sorted());
 
-    // Create 
+    // Update and re-order communication buffers
     domdec.comm_update(nlist.get_glo2loc(), nlist.get_ind_sorted());
 
   } else {
@@ -275,6 +268,9 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
 // Calculate forces
 //
 void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, Force<long long int>& force) {
+
+  // Re-allocate force
+  force.realloc(domdec.get_ncoord_tot());
 
   bool do_recipcomm = recipComm.get_hasPureRecip() || 
     (recipComm.get_num_recip() > 0  && recipComm.get_num_direct() > 1);
@@ -415,8 +411,7 @@ void CudaPMEForcefield::post_calc(const float *global_mass, float *mass, HoloCon
     // Re-order xyz_shift
     domdec.reorder_xyz_shift(nlist.get_ind_sorted());
 
-    // Re-order mass
-    //domdec.reorder_mass(mass, nlist.get_ind_sorted());
+    // Re-do mass array
     map_to_local_array<float>(domdec.get_ncoord(), domdec.get_loc2glo_ptr(), global_mass, mass);
 
     if (holoconst != NULL) {
@@ -523,35 +518,39 @@ void CudaPMEForcefield::print_energy_virial(int step) {
 //
 // Copies restart data into host buffers
 //
-void CudaPMEForcefield::get_restart_data(hostXYZ<double>& h_coord, hostXYZ<double>& h_step,
-					 hostXYZ<double>& h_force,
-					 double *x, double *y, double *z, double *dx, double *dy, double *dz,
+void CudaPMEForcefield::get_restart_data(cudaXYZ<double>& coord, cudaXYZ<double>& step,
+					 Force<long long int>& force,
+					 double *x, double *y, double *z,
+					 double *dx, double *dy, double *dz,
 					 double *fx, double *fy, double *fz) {
 
-  int ncoord = domdec.get_ncoord();
+  int* loc2glo = new int[domdec.get_ncoord()];
+  int* loc2glo_glo = new int[domdec.get_ncoord_glo()];
+  int* nrecv = new int[domdec.get_numnode()];
+  int* precv = new int[domdec.get_numnode()];
+  double* recvbuf = new double[domdec.get_ncoord_glo()];
+  hostXYZ<double> hXYZ(domdec.get_ncoord(), NON_PINNED);
 
-  if (h_loc2glo != NULL && h_loc2glo_len < ncoord) {
-    delete [] h_loc2glo;
-    h_loc2glo = NULL;
-    h_loc2glo_len = 0;
-  }
-  if (h_loc2glo == NULL) {
-    h_loc2glo_len = min(domdec.get_ncoord_glo(), (int)(ncoord*1.2));
-    h_loc2glo = new int[h_loc2glo_len];
-  }
-  copy_DtoH_sync<int>(domdec.get_loc2glo_ptr(), h_loc2glo, ncoord);
+  copy_DtoH_sync<int>(domdec.get_loc2glo_ptr(), loc2glo, domdec.get_ncoord());
+  domdec.buildGlobal_loc2glo(loc2glo, loc2glo_glo, nrecv, precv);
 
-  for (int i=0;i < ncoord;i++) {
-    int j = h_loc2glo[i];
-    x[j] = h_coord.x()[i];
-    y[j] = h_coord.y()[i];
-    z[j] = h_coord.z()[i];
-    dx[j] = h_step.x()[i];
-    dy[j] = h_step.y()[i];
-    dz[j] = h_step.z()[i];
-    fx[j] = h_force.x()[i];
-    fy[j] = h_force.y()[i];
-    fz[j] = h_force.z()[i];
-  }
+  hXYZ.set_data_sync(domdec.get_ncoord(), coord);
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, hXYZ.x(), x);
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, hXYZ.y(), y);
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, hXYZ.z(), z);
+  hXYZ.set_data_sync(domdec.get_ncoord(), step);
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, hXYZ.x(), dx);
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, hXYZ.y(), dy);
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, hXYZ.z(), dz);
+  hXYZ.set_data_sync(domdec.get_ncoord(), (double *)force.x(), (double *)force.y(), (double *)force.z());
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, hXYZ.x(), fx);
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, hXYZ.y(), fy);
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, hXYZ.z(), fz);
+
+  delete [] loc2glo;
+  delete [] loc2glo_glo;
+  delete [] nrecv;
+  delete [] precv;
+  delete [] recvbuf;
 
 }

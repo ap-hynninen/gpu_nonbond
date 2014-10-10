@@ -17,7 +17,7 @@ class CudaPMEForcefield : public CudaForcefield {
 
 private:
 
-  // Reference coordinates for neighborlist building
+  // Reference coordinates for neighborlist building (size ncoord)
   cudaXYZ<double> ref_coord;
 
   // true if neighborlist was updated in this call
@@ -33,10 +33,10 @@ private:
   // Global charge table
   float *glo_q;
 
-  // Coordinates in XYZQ format
+  // Coordinates in XYZQ format (size ncoord_tot)
   XYZQ xyzq;
 
-  // Coordinates in XYZQ format
+  // Coordinates in XYZQ format (size ncoord_tot)
   XYZQ xyzq_copy;
 
   // --------------
@@ -73,10 +73,6 @@ private:
   // ---------------------
   CudaDomdec& domdec;
   CudaDomdecGroups& domdecGroups;
-
-  // Host version of loc2glo
-  int h_loc2glo_len;
-  int *h_loc2glo;
 
   // ---------------------
   // Energies and virials
@@ -168,10 +164,12 @@ public:
 
   void assignCoordToNodes(hostXYZ<double>& coord, std::vector<int>& h_loc2glo);
 
-  void get_restart_data(hostXYZ<double>& h_coord, hostXYZ<double>& h_step, hostXYZ<double>& h_force,
-			double *x, double *y, double *z, double *dx, double *dy, double *dz,
+  void get_restart_data(cudaXYZ<double>& coord, cudaXYZ<double>& step,
+			Force<long long int>& force,
+			double *x, double *y, double *z,
+			double *dx, double *dy, double *dz,
 			double *fx, double *fy, double *fz);
-  
+
   void print_energy_virial(int step);
 };
 

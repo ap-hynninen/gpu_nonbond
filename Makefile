@@ -58,7 +58,7 @@ OBJS_CONST = cuda_utils.o gpu_const.o HoloConst.o
 OBJS_DYNA = cuda_utils.o gpu_dyna.o Force.o reduce.o CudaLeapfrogIntegrator.o CudaPMEForcefield.o \
 	NeighborList.o CudaPMEDirectForce.o BondedForce.o Grid.o Matrix3d.o XYZQ.o CudaDomdec.o \
 	CudaDomdecGroups.o HoloConst.o CudaDomdecHomezone.o CudaMPI.o mpi_utils.o CudaDomdecD2DComm.o \
-	DomdecD2DComm.o DomdecRecipComm.o CudaDomdecRecipComm.o CudaDomdecRecipLooper.o
+	DomdecD2DComm.o DomdecRecipComm.o CudaDomdecRecipComm.o CudaDomdecRecipLooper.o Domdec.o
 
 OBJS_TRANSPOSE = cpu_transpose.o mpi_utils.o CpuMultiNodeMatrix3d.o CpuMatrix3d.o
 

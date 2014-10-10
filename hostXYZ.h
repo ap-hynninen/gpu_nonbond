@@ -118,6 +118,17 @@ public:
     copy_DtoH_sync<T>((T *)xyz.z(), this->_z, this->_size);
   }
 
+  // Sets first n elements in data from cudaXYZ object with sync
+  template <typename P>
+  void set_data_sync(const int n, cudaXYZ<P> &xyz) {
+    assert(sizeof(T) == sizeof(P));
+    assert(n <= this->_size);
+    assert(n <= xyz.size());
+    copy_DtoH_sync<T>((T *)xyz.x(), this->_x, n);
+    copy_DtoH_sync<T>((T *)xyz.y(), this->_y, n);
+    copy_DtoH_sync<T>((T *)xyz.z(), this->_z, n);
+  }
+
   // Sets data from device arrays
   void set_data_sync(const int size, const T *d_x, const T *d_y, const T *d_z) {
     assert(size == this->_size);

@@ -84,6 +84,16 @@ public:
     copy_DtoD<T>((T *)xyz._z, this->_z, this->_size, stream);
   }
 
+  // Sets n first entries of data from cudaXYZ
+  template <typename P>
+  void set_data(const int n, cudaXYZ<P> &xyz, cudaStream_t stream=0) {
+    assert(n <= this->_size);
+    assert(n <= xyz._size);
+    copy_DtoD<T>((T *)xyz._x, this->_x, n, stream);
+    copy_DtoD<T>((T *)xyz._y, this->_y, n, stream);
+    copy_DtoD<T>((T *)xyz._z, this->_z, n, stream);
+  }
+
   // Sets data from cudaXYZ synchroniously
   template <typename P>
   void set_data_sync(cudaXYZ<P> &xyz) {

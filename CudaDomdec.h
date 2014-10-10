@@ -70,8 +70,8 @@ class CudaDomdec : public Domdec {
   void comm_update(int* glo2loc, int* loc2loc, cudaStream_t stream=0);
   void comm_force(Force<long long int>& force, cudaStream_t stream=0);
 
-  void reorder_coord(cudaXYZ<double>& coord_src, cudaXYZ<double>& coord_dst,
-		     const int* ind_sorted, cudaStream_t stream=0);
+  void reorder_homezone_coord(cudaXYZ<double>& coord_src, cudaXYZ<double>& coord_dst,
+			      const int* ind_sorted, cudaStream_t stream=0);
 
   void reorder_xyz_shift(const int* ind_sorted, cudaStream_t stream=0);
 
