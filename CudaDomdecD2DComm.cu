@@ -131,7 +131,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	// Re-allocate sendbuf if needed
 	int req_sendbuf_len = pos + alignInt(z_nsend.at(i),2)*sizeof(int) + 
 	  z_nsend.at(i)*3*sizeof(double);
-	reallocate<char>(&sendbuf, &sendbuf_len, req_sendbuf_len, 1.5f);
+	resize<char>(&sendbuf, &sendbuf_len, req_sendbuf_len, 1.5f);
 
 	// Get int pointer to sendbuf
 	thrust::device_ptr<int> sendbuf_ind_ptr((int *)&sendbuf[pos]);
@@ -274,14 +274,13 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 // Updates (z_recv_loc)
 // Called after neighborlist update
 // glo2loc = global -> local mapping
-// loc2loc = local -> local re-indexing (this happens at neighborlist build)
 //
-void CudaDomdecD2DComm::update(int* glo2loc, int* loc2loc) {
-
+void CudaDomdecD2DComm::comm_update(int* glo2loc) {
   thrust::device_ptr<int> glo2loc_ptr(glo2loc);
-  thrust::device_ptr<int> loc2loc_ptr(loc2loc);
-  
+
   if (nz_comm > 0) {
+    // Compute byte positions
+    computeByteNumPos(nz_comm, z_nsend, nsendByte, psendByte, true);
     // Re-allocate
     z_recv_loc.resize(z_precv.at(nz_comm));
     z_send_loc.resize(z_psend.at(nz_comm));
@@ -290,18 +289,16 @@ void CudaDomdecD2DComm::update(int* glo2loc, int* loc2loc) {
     thrust::copy(thrust::make_permutation_iterator(glo2loc_ptr, z_recv_glo.begin()),
 		 thrust::make_permutation_iterator(glo2loc_ptr, z_recv_glo.end()),
 		 z_recv_loc.begin());
-    //thrust::gather(z_recv_glo.begin(), z_recv_glo.end(), glo2loc_ptr, z_recv_loc.begin());
-    // Map: z_send_loc0 => z_send_loc
-    // z_send_loc = loc2loc[z_send_loc0]
     for (int i=0;i < nz_comm;i++) {
-      thrust::copy(thrust::make_permutation_iterator(loc2loc_ptr, z_send_loc0.at(i).begin()),
-		   thrust::make_permutation_iterator(loc2loc_ptr, z_send_loc0.at(i).end()),
+      // Map:
+      // z_send_loc = glo2loc[z_send_glo]
+      // z_send_glo is in sendbuf[psendByte.at(i)]
+      thrust::device_ptr<int> z_send_glo((int *)&sendbuf[psendByte.at(i)]);
+      thrust::copy(thrust::make_permutation_iterator(glo2loc_ptr, z_send_glo),
+		   thrust::make_permutation_iterator(glo2loc_ptr, z_send_glo+z_nsend.at(i)),
 		   z_send_loc.begin()+z_psend.at(i));
-      //thrust::gather(z_send_loc0.at(i).begin(), z_send_loc0.at(i).begin(), loc2loc_ptr,
-      //z_send_loc.begin()+z_psend.at(i));
     }
   }
-  
 }
 
 //

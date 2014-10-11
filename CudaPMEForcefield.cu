@@ -248,7 +248,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     domdec.reorder_homezone_coord(coord, ref_coord, nlist.get_ind_sorted());
 
     // Update and re-order communication buffers
-    domdec.comm_update(nlist.get_glo2loc(), nlist.get_ind_sorted());
+    domdec.comm_update(nlist.get_glo2loc());
 
   } else {
     neighborlist_updated = false;

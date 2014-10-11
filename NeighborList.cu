@@ -2165,47 +2165,42 @@ bool NeighborList<tilesize>::test_z_columns(const int* zone_patom,
   int izone, i, j;
   float x, y, xj, yj;
   int ix, iy, ind, lo_ind, hi_ind;
-  try {
-    int ind0 = 0;
-    for (izone=0;izone < 8;izone++) {
-      int istart = zone_patom[izone];
-      int iend   = zone_patom[izone+1] - 1;
-      if (iend >= istart) {
-	float x0 = min_xyz[izone].x;
-	float y0 = min_xyz[izone].y;
-	for (i=istart;i <= iend;i++) {
-	  x = h_xyzq_sorted[i].x;
-	  y = h_xyzq_sorted[i].y;
-	  ix = (int)((x - x0)/celldx[izone]);
-	  iy = (int)((y - y0)/celldy[izone]);
-	  ind = ind0 + ix + iy*ncellx[izone];
-	  lo_ind = h_col_patom[ind];
-	  hi_ind = h_col_patom[ind+1] - 1;
-	  if (i < lo_ind || i > hi_ind) throw 1;
+  int ind0 = 0;
+  for (izone=0;izone < 8;izone++) {
+    int istart = zone_patom[izone];
+    int iend   = zone_patom[izone+1] - 1;
+    if (iend >= istart) {
+      float x0 = min_xyz[izone].x;
+      float y0 = min_xyz[izone].y;
+      for (i=istart;i <= iend;i++) {
+	x = h_xyzq_sorted[i].x;
+	y = h_xyzq_sorted[i].y;
+	ix = (int)((x - x0)/celldx[izone]);
+	iy = (int)((y - y0)/celldy[izone]);
+	ind = ind0 + ix + iy*ncellx[izone];
+	lo_ind = h_col_patom[ind];
+	hi_ind = h_col_patom[ind+1] - 1;
+	if (i < lo_ind || i > hi_ind) {
+	  std::cout << "test_z_columns FAILED at i=" << i << std::endl;
+	  std::cout << "ind, lo_ind, hi_ind = " << ind << " " << lo_ind << " " << hi_ind << std::endl;
+	  exit(1);
 	}
-	for (i=istart;i <= iend;i++) {
-	  j = h_ind_sorted[i];
-	  x = h_xyzq_sorted[i].x;
-	  y = h_xyzq_sorted[i].y;
-	  xj = h_xyzq[j].x;
-	  yj = h_xyzq[j].y;
-	  if (x != xj || y != yj) {
-	    throw 2;
-	  }
-	}
-	ind0 += ncellx[izone]*ncelly[izone];
       }
+      for (i=istart;i <= iend;i++) {
+	j = h_ind_sorted[i];
+	x = h_xyzq_sorted[i].x;
+	y = h_xyzq_sorted[i].y;
+	xj = h_xyzq[j].x;
+	yj = h_xyzq[j].y;
+	if (x != xj || y != yj) {
+	  std::cout << "test_z_columns FAILED at i=" << i << std::endl;
+	  std::cout << "x,y   =" << x << " " << y << std::endl;
+	  std::cout << "xj,yj =" << xj << " " << yj << std::endl;
+	  exit(1);
+	}
+      }
+      ind0 += ncellx[izone]*ncelly[izone];
     }
-  }
-  catch (int a) {
-    std::cout << "test_z_columns FAILED at i=" << i << std::endl;
-    if (a == 1) {
-      std::cout << "ind, lo_ind, hi_ind = " << ind << " " << lo_ind << " " << hi_ind << std::endl;
-    } else if (a == 2) {
-      std::cout << "x,y   =" << x << " " << y << std::endl;
-      std::cout << "xj,yj =" << xj << " " << yj << std::endl;
-    }
-    ok = false;
   }
 
   if (ok) std::cout << "test_z_columns OK" << std::endl;
@@ -2243,82 +2238,78 @@ bool NeighborList<tilesize>::test_sort(const int* zone_patom,
   copy_DtoH_sync<int>(cell_patom, h_cell_patom, ncell_max);
 
   bool ok = true;
-
+  
   int izone, i, j, k, prev_ind;
   float x, y, z, prev_z;
   float xj, yj, zj;
   int ix, iy, ind, lo_ind, hi_ind;
-  try {
 
-    k = 0;
-    for (i=1;i < ncol_tot+1;i++) {
-      for (j=h_col_patom[i-1];j < h_col_patom[i];j+=32) {
-	if (j != h_cell_patom[k]) throw 4;
-	k++;
+  k = 0;
+  for (i=1;i < ncol_tot+1;i++) {
+    for (j=h_col_patom[i-1];j < h_col_patom[i];j+=32) {
+      if (j != h_cell_patom[k]) {
+	std::cout << "test_sort FAILED at i=" << i << std::endl;
+	std::cout << "j,k=" << j << " " << k << "cell_patom[k]=" << h_cell_patom[k] << std::endl;
+	exit(1);
       }
+      k++;
     }
-
-    int ind0 = 0;
-    for (izone=0;izone < 8;izone++) {
-      int istart = zone_patom[izone];
-      int iend   = zone_patom[izone+1] - 1;
-      if (iend >= istart) {
-	float x0 = min_xyz[izone].x;
-	float y0 = min_xyz[izone].y;
-	prev_z = min_xyz[izone].z;
-	prev_ind = ind0;
-	for (i=istart;i <= iend;i++) {
-	  x = h_xyzq_sorted[i].x;
-	  y = h_xyzq_sorted[i].y;
-	  z = h_xyzq_sorted[i].z;
+  }
+  int ind0 = 0;
+  for (izone=0;izone < 8;izone++) {
+    int istart = zone_patom[izone];
+    int iend   = zone_patom[izone+1] - 1;
+    if (iend >= istart) {
+      float x0 = min_xyz[izone].x;
+      float y0 = min_xyz[izone].y;
+      prev_z = min_xyz[izone].z;
+      prev_ind = ind0;
+      for (i=istart;i <= iend;i++) {
+	x = h_xyzq_sorted[i].x;
+	y = h_xyzq_sorted[i].y;
+	z = h_xyzq_sorted[i].z;
 	  
-	  ix = (int)((x - x0)/celldx[izone]);
-	  iy = (int)((y - y0)/celldy[izone]);
-	  ind = ind0 + ix + iy*ncellx[izone];
+	ix = (int)((x - x0)/celldx[izone]);
+	iy = (int)((y - y0)/celldy[izone]);
+	ind = ind0 + ix + iy*ncellx[izone];
 
-	  if (prev_ind != ind) {
-	    prev_z = min_xyz[izone].z;
-	  }
-
-	  lo_ind = h_col_patom[ind];
-	  hi_ind = h_col_patom[ind+1] - 1;
-	  if (i < lo_ind || i > hi_ind) throw 1;
-	  if (z < prev_z) throw 2;
-	  prev_z = z;
-	  prev_ind = ind;
+	if (prev_ind != ind) {
+	  prev_z = min_xyz[izone].z;
 	}
 
-	for (i=istart;i <= iend;i++) {
-	  j = h_ind_sorted[i];
-	  x = h_xyzq_sorted[i].x;
-	  y = h_xyzq_sorted[i].y;
-	  z = h_xyzq_sorted[i].z;
-	  xj = h_xyzq[j].x;
-	  yj = h_xyzq[j].y;
-	  zj = h_xyzq[j].z;
-	  if (x != xj || y != yj || z != zj) throw 3;
-	}	
-
-	ind0 += ncellx[izone]*ncelly[izone];
+	lo_ind = h_col_patom[ind];
+	hi_ind = h_col_patom[ind+1] - 1;
+	if (i < lo_ind || i > hi_ind) {
+	  std::cout << "test_sort FAILED at i=" << i << std::endl;
+	  std::cout << "ind, lo_ind, hi_ind = " << ind << " " << lo_ind << " " << hi_ind << std::endl;
+	  exit(1);
+	}
+	if (z < prev_z) {
+	  std::cout << "test_sort FAILED at i=" << i << std::endl;
+	  std::cout << "prev_z, z = " << prev_z << " " << z << std::endl;
+	  exit(1);
+	}
+	prev_z = z;
+	prev_ind = ind;
       }
+      
+      for (i=istart;i <= iend;i++) {
+	j = h_ind_sorted[i];
+	x = h_xyzq_sorted[i].x;
+	y = h_xyzq_sorted[i].y;
+	z = h_xyzq_sorted[i].z;
+	xj = h_xyzq[j].x;
+	yj = h_xyzq[j].y;
+	zj = h_xyzq[j].z;
+	if (x != xj || y != yj || z != zj) {
+	  std::cout << "test_sort FAILED at i=" << i << std::endl;
+	  std::cout << "x,y,z   =" << x << " " << y << " " << z << std::endl;
+	  std::cout << "xj,yj,zj=" << xj << " " << yj << " " << zj << std::endl;
+	  exit(1);
+	}
+      }
+      ind0 += ncellx[izone]*ncelly[izone];
     }
-  }
-  catch (int a) {
-    std::cout << "test_sort FAILED at i=" << i << std::endl;
-    if (a == 1) {
-      std::cout << "ind, lo_ind, hi_ind = " << ind << " " << lo_ind << " " << hi_ind << std::endl;
-    } else if (a == 2) {
-      std::cout << "prev_z, z = " << prev_z << " " << z << std::endl;
-    } else if (a == 3) {
-      std::cout << "x,y,z   =" << x << " " << y << " " << z << std::endl;
-      std::cout << "xj,yj,zj=" << xj << " " << yj << " " << zj << std::endl;
-    } else if (a == 4) {
-      std::cout << "j,k=" << j << " " << k << "cell_patom[k]=" << h_cell_patom[k] << std::endl;
-    }
-    ok = false;
-  }
-  catch(...) {
-    std::cout << "default catch" << std::endl;
   }
 
   if (ok) std::cout << "test_sort OK" << std::endl;

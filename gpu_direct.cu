@@ -129,6 +129,7 @@ void test() {
   delete [] h_loc2glo;
 
   NeighborList<32> nlist(ncoord, iblo14, inb14);
+  nlist.set_test(true);
   //nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
   nlist.sort(zone_patom, xyzq_unsorted.xyzq, xyzq_sorted.xyzq, loc2glo);
   nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq, loc2glo);

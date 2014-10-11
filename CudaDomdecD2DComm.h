@@ -22,7 +22,8 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
   // Local indices that we send
   // Initial version
   std::vector< thrust::device_vector<int> > z_send_loc0;
-  // Final version, built after neighborlist has re-ordered coordinates
+
+  // Local indices that we send to -z direction
   thrust::device_vector<int> z_send_loc;  
 
   // Local indices that we receive from +z direction
@@ -69,7 +70,7 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
 
   void comm_coord(cudaXYZ<double>& coord, thrust::device_vector<int>& loc2glo,
 		  const bool update);
-  void update(int* glo2loc, int* loc2loc);
+  void comm_update(int* glo2loc);
   void comm_force(Force<long long int>& force);
 };
 
