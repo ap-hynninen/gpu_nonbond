@@ -213,6 +213,8 @@ public:
 			 double *energy_dihe, double *energy_imdihe,
 			 double *energy_cmap,
 			 double *sforcex, double *sforcey, double *sforcez);
+
+  void print();
 };
 
 #endif // BONDEDFORCE_H

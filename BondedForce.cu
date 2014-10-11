@@ -1,4 +1,6 @@
 #include <iostream>
+#include <iomanip>
+#include <cmath>
 #include <cassert>
 #include <cuda.h>
 #include "cuda_utils.h"
@@ -1137,6 +1139,36 @@ void BondedForce<AT, CT>::setup_list(const float4 *xyzq,
 }
 
 //
+// Print info
+//
+template <typename AT, typename CT>
+void BondedForce<AT, CT>::print() {
+  int maxnum = nbondlist;
+  maxnum = std::max(maxnum, nureyblist);
+  maxnum = std::max(maxnum, nanglelist);
+  maxnum = std::max(maxnum, ndihelist);
+  maxnum = std::max(maxnum, nimdihelist);
+  maxnum = std::max(maxnum, ncmaplist);
+  maxnum = std::max(maxnum, nbondcoef);
+  maxnum = std::max(maxnum, nureybcoef);
+  maxnum = std::max(maxnum, nanglecoef);
+  maxnum = std::max(maxnum, ndihecoef);
+  maxnum = std::max(maxnum, nimdihecoef);
+  maxnum = std::max(maxnum, ncmapcoef);
+  int maxw = (int)log10(maxnum+1) + 2;
+  std::cout << "BOND:   " << std::setw(maxw) << nbondlist << " "
+	    << std::setw(maxw) << nbondcoef << std::endl;
+  std::cout << "UREYB:  " << std::setw(maxw) << nureyblist << " "
+	    << std::setw(maxw) << nureybcoef << std::endl;
+  std::cout << "ANGLE:  " << std::setw(maxw) << nanglelist << " "
+	    << std::setw(maxw) << nanglecoef << std::endl;
+  std::cout << "DIHE:   " << std::setw(maxw) << ndihelist << " "
+	    << std::setw(maxw) << ndihecoef << std::endl;
+  std::cout << "IMDIHE: " << std::setw(maxw) << nimdihelist << " "
+	    << std::setw(maxw) << nimdihecoef << std::endl;
+}
+
+//
 // Calculates forces
 //
 template <typename AT, typename CT>
@@ -1237,7 +1269,8 @@ void BondedForce<AT, CT>::calc_force(const float4 *xyzq,
     
     nthread = 512;
     nblock = (nbondlist_loc + nureyblist_loc + nanglelist_loc + 
-	      ndihelist_loc + nimdihelist_loc -1)/nthread + 1;      
+	      ndihelist_loc + nimdihelist_loc -1)/nthread + 1;
+    
     calc_all_forces_kernel<AT, CT, false, false>
       <<< nblock, nthread, shmem_size, stream>>>
       (nbondlist_loc, bondlist, bondcoef,

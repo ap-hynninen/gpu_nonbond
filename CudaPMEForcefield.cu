@@ -213,7 +213,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Build bonded tables
     domdecGroups.buildGroupTables();
     domdecGroups.syncGroupTables();
-
+    
     // Setup bonded interaction lists
     bonded.setup_list(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
 		      nlist.get_glo2loc(),
@@ -241,10 +241,10 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
 		    domdecGroups.getNumGroupTable(EX14), domdecGroups.getGroupTable(EX14),
 		    domdecGroups.getGroupList<xx14_t>(EX14));
 
-    // Re-order prev_step vector
+    // Re-order prev_step vector, using ref_coord as temporary storage
     domdec.reorder_homezone_coord(prev_step, ref_coord, nlist.get_ind_sorted());
 
-    // Re-order coordinates (coord) and copy to reference coordinates (ref_coord)
+    // Re-order coordinates (coord), using ref_coord as temporary storage
     domdec.reorder_homezone_coord(coord, ref_coord, nlist.get_ind_sorted());
 
     // Update and re-order communication buffers
@@ -326,15 +326,15 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   //cudaCheck(cudaDeviceSynchronize());
   cudaCheck(cudaStreamWaitEvent(in14_stream, done_force_clear_event, 0));
   dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force.stride(), force.xyz(),
-		    in14_stream);
+  		    in14_stream);
   cudaCheck(cudaEventRecord(done_in14_event, in14_stream));
 
   // Bonded forces
   cudaCheck(cudaStreamWaitEvent(bonded_stream, done_force_clear_event, 0));
   bonded.calc_force(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
-  		    calc_energy, calc_virial, force.stride(), force.xyz(),
-		    calc_bond, calc_ureyb, calc_angle, calc_dihe, calc_imdihe, calc_cmap,
-		    bonded_stream);
+    		    calc_energy, calc_virial, force.stride(), force.xyz(),
+  		    calc_bond, calc_ureyb, calc_angle, calc_dihe, calc_imdihe, calc_cmap,
+  		    bonded_stream);
   cudaCheck(cudaEventRecord(done_bonded_event, bonded_stream));
 
   // Reciprocal force (Only reciprocal nodes calculate this)
@@ -467,7 +467,7 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double>& coord, cudaStream
   float rsq_limit = (float)rsq_limit_dbl;
 
   int nthread = 512;
-  int nblock = (ref_coord.size() - 1)/nthread + 1;
+  int nblock = (domdec.get_ncoord() - 1)/nthread + 1;
 
   int shmem_size = (nthread/warpsize)*sizeof(int);
 
@@ -475,7 +475,8 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double>& coord, cudaStream
   copy_HtoD<int>(h_heuristic_flag, d_heuristic_flag, 1, stream);
 
   heuristic_check_kernel<<< nblock, nthread, shmem_size, stream >>>
-    (coord.size(), coord.x(), coord.y(), coord.z(), ref_coord.x(), ref_coord.y(), ref_coord.z(),
+    (domdec.get_ncoord(), coord.x(), coord.y(), coord.z(),
+     ref_coord.x(), ref_coord.y(), ref_coord.z(),
      rsq_limit, d_heuristic_flag);
 
   cudaCheck(cudaGetLastError());

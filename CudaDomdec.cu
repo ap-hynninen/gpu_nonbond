@@ -215,12 +215,13 @@ void CudaDomdec::reorder_homezone_coord(cudaXYZ<double>& coord_src, cudaXYZ<doub
   int nthread = 512;
   int nblock = (this->get_ncoord() - 1)/nthread + 1;
   reorder_coord_kernel<<< nblock, nthread, 0, stream >>>
-    (this->get_ncoord(), ind_sorted, coord_src.x(), coord_src.y(), coord_src.z(),
+    (this->get_ncoord(), ind_sorted,
+     coord_src.x(), coord_src.y(), coord_src.z(),
      coord_dst.x(), coord_dst.y(), coord_dst.z());
   cudaCheck(cudaGetLastError());
 
-  // Copy: coord_dst => coord_src
-  coord_dst.set_data(this->get_ncoord(), coord_src, stream);
+  // Copy: coord_src = coord_dst
+  coord_src.set_data(this->get_ncoord(), coord_dst, stream);
 }
 
 //

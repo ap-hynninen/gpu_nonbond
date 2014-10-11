@@ -12,7 +12,7 @@
 
 int numnode=1, mynode=0;
 
-void test();
+void test(const int nstep);
 
 int main(int argc, char *argv[]) {
 
@@ -28,7 +28,12 @@ int main(int argc, char *argv[]) {
     start_gpu(1, mynode);
   }
 
-  test();
+  int nstep = 1;
+  if (argc == 2) {
+    sscanf(argv[1],"%d",&nstep);
+  }
+
+  test(nstep);
 
   stop_mpi();
   stop_gpu();
@@ -245,7 +250,7 @@ void check_holoconst(const double* x, const double* y, const double* z,
 //
 // Test the code using data in test_data/ -directory
 //
-void test() {
+void test(const int nstep) {
 
   // Settings for the data:
   const double boxx = 62.23;
@@ -557,7 +562,6 @@ void test() {
     leapfrog.set_step_buffers(dx, dy, dz);
     leapfrog.set_force_buffers(fx, fy, fz);
     leapfrog.set_timestep(2.0);
-    int nstep = 1;
     leapfrog.run(nstep);
 
     if (nstep == 100 || (nstep == 1 && !holoconst_on)) {

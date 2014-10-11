@@ -42,7 +42,7 @@ __global__ void buildGroupTable_kernel(const int ncoord,
       // Group index
       int bi  = groupData[j++];
       int loc_or = 0;
-      int loc_and = 0;
+      int loc_and = 7;
       for (int k=0;k < size;k++) {
 	int icoord = groupData[j++];
 	int loc = (int)coordLoc[icoord];
@@ -149,7 +149,6 @@ void CudaDomdecGroups::finishGroups() {
 void CudaDomdecGroups::buildGroupTables(cudaStream_t stream) {
 
   if (domdec.get_numnode() > 1 || !tbl_upto_date) {
-    
     clear_gpu_array<int>(groupTablePos, atomGroups.size(), stream);
 
     int nthread = 512;
@@ -160,7 +159,6 @@ void CudaDomdecGroups::buildGroupTables(cudaStream_t stream) {
     cudaCheck(cudaGetLastError());
 
     copy_DtoH<int>(groupTablePos, h_groupTablePos, atomGroups.size(), stream);
-
   }
 }
 
