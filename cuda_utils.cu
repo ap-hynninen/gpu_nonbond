@@ -140,7 +140,7 @@ void reallocate_T(void **pp, int *curlen, const int newlen, const float fac, con
 void resize_T(void **pp, int *curlen, const int cur_size, const int new_size,
 	      const float fac, const size_t sizeofT) {
 
-  void *old = NULL;
+  void *old = NULL;  
 
   if (*pp != NULL && *curlen < new_size) {
     allocate_T(&old, cur_size, sizeofT);
@@ -159,6 +159,7 @@ void resize_T(void **pp, int *curlen, const int cur_size, const int new_size,
     allocate_T(pp, *curlen, sizeofT);
     if (old != NULL) {
       copy_DtoD_T(old, *pp, cur_size, sizeofT);
+      cudaCheck(cudaDeviceSynchronize());       //Make sure D-D copy is done
       deallocate_T(&old);
     }
   }

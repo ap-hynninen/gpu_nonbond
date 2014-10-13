@@ -176,7 +176,7 @@ void reallocate(T **pp, int *curlen, const int newlen, const float fac=1.0f) {
 //
 #ifdef __cplusplus
 template <class T>
-void resize(T **pp, int *curlen, const int cur_size, const int new_size, const float fac=1.0f) {
+void resize(T **pp, int *curlen, const int cur_size, const int new_size, const float fac) {
   resize_T((void **)pp, curlen, cur_size, new_size, fac, sizeof(T));
 }
 #endif

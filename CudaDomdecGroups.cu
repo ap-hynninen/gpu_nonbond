@@ -49,6 +49,7 @@ __global__ void buildGroupTable_kernel(const int ncoord,
 	loc_or |= loc;
 	loc_and &= loc;
       }
+      // loc_and == 0: this node does not have all the coordinates
       // 7 = binary 111
       if (loc_or == 7 && loc_and != 0) {
 	int p = atomicAdd(&groupTablePos[type], 1);
@@ -94,6 +95,8 @@ CudaDomdecGroups::~CudaDomdecGroups() {
 void CudaDomdecGroups::beginGroups() {
   regGroups.clear();
   regGroups.resize(domdec.get_ncoord_glo());
+  atomGroups.clear();
+  atomGroupVector.clear();
 }
 
 //
@@ -101,6 +104,7 @@ void CudaDomdecGroups::beginGroups() {
 //
 void CudaDomdecGroups::finishGroups() {
   h_groupTable.reserve(atomGroups.size());
+  atomGroupVector.reserve(atomGroups.size());
   for (std::map<int, AtomGroupBase*>::iterator it=atomGroups.begin();it != atomGroups.end();it++) {
     // Set table size to maximum possible = number of entries in the list
     // This makes a big list but avoid possible overflow
@@ -110,6 +114,7 @@ void CudaDomdecGroups::finishGroups() {
     p->resizeTable(p->get_numGroupList());
     p->set_numTable(p->get_numGroupList());
     h_groupTable.push_back(p->get_table());
+    atomGroupVector.push_back(p);
   }
   allocate<int*>(&groupTable, atomGroups.size());
   copy_HtoD_sync<int*>(h_groupTable.data(), groupTable, atomGroups.size());

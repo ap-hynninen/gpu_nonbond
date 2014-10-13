@@ -20,9 +20,9 @@ __global__ void calc_xyz_shift(const int ncoord,
 			       char* __restrict__ coordLoc) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
   if (i < ncoord) {
-    double xi = x[i]*inv_boxx;
-    double yi = y[i]*inv_boxy;
-    double zi = z[i]*inv_boxz;
+    double xi = x[i]*inv_boxx + 0.5;
+    double yi = y[i]*inv_boxy + 0.5;
+    double zi = z[i]*inv_boxz + 0.5;
     double shx = ceil(x0 - xi);
     double shy = ceil(y0 - yi);
     double shz = ceil(z0 - zi);

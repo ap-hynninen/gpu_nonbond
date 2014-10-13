@@ -4,6 +4,7 @@
 #include <cassert>
 #include <vector>
 #include <mpi.h>
+#include "AtomGroupBase.h"
 
 //
 // Base class for atom decompositors
@@ -29,6 +30,10 @@ private:
   std::vector<double> bx;
   std::vector< std::vector<double> > by;
   std::vector< std::vector<std::vector<double> > > bz;
+
+  // Used for checking the total number of groups
+  std::vector<int> numGroups;
+  std::vector<int> numGroupsTot;    // Total number, only used on the root node
 
   // Calculate zone_pcoord
   void update_zone_pcoord() {
@@ -203,6 +208,7 @@ protected:
   void combineData(int* loc2glo_glo, int* nrecv, int* precv,
 		   double *xrecvbuf, double *x, double *xglo);
 
+  bool checkNumGroups(std::vector<AtomGroupBase*>& atomGroupVector);
 };
 
 #endif // DOMDEC_H

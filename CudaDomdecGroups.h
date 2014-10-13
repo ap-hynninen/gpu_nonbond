@@ -14,8 +14,12 @@ class CudaDomdecGroups {
 
   const CudaDomdec& domdec;
   
-  // Atom groups
+  // Atom group pointers in a map:
+  // <id, atomgroup*>
   std::map<int, AtomGroupBase*> atomGroups;
+
+  // Atom group pointers in a vector:
+  std::vector<AtomGroupBase*> atomGroupVector;
 
   int** groupTable;
   std::vector<int*> h_groupTable;
@@ -29,13 +33,14 @@ class CudaDomdecGroups {
   bool tbl_upto_date;
 
   // Storage vector used for registering groups
-  //std::vector< std::vector<  std::pair<int, AtomGroupBase*> > > regGroups;
   std::vector< std::vector<int> > regGroups;
   
  public:
 
   CudaDomdecGroups(const CudaDomdec& domdec);
   ~CudaDomdecGroups();
+
+  std::vector<AtomGroupBase*>& get_atomGroupVector() {return atomGroupVector;}
 
   void beginGroups();
 
@@ -62,10 +67,17 @@ class CudaDomdecGroups {
       std::vector<int> atoms;
       h_groupList[i].getAtoms(atoms);
       int t = *std::min_element(atoms.begin(), atoms.end());
-      // Add group to the smallest atom index t
       regGroups.at(t).push_back((size << 16) | type );
       regGroups.at(t).push_back(i);
       regGroups.at(t).insert( regGroups.at(t).end(), atoms.begin(), atoms.end() );
+      /*
+      // Add group to all atoms
+      for (std::vector<int>::iterator it=atoms.begin();it != atoms.end();it++) {
+	regGroups.at(*it).push_back((size << 16) | type );
+	regGroups.at(*it).push_back(i);
+	regGroups.at(*it).insert( regGroups.at(*it).end(), atoms.begin(), atoms.end() );
+      }
+      */
     }
   }
 

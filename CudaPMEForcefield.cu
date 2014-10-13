@@ -177,7 +177,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
   if (heuristic_check(coord, direct_stream[0])) {
     neighborlist_updated = true;
 
-    std::cout << "  Building neighborlist" << std::endl;
+    fprintf(stderr,"Building neighborlist\n");
 
     // Update homezone coordinates (coord) and step vector (prev_step)
     // NOTE: Builds domdec.loc2glo
@@ -213,6 +213,11 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Build bonded tables
     domdecGroups.buildGroupTables();
     domdecGroups.syncGroupTables();
+
+    // Check the total number of groups
+    if (domdec.checkNumGroups(domdecGroups.get_atomGroupVector())) {
+      fprintf(stderr,"checkNumGroups OK\n");
+    }
     
     // Setup bonded interaction lists
     bonded.setup_list(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
@@ -318,12 +323,11 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
 
   // Direct non-bonded force
   dir.calc_force(xyzq.xyzq, nlist, calc_energy, calc_virial, force.stride(), force.xyz(),
-		 direct_stream[0]);
+  		 direct_stream[0]);
   cudaCheck(cudaEventRecord(done_direct_event, direct_stream[0]));
 
   // 1-4 interactions
   // NOTE: we make GPU wait until force.cleap() is done
-  //cudaCheck(cudaDeviceSynchronize());
   cudaCheck(cudaStreamWaitEvent(in14_stream, done_force_clear_event, 0));
   dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force.stride(), force.xyz(),
   		    in14_stream);
@@ -333,7 +337,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   cudaCheck(cudaStreamWaitEvent(bonded_stream, done_force_clear_event, 0));
   bonded.calc_force(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
     		    calc_energy, calc_virial, force.stride(), force.xyz(),
-  		    calc_bond, calc_ureyb, calc_angle, calc_dihe, calc_imdihe, calc_cmap,
+		    calc_bond, calc_ureyb, calc_angle, calc_dihe, calc_imdihe, calc_cmap,
   		    bonded_stream);
   cudaCheck(cudaEventRecord(done_bonded_event, bonded_stream));
 
@@ -341,7 +345,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   if (recipComm.get_isRecip()) {
     if (recipComm.get_num_recip() == 1) {
       if (recipComm.get_num_direct() == 1) {
-	// Single Direct+Recip node => add to total force and be done
+	// Single node that is a Direct+Recip node => add to total force and be done
 	cudaCheck(cudaStreamWaitEvent(recip_stream, done_force_clear_event, 0));
 	recip->calc(domdec.get_inv_boxx(), domdec.get_inv_boxy(), domdec.get_inv_boxz(),
 		    xyzq.xyzq, xyzq.ncoord,

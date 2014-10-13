@@ -480,17 +480,17 @@ void test(const int nstep) {
 
     CudaDomdecGroups domdecGroups(domdec);
 
-    AtomGroup<bond_t> bondGroup(nbond, h_bond);
-    AtomGroup<bond_t> ureybGroup(nureyb, h_ureyb);
-    AtomGroup<angle_t> angleGroup(nangle, h_angle);
-    AtomGroup<dihe_t> diheGroup(ndihe, h_dihe);
-    AtomGroup<dihe_t> imdiheGroup(nimdihe, h_imdihe);
-    AtomGroup<xx14_t> in14Group(nin14, h_in14);
-    AtomGroup<xx14_t> ex14Group(nex14, h_ex14);
-    AtomGroup<bond_t>    pairGroup(npair, h_pair_indtype);
-    AtomGroup<angle_t>   tripGroup(ntrip, h_trip_indtype);
-    AtomGroup<dihe_t>    quadGroup(nquad, h_quad_indtype);
-    AtomGroup<solvent_t> solventGroup(nsolvent, h_solvent_ind);
+    AtomGroup<bond_t> bondGroup(nbond, h_bond, "BOND");
+    AtomGroup<bond_t> ureybGroup(nureyb, h_ureyb, "UREYB");
+    AtomGroup<angle_t> angleGroup(nangle, h_angle, "ANGLE");
+    AtomGroup<dihe_t> diheGroup(ndihe, h_dihe, "DIHE");
+    AtomGroup<dihe_t> imdiheGroup(nimdihe, h_imdihe, "IMDIHE");
+    AtomGroup<xx14_t> in14Group(nin14, h_in14, "IN14");
+    AtomGroup<xx14_t> ex14Group(nex14, h_ex14, "EX14");
+    AtomGroup<bond_t>    pairGroup(npair, h_pair_indtype, "PAIR");
+    AtomGroup<angle_t>   tripGroup(ntrip, h_trip_indtype, "TRIP");
+    AtomGroup<dihe_t>    quadGroup(nquad, h_quad_indtype, "QUAD");
+    AtomGroup<solvent_t> solventGroup(nsolvent, h_solvent_ind, "SOLVENT");
     // Register groups
     // NOTE: the register IDs (BOND, UREYB, ...) must be unique
     domdecGroups.beginGroups();

@@ -16,8 +16,8 @@ class AtomGroup : public AtomGroupBase {
 
  public:
 
- AtomGroup(const int numGroupList, T* h_groupList) : 
-  AtomGroupBase(T::size(), numGroupList) {
+  AtomGroup(const int numGroupList, T* h_groupList, const char* name) : 
+    AtomGroupBase(T::size(), numGroupList, name) {
     groupList = NULL;
     if (numGroupList > 0) {
       allocate<T>(&groupList, numGroupList);

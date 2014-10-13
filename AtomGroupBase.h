@@ -3,12 +3,17 @@
 
 #include <cassert>
 #include <vector>
+#include <string>
 
 //
 // Abstract base class for atom groups
 //
 
 class AtomGroupBase {
+
+private:
+  // Name, constant
+  std::string name;
 
  protected:
   // Size of the group
@@ -27,8 +32,8 @@ class AtomGroupBase {
 
  public:
 
- AtomGroupBase(const int size, const int numGroupList) : 
-  size(size), numGroupList(numGroupList) {
+  AtomGroupBase(const int size, const int numGroupList, const char* name) : 
+    size(size), numGroupList(numGroupList), name(name) {
     assert(numGroupList > 0);
     numTable = 0;
     lenTable = 0;
@@ -49,6 +54,7 @@ class AtomGroupBase {
   int* get_table() {return table;}
   int get_numTable() {return numTable;}
   int get_numGroupList() {return numGroupList;}
+  const char* get_name() {return name.c_str();}
   virtual void resizeTable(const int new_numTable) = 0;
 };
 

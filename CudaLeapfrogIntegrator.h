@@ -47,11 +47,6 @@ private:
   // Force array (size ncoord_tot)
   Force<long long int> force;
 
-  // Host memory versions of coordinates, step, and force arrays (size ncoord_glo)
-  //hostXYZ<double> h_coord;
-  //hostXYZ<double> h_step;
-  //hostXYZ<double> h_force;
-
   // Holonomic constraints
   HoloConst *holoconst;
 

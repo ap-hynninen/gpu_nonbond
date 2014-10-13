@@ -100,8 +100,6 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	get_fz_boundary(homeix, homeiy, homeiz-(i+1), rnl, rnl_grouped, zf);
 	//if (homeiz-(i+1) < 0) zf -= 1.0;
 
-	//fprintf(stderr,"%d: homeiz=%d zf=%lf\n",domdec.get_mynode(),homeiz,zf);
-
 	// Get pointer to z coordinates
 	thrust::device_ptr<double> z_ptr(coord.z());
 
@@ -131,7 +129,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	// Re-allocate sendbuf if needed
 	int req_sendbuf_len = pos + alignInt(z_nsend.at(i),2)*sizeof(int) + 
 	  z_nsend.at(i)*3*sizeof(double);
-	resize<char>(&sendbuf, &sendbuf_len, req_sendbuf_len, 1.5f);
+	resize<char>(&sendbuf, &sendbuf_len, sendbuf_len, req_sendbuf_len, 1.5f);
 
 	// Get int pointer to sendbuf
 	thrust::device_ptr<int> sendbuf_ind_ptr((int *)&sendbuf[pos]);
@@ -351,49 +349,43 @@ void CudaDomdecD2DComm::comm_force(Force<long long int>& force) {
     }
   }    
 
+  /*
+  thrust::device_ptr<double> x_dst_ptr((double *)force.x());
+  thrust::copy(x_dst_ptr,
+	       x_dst_ptr+10,
+	       std::ostream_iterator<double>(std::cout, "\n"));
+  */
+
   // Unpack force in z-direction: sendbuf => force
   for (int i=0;i < nz_comm;i++) {
     // format = X[z_nsend.at(i) x double] | Y[z_nsend.at(i) x double] | Z[z_nsend.at(i) x double]
     thrust::device_ptr<double> x_src_ptr(&psendbuf[3*z_psend.at(i)]);
     thrust::device_ptr<double> x_dst_ptr((double *)force.x());
-    //thrust::permutation_iterator< thrust::device_vector<double>::iterator,
-    //thrust::device_vector<int>::iterator >
-    //  x_dst_iter(x_dst_ptr, z_send_loc.begin()+z_precv.at(i));
-    //thrust::transform(x_src_ptr, x_src_ptr+z_nrecv.at(i),
-    //x_dst_iter, x_dst_iter, thrust::plus<double>());
 
-    /*
-    thrust::transform(x_src_ptr, x_src_ptr+z_nrecv.at(i),
-		      thrust::make_permutation_iterator(x_dst_ptr, z_send_loc.begin()+z_precv.at(i)),
-		      thrust::make_permutation_iterator(x_dst_ptr, z_send_loc.begin()+z_precv.at(i)),
-		      thrust::plus<double>());
-    */
-
-    thrust::copy(x_dst_ptr,
-		 x_dst_ptr+10,
-		 std::ostream_iterator<double>(std::cout, "\n"));
-
-    thrust::copy(z_send_loc.begin()+z_precv.at(i),
-		 z_send_loc.begin()+z_precv.at(i)+10,
-		 std::ostream_iterator<int>(std::cout, "\n"));
-
-    /*
-    thrust::device_ptr<double> y_src_ptr(&psendbuf[3*z_psend.at(i) + z_nsend.at(i)]);
+    thrust::device_ptr<double> y_src_ptr(&psendbuf[3*z_psend.at(i)+z_nsend.at(i)]);
     thrust::device_ptr<double> y_dst_ptr((double *)force.y());
-    thrust::permutation_iterator< thrust::device_vector<double>::iterator,
-				  thrust::device_vector<int>::iterator >
-      y_dst_iter(y_dst_ptr, z_send_loc.begin()+z_precv.at(i));
-    thrust::transform(y_src_ptr, y_src_ptr+z_nrecv.at(i),
-		      y_dst_iter, y_dst_iter, thrust::plus<double>());
 
-    thrust::device_ptr<double> z_src_ptr(&psendbuf[3*z_psend.at(i) + 2*z_nsend.at(i)]);
+    thrust::device_ptr<double> z_src_ptr(&psendbuf[3*z_psend.at(i)+2*z_nsend.at(i)]);
     thrust::device_ptr<double> z_dst_ptr((double *)force.z());
-    thrust::permutation_iterator< thrust::device_vector<double>::iterator,
-				  thrust::device_vector<int>::iterator >
-      z_dst_iter(z_dst_ptr, z_send_loc.begin()+z_precv.at(i));
-    thrust::transform(z_src_ptr, z_src_ptr+z_nrecv.at(i),
-		      z_dst_iter, z_dst_iter, thrust::plus<double>());
-    */
+
+    // x_dst_ptr[z_send_loc[i]] += x_src_ptr[i], i=0,...,z_nsend[i]-1
+    thrust::transform(x_src_ptr, x_src_ptr+z_nsend.at(i),
+		      thrust::make_permutation_iterator(x_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
+		      thrust::make_permutation_iterator(x_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
+		      thrust::plus<double>());
+
+    // y_dst_ptr[z_send_loc[i]] += y_src_ptr[i], i=0,...,z_nsend[i]-1
+    thrust::transform(y_src_ptr, y_src_ptr+z_nsend.at(i),
+		      thrust::make_permutation_iterator(y_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
+		      thrust::make_permutation_iterator(y_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
+		      thrust::plus<double>());
+
+    // x_dst_ptr[z_send_loc[i]] += x_src_ptr[i], i=0,...,z_nsend[i]-1
+    thrust::transform(z_src_ptr, z_src_ptr+z_nsend.at(i),
+		      thrust::make_permutation_iterator(z_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
+		      thrust::make_permutation_iterator(z_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
+		      thrust::plus<double>());
+
   }
 
 }

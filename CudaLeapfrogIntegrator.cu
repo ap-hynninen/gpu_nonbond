@@ -418,14 +418,6 @@ void CudaLeapfrogIntegrator::get_restart_data(double *x, double *y, double *z,
 					      double *dx, double *dy, double *dz,
 					      double *fx, double *fy, double *fz) {
   if (forcefield != NULL) {
-    // Re-allocate host versions of coordinate, step, and force arrays
-    //h_coord.realloc(ncoord);
-    //h_step.realloc(ncoord);
-    //h_force.realloc(ncoord);
-    // Copy to host memory
-    //h_coord.set_data_sync(ncoord, coord);
-    //h_step.set_data_sync(ncoord, step);
-    //h_force.set_data_sync(ncoord, (double *)force.x(), (double *)force.y(), (double *)force.z());
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
     p->get_restart_data(coord, step, force, x, y, z, dx, dy, dz, fx, fy, fz);
   }

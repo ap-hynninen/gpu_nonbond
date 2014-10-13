@@ -86,15 +86,6 @@ void Domdec::buildGlobal_loc2glo(int* loc2glo, int* loc2glo_glo, int* nrecv, int
 
   MPICheck(MPI_Allgatherv(loc2glo, nsend, MPI_INT, loc2glo_glo, nrecv, precv, MPI_INT, comm));
 
-  // Displace loc2glo_glo values to create a unified global mapping
-  // (inode==0 does not need to be displaced, since displacement is 0)
-  for (int inode=1;inode < numnode;inode++) {
-    int istart = precv[inode];
-    int iend   = precv[inode] + nrecv[inode];
-    for (int i=istart;i < iend;i++) {
-      loc2glo_glo[i] += precv[inode];
-    }
-  }
 }
 
 //
@@ -114,4 +105,40 @@ void Domdec::combineData(int* loc2glo_glo, int* nrecv, int* precv,
     xglo[j] = xrecvbuf[i];
   }
 
+}
+
+//
+// Check the total number of atom groups
+//
+bool Domdec::checkNumGroups(std::vector<AtomGroupBase*>& atomGroupVector) {
+
+  numGroups.resize(atomGroupVector.size());
+  for (int i=0;i < atomGroupVector.size();i++) {
+    numGroups.at(i) = atomGroupVector.at(i)->get_numTable();
+  }
+
+  int *numGroupsTotp = NULL;
+  if (mynode == 0) {
+    numGroupsTot.resize(atomGroupVector.size());
+    numGroupsTotp = numGroupsTot.data();
+  }
+
+  MPICheck(MPI_Reduce(numGroups.data(), numGroupsTotp, atomGroupVector.size(),
+		      MPI_INT, MPI_SUM, 0, comm));
+
+  bool ok = true;
+  if (mynode == 0) {
+    for (int i=0;i < atomGroupVector.size();i++) {
+      if (numGroupsTot.at(i) != atomGroupVector.at(i)->get_numGroupList()) {
+	std::cout << "Domdec::checkNumGroups, number of groups does not match for "
+		  << atomGroupVector.at(i)->get_name() << ":"<< std::endl;
+	std::cout << "Counted=" << numGroupsTot.at(i)
+		  << " Correct=" << atomGroupVector.at(i)->get_numGroupList() << std::endl;
+	ok = false;
+      }
+    }
+    if (!ok) exit(1);
+  }
+
+  return ok;
 }
