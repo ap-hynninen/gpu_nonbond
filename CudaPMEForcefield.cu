@@ -208,7 +208,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Build neighborlist
     nlist.build(domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), domdec.get_rnl(),
 		xyzq.xyzq, domdec.get_loc2glo_ptr());
-    cudaCheck(cudaDeviceSynchronize());
+    //cudaCheck(cudaDeviceSynchronize());
 
     // Build bonded tables
     domdecGroups.buildGroupTables();
@@ -253,7 +253,9 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     domdec.reorder_homezone_coord(coord, ref_coord, nlist.get_ind_sorted());
 
     // Update and re-order communication buffers
-    domdec.comm_update(nlist.get_glo2loc());
+    domdec.comm_update(nlist.get_glo2loc(), coord);
+
+    if (domdec.get_mynode() == 0) xyzq.save("xyzq0.txt");
 
   } else {
     neighborlist_updated = false;
@@ -263,8 +265,15 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Communicate coordinates between direct nodes
     domdec.comm_coord(coord, false);
     // Copy import volume coordinates to xyzq -array
-    xyzq.set_xyz(coord, domdec.get_ncoord(), domdec.get_ncoord_glo()-1, domdec.get_xyz_shift(),
+    xyzq.set_xyz(coord, domdec.get_ncoord(), domdec.get_ncoord_tot()-1, domdec.get_xyz_shift(),
 		 domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), direct_stream[0]);
+
+    //xyzq_copy.set_xyzq(coord, glo_q, domdec.get_loc2glo_ptr(), domdec.get_xyz_shift(),
+    //domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz());
+
+    cudaCheck(cudaDeviceSynchronize());
+    if (domdec.get_mynode() == 0) xyzq.save("xyzq1.txt");
+
   }
 
 }
@@ -463,7 +472,8 @@ void CudaPMEForcefield::assignCoordToNodes(hostXYZ<double>& coord, std::vector<i
 // Returns true if update is needed
 //
 bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double>& coord, cudaStream_t stream) {
-  assert(ref_coord.match(coord));
+  assert(ref_coord.size() == domdec.get_ncoord());
+  assert(coord.size() == domdec.get_ncoord_tot());
   assert(warpsize <= 32);
 
   double rsq_limit_dbl = fabs(domdec.get_rnl() - roff)/2.0;

@@ -70,7 +70,7 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
 
   void comm_coord(cudaXYZ<double>& coord, thrust::device_vector<int>& loc2glo,
 		  const bool update);
-  void comm_update(int* glo2loc);
+  void comm_update(int* glo2loc, cudaXYZ<double>& coord);
   void comm_force(Force<long long int>& force);
 };
 

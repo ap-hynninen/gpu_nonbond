@@ -41,6 +41,7 @@ public:
   bool compare(XYZQ& xyzq_in, const double tol, double& max_diff);
 
   void print(const int start, const int end, std::ostream& out);
+  void save(const char* filename);
 };
 
 #endif // XYZQ_H

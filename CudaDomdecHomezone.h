@@ -87,7 +87,7 @@ class CudaDomdecHomezone {
   ~CudaDomdecHomezone();
 
   int build(hostXYZ<double>& h_coord);
-  int update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream=0);
+  int update(const int ncoord, cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream=0);
 
   int* get_loc2glo_ptr() {return thrust::raw_pointer_cast(loc2glo.data());}
   const int* get_loc2glo_ptr() const {return thrust::raw_pointer_cast(loc2glo.data());}

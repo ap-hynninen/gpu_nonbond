@@ -68,7 +68,6 @@ __global__ void set_xyzq_shift_kernel(const int ncoord,
     xyzq_val.y = (float)(y[tid] + ((double)shift.y)*boxy);
     xyzq_val.z = (float)(z[tid] + ((double)shift.z)*boxz);
     xyzq_val.w = q[loc2glo[tid]];
-    //if (isnan(xyzq_val.x)) printf("NAN at tid=%d x=%lf shift=%f\n",tid,x[tid],shift.x);
     xyzq[tid] = xyzq_val;
   }
 }
@@ -308,10 +307,13 @@ bool XYZQ::compare(XYZQ& xyzq_in, const double tol, double& max_diff) {
   return ok;
 }
 
+//
+// Print to ostream
+//
 void XYZQ::print(const int start, const int end, std::ostream& out) {
 
   float4 *h_xyzq = new float4[ncoord];
-  copy_DtoH<float4>(xyzq, h_xyzq, ncoord);
+  copy_DtoH_sync<float4>(xyzq, h_xyzq, ncoord);
 
   for (int i=start;i <= end;i++) {
     out << i << " " << h_xyzq[i].x << " " << h_xyzq[i].y << " "
@@ -319,4 +321,23 @@ void XYZQ::print(const int start, const int end, std::ostream& out) {
   }
 
   delete [] h_xyzq;
+}
+
+//
+// Save to file
+//
+void XYZQ::save(const char* filename) {
+  std::ofstream file(filename);
+  if (file.is_open()) {
+    float4 *h_xyzq = new float4[ncoord];
+    copy_DtoH_sync<float4>(xyzq, h_xyzq, ncoord);
+    for (int i=0;i < ncoord;i++) {
+      file << h_xyzq[i].x << " " << h_xyzq[i].y << " "
+	   << h_xyzq[i].z << " " << h_xyzq[i].w << std::endl;
+    }
+    delete [] h_xyzq;
+  } else {
+    std::cerr<<"Error opening file "<<filename<<std::endl;
+    exit(1);
+  }
 }

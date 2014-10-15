@@ -10,7 +10,6 @@ __global__ void calc_xyz_shift(const int ncoord,
 			       const double* __restrict__ x,
 			       const double* __restrict__ y,
 			       const double* __restrict__ z,
-			       const double x0, const double y0, const double z0,
 			       const double inv_boxx, const double inv_boxy, const double inv_boxz,
 			       const int* __restrict__ loc2glo,
 			       const double lox, const double hix,
@@ -20,12 +19,12 @@ __global__ void calc_xyz_shift(const int ncoord,
 			       char* __restrict__ coordLoc) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
   if (i < ncoord) {
-    double xi = x[i]*inv_boxx + 0.5;
-    double yi = y[i]*inv_boxy + 0.5;
-    double zi = z[i]*inv_boxz + 0.5;
-    double shx = ceil(x0 - xi);
-    double shy = ceil(y0 - yi);
-    double shz = ceil(z0 - zi);
+    double xi = x[i]*inv_boxx + 0.5 - lox;
+    double yi = y[i]*inv_boxy + 0.5 - loy;
+    double zi = z[i]*inv_boxz + 0.5 - loz;
+    double shx = -floor(xi);
+    double shy = -floor(yi);
+    double shz = -floor(zi);
     float3 shift;
     shift.x = (float)shx;
     shift.y = (float)shy;
@@ -36,8 +35,10 @@ __global__ void calc_xyz_shift(const int ncoord,
     double zf = zi + shz;
     // (xf, yf, zf) is in range (0...1)
     int iglo = loc2glo[i];
-    int loca = (xf >= lox && xf < hix) | ((yf >= loy && yf < hiy) << 1) | 
-      ((zf >= loz && zf < hiz) << 2);
+    //    int loca = (xf >= lox && xf < hix) | ((yf >= loy && yf < hiy) << 1) | 
+    //      ((zf >= loz && zf < hiz) << 2);
+    int loca = (xf >= 0.0 && xf < hix) | ((yf >= 0.0 && yf < hiy) << 1) | 
+      ((zf >= 0.0 && zf < hiz) << 2);
     coordLoc[iglo] = (char)loca;
   }
 }
@@ -146,8 +147,10 @@ void CudaDomdec::build_homezone(hostXYZ<double>& coord) {
 //
 void CudaDomdec::update_homezone(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream) {
   if (numnode > 1) {
+    // Read value of ncoord before it is reset on the next line
+    int ncoord = this->get_ncoord();
     this->clear_zone_ncoord();
-    this->set_zone_ncoord(I, homezone.update(coord, coord2, stream));
+    this->set_zone_ncoord(I, homezone.update(ncoord, coord, coord2, stream));
   }
 }
 
@@ -162,11 +165,6 @@ void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStrea
   if (update) {
     int nthread, nblock;
 
-    // Calculate xyz shift
-    double x0 = 0.0;
-    double y0 = 0.0;
-    double z0 = 0.0;
-
     // Re-allocate (xyz_shift0, xyz_shift1)
     float fac = (numnode > 1) ? 1.2f : 1.0f;
     reallocate<float3>(&xyz_shift0, &xyz_shift0_len, this->get_ncoord_tot(), fac);
@@ -178,11 +176,11 @@ void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStrea
     nblock = (this->get_ncoord_tot() - 1)/nthread + 1;
     calc_xyz_shift<<< nblock, nthread, 0, stream >>>
       (this->get_ncoord_tot(), coord.x(), coord.y(), coord.z(),
-       x0, y0, z0, this->get_inv_boxx(), this->get_inv_boxy(), this->get_inv_boxz(),
+       this->get_inv_boxx(), this->get_inv_boxy(), this->get_inv_boxz(),
        this->get_loc2glo_ptr(),
-       this->get_lo_bx(), this->get_hi_bx(),
-       this->get_lo_by(), this->get_hi_by(),
-       this->get_lo_bz(), this->get_hi_bz(),
+       this->get_lo_bx(), this->get_hi_bx()-this->get_lo_bx(),
+       this->get_lo_by(), this->get_hi_by()-this->get_lo_by(),
+       this->get_lo_bz(), this->get_hi_bz()-this->get_lo_bz(),
        xyz_shift0, coordLoc);
     cudaCheck(cudaGetLastError());
   }
@@ -192,8 +190,8 @@ void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStrea
 //
 // Update communication (we're updating the local receive indices)
 //
-void CudaDomdec::comm_update(int* glo2loc, cudaStream_t stream) {
-  D2Dcomm.comm_update(glo2loc);
+void CudaDomdec::comm_update(int* glo2loc, cudaXYZ<double>& coord, cudaStream_t stream) {
+  D2Dcomm.comm_update(glo2loc, coord);
 }
 
 //

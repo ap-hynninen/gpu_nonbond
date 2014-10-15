@@ -27,7 +27,7 @@ gpu_recip
 gpu_const
 - Test holonomic constraints (i.e. "SHAKE")
 
-gpu_dyna
+gpu_dyna -nstep N
 - Test molecular dynamics run
 - Uses MPI for multi-GPU support
 

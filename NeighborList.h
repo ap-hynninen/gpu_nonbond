@@ -7,6 +7,7 @@
 const int n_jlist_max = 64;
 const int n_jlist_max_shift = 6;
 const int n_jlist_max_mask = (1<<6) - 1;
+const int max_ncoord = (1 << (32-n_jlist_max_shift));
 
 template <int tilesize>
 struct num_excl {
@@ -75,6 +76,12 @@ struct NeighborListParam_t {
   int n_int_zone[8];
   int int_zone[8][8];
 
+  // Starting column for every zone
+  int zone_col[8];
+
+  // Starting cell for every zone
+  int zone_cell[8];
+
   // Number of entries in ientry -table
   int n_ientry;
 
@@ -83,7 +90,6 @@ struct NeighborListParam_t {
 
   // Number of cell-cell exclusions
   int nexcl;
-
 };
 
 //
@@ -270,12 +276,14 @@ private:
 
   void setup_top_excl(const int ncoord_glo, const int *iblo14, const int *inb14);
 
-  void init();
+  void init(const int nx, const int ny, const int nz);
   void load(const char *filename);
 
 public:
-  NeighborList(const int ncoord_glo, const int *iblo14, const int *inb14);
-  NeighborList(const int ncoord_glo, const char *filename);
+  NeighborList(const int ncoord_glo, const int *iblo14, const int *inb14,
+	       const int nx, const int ny, const int nz);
+  NeighborList(const int ncoord_glo, const char *filename,
+	       const int nx, const int ny, const int nz);
   ~NeighborList();
 
   void sort(const int *zone_patom,
@@ -296,9 +304,11 @@ public:
 	     const float4 *xyzq, const int *loc2glo,
 	     cudaStream_t stream=0);
 
+  void reset();
+
   void test_build(const int *zone_patom,
-		  const float boxx, const float boxy, const float boxz,
-		  const float rcut, const float4 *xyzq, const int *loc2glo);
+		  const double boxx, const double boxy, const double boxz,
+		  const double rcut, const float4 *xyzq, const int *loc2glo);
   
   void build_excl(const float boxx, const float boxy, const float boxz,
 		  const float rcut,

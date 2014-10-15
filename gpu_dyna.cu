@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <cstring>
 #include <cuda.h>
 #include "cuda_utils.h"
 #include "gpu_utils.h"
@@ -29,16 +30,37 @@ int main(int argc, char *argv[]) {
   }
 
   int nstep = 1;
-  if (argc == 2) {
-    sscanf(argv[1],"%d",&nstep);
+  int iarg = 1;
+  bool arg_ok = true;
+  while (iarg < argc) {
+    if (strcmp(argv[iarg],"-nstep")==0) {
+      iarg++;
+      if (iarg == argc) {
+	arg_ok = false;
+	break;
+      }
+      sscanf(argv[iarg],"%d",&nstep);
+      iarg++;
+    } else {
+      std::cout << "Invalid option " << argv[iarg] << std::endl;
+      arg_ok = false;
+      break;
+    }
   }
 
-  test(nstep);
+  int ret_val = 0;
+
+  if (arg_ok) {
+    test(nstep);
+  } else {
+    std::cout << "Usage: mpirun -n X gpu_dyna -nstep N" << std::endl;
+    ret_val = 1;
+  }
 
   stop_mpi();
   stop_gpu();
 
-  return 0;
+  return ret_val;
 }
 
 //
@@ -470,7 +492,7 @@ void test(const int nstep) {
     cudaCheck(cudaStreamCreate(&integrator_stream));
 
     // Neighborlist
-    NeighborList<32> nlist(ncoord, h_iblo14, h_inb14);
+    NeighborList<32> nlist(ncoord, h_iblo14, h_inb14, nx, ny, nz);
 
     // Setup domain decomposition
 
@@ -564,54 +586,56 @@ void test(const int nstep) {
     leapfrog.set_timestep(2.0);
     leapfrog.run(nstep);
 
-    if (nstep == 100 || (nstep == 1 && !holoconst_on)) {
-      double* fxref = new double[ncoord];
-      double* fyref = new double[ncoord];
-      double* fzref = new double[ncoord];
-      char filename[256];
-      if (nstep == 100 && holoconst_on) {
-	sprintf(filename,"test_data/force_dyn%d_holoconst.txt",nstep);
-      } else {
-	sprintf(filename,"test_data/force_dyn%d.txt",nstep);
-      }
-      read_xyz(ncoord, fxref, fyref, fzref, filename);
-      double max_err = 0.0;
-      double err_tol = 1.0e-8;
-      for (int i=0;i < ncoord;i++) {
-	double dfx = fx[i] - fxref[i];
-	double dfy = fy[i] - fyref[i];
-	double dfz = fz[i] - fzref[i];
-	double err = dfx*dfx + dfy*dfy + dfz*dfz;
-	max_err = max(max_err, err);
-	if (err > err_tol) {
-	  std::cout << "i = " << i << " err = " << err << std::endl;
-	  break;
-	}
-      }
-      if (max_err < err_tol) {
-	std::cout << "Test OK, maximum error = " << max_err << std::endl;
-      } else {
-	std::cout << "Test FAILED" << std::endl;
-      }
-      delete [] fxref;
-      delete [] fyref;
-      delete [] fzref;
-    } else {
-      std::cout << "Test NOT performed (nstep != 100)" << std::endl;
-    }
-
-    write_xyz(ncoord, x, y, z, "coord.txt");
-    write_xyz(ncoord, dx, dy, dz, "step.txt");
-    write_xyz(ncoord, fx, fy, fz, "force.txt");
-
     cudaCheck(cudaStreamDestroy(integrator_stream));
 
-    if (nstep != 1 && holoconst_on) {
-      check_holoconst(x, y, z,
-		      npair, h_pair_indtype, h_pair_constr, 
-		      ntrip, h_trip_indtype, h_trip_constr,
-		      nquad, h_quad_indtype, h_quad_constr,
-		      nsolvent, h_solvent_ind, rOHsq, rHHsq);
+    if (mynode == 0) {
+      if (nstep == 100 || nstep == 2 || (nstep == 1 && !holoconst_on)) {
+	double* fxref = new double[ncoord];
+	double* fyref = new double[ncoord];
+	double* fzref = new double[ncoord];
+	char filename[256];
+	if (nstep == 100 && holoconst_on) {
+	  sprintf(filename,"test_data/force_dyn%d_holoconst.txt",nstep);
+	} else {
+	  sprintf(filename,"test_data/force_dyn%d.txt",nstep);
+	}
+	read_xyz(ncoord, fxref, fyref, fzref, filename);
+	double max_err = 0.0;
+	double err_tol = 5.0e-6;
+	for (int i=0;i < ncoord;i++) {
+	  double dfx = fx[i] - fxref[i];
+	  double dfy = fy[i] - fyref[i];
+	  double dfz = fz[i] - fzref[i];
+	  double err = dfx*dfx + dfy*dfy + dfz*dfz;
+	  max_err = max(max_err, err);
+	  if (err > err_tol) {
+	    std::cout << "i = " << i << " err = " << err << std::endl;
+	    break;
+	  }
+	}
+	if (max_err < err_tol) {
+	  std::cout << "Test OK, maximum error = " << max_err << std::endl;
+	} else {
+	  std::cout << "Test FAILED" << std::endl;
+	}
+	delete [] fxref;
+	delete [] fyref;
+	delete [] fzref;
+      } else {
+	std::cout << "Test NOT performed (nstep != 100)" << std::endl;
+      }
+
+      write_xyz(ncoord, x, y, z, "coord.txt");
+      write_xyz(ncoord, dx, dy, dz, "step.txt");
+      write_xyz(ncoord, fx, fy, fz, "force.txt");
+
+      if (nstep != 1 && holoconst_on) {
+	check_holoconst(x, y, z,
+			npair, h_pair_indtype, h_pair_constr, 
+			ntrip, h_trip_indtype, h_trip_constr,
+			nquad, h_quad_indtype, h_quad_constr,
+			nsolvent, h_solvent_ind, rOHsq, rHHsq);
+      }
     }
 
     delete [] mass;

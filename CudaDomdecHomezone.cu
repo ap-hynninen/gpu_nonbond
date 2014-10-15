@@ -324,22 +324,23 @@ int CudaDomdecHomezone::build(hostXYZ<double>& h_coord) {
 // creates new loc2glo, re-creates coord and coord2 accoring to the new loc2glo
 // Returns: the number of coordinates in the homezone
 //
-int CudaDomdecHomezone::update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream) {
-
-  assert(coord.size() == coord2.size());
+int CudaDomdecHomezone::update(const int ncoord, cudaXYZ<double>& coord, cudaXYZ<double>& coord2,
+			       cudaStream_t stream) {
+  assert(ncoord <= coord.size());
+  assert(ncoord <= coord2.size());
 
   // Allocate to #coordinates to avoid busting the buffer limits
-  reallocate<int>(&destind, &destind_len, coord.size(), 1.2f);
-  reallocate<neighcomm_t>(&send, &send_len, coord.size(), 1.2f);
+  reallocate<int>(&destind, &destind_len, ncoord, 1.2f);
+  reallocate<neighcomm_t>(&send, &send_len, ncoord, 1.2f);
 
   clear_gpu_array<int>(num_send, nneigh+1, stream);
 
   int nthread = 1024;
-  int nblock = (coord.size() - 1)/nthread + 1;
+  int nblock = (ncoord - 1)/nthread + 1;
 
   // Assign coordinates into neighboring, or home, sub-boxes
   fill_send_kernel<<< nblock, nthread, 0, stream >>>
-    (coord.size(), coord.x(), coord.y(), coord.z(),
+    (ncoord, coord.x(), coord.y(), coord.z(),
      domdec.get_inv_boxx(), domdec.get_inv_boxy(), domdec.get_inv_boxz(),
      domdec.get_nx(), domdec.get_ny(), domdec.get_nz(), nneigh,
      domdec.get_homeix(), domdec.get_homeiy(), domdec.get_homeiz(),
@@ -355,7 +356,7 @@ int CudaDomdecHomezone::update(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, 
 
   // Pack coordinate data into send buffer
   pack_send_kernel<<< nblock, nthread, 0, stream >>>
-    (coord.size(), coord.x(), coord.y(), coord.z(), coord2.x(), coord2.y(), coord2.z(),
+    (ncoord, coord.x(), coord.y(), coord.z(), coord2.x(), coord2.y(), coord2.z(),
      destind, get_loc2glo_ptr(), pos_send, send);
   cudaCheck(cudaGetLastError());
 

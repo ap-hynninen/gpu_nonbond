@@ -1,4 +1,7 @@
 #include <iostream>
+#include <vector>
+#include <algorithm>
+#include <utility>
 #include <cuda.h>
 #include <nvToolsExtCuda.h>
 #include "gpu_utils.h"
@@ -385,24 +388,31 @@ static int gpu_ind = -1;
 static cudaDeviceProp gpu_prop;
 static int cuda_arch;
 
+bool gpuDevCompare (std::pair<int, cudaDeviceProp> dev1, std::pair<int, cudaDeviceProp> dev2) {
+  return (dev1.second.major*100+dev1.second.minor) >= (dev2.second.major*100+dev2.second.minor);
+}
+
 void start_gpu(int numnode, int mynode) {
   //int devices[4] = {0, 1, 2, 3};
 
-  int device_count;
-  cudaCheck(cudaGetDeviceCount(&device_count));
-  if (device_count < 1) {
+  int deviceNum;
+  cudaCheck(cudaGetDeviceCount(&deviceNum));
+  if (deviceNum < 1) {
     std::cout << "No CUDA device found" << std::endl;
     exit(1);
   }
 
-  /*
-  if (device_count == 4) {
-    int devices[4] = {2, 3, 0, 1};
-    gpu_ind = devices[mynode % device_count];
-  } else {
-  */
-  gpu_ind = mynode % device_count;
-    //}
+  // Get all device properties and sort "most powerful first"
+  std::vector<int> deviceID(deviceNum);
+  std::vector<std::pair<int, cudaDeviceProp> > gpuList(deviceNum);
+  for (int i=0;i < deviceNum;i++) {
+    gpuList.at(i).first = i;
+    cudaCheck(cudaGetDeviceProperties(&gpuList.at(i).second, i));
+  }
+  std::sort(gpuList.begin(), gpuList.end(), gpuDevCompare);
+
+  gpu_ind = gpuList.at(mynode % deviceNum).first;
+
   cudaCheck(cudaSetDevice(gpu_ind));
 
   cudaCheck(cudaDeviceSynchronize());
@@ -428,14 +438,14 @@ void start_gpu(int numnode, int mynode) {
   }
 
   if (mynode == 0) {
-    std::cout << "Number of CUDA devices found " << device_count << std::endl;
+    std::cout << "Number of CUDA devices found " << deviceNum << std::endl;
     std::cout << "Using CUDA driver version " << cuda_driver_version << std::endl;
     std::cout << "Using CUDA runtime version " << cuda_rt_version << std::endl;
-    std::cout << "Compiled using CUDA_ARCH " << cuda_arch << std::endl;
+    //std::cout << "Compiled using CUDA_ARCH " << cuda_arch << std::endl;
   }
 
   std::cout << "Node " << mynode << " uses CUDA device " << gpu_ind 
-	    << " " << gpu_prop.name << std::endl;
+	    << " " << gpu_prop.name << " with CUDA_ARCH " << cuda_arch << std::endl;
 
 }
 
