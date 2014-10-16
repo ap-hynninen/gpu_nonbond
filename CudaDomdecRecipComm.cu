@@ -180,6 +180,7 @@ void CudaDomdecRecipComm::recv_force(float3* force) {
     // Reveice via MPI
     MPICheck(cudaMPI.Recv(force, ncomm.at(0)*sizeof(float3),
 			  recip_nodes.at(0), TAG, MPI_STATUS_IGNORE, h_commbuf));
+
     force_ptr = force;
   } else {
     if (!isRecip) {

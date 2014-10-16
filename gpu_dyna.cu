@@ -13,23 +13,14 @@
 
 int numnode=1, mynode=0;
 
-void test(const int nstep);
+void test(const int nstep, const bool cudaAware, const bool use_pure_recip);
 
 int main(int argc, char *argv[]) {
 
-  // Get the local rank within this node from environmental variables
-  int local_rank = get_env_local_rank();
-
-  std::cout << "local_rank = " << local_rank << std::endl;
-  if (local_rank >= 0) {
-    start_gpu(1, local_rank);
-    start_mpi(argc, argv, numnode, mynode);
-  } else {
-    start_mpi(argc, argv, numnode, mynode);
-    start_gpu(1, mynode);
-  }
-
   int nstep = 1;
+  bool cudaAware = false;
+  bool use_pure_recip = false;
+
   int iarg = 1;
   bool arg_ok = true;
   while (iarg < argc) {
@@ -41,6 +32,36 @@ int main(int argc, char *argv[]) {
       }
       sscanf(argv[iarg],"%d",&nstep);
       iarg++;
+    } else if (strcmp(argv[iarg],"-cuda-aware")==0) {
+      iarg++;
+      if (iarg == argc) {
+	arg_ok = false;
+	break;
+      }
+      if (strcmp(argv[iarg],"yes")==0) {
+	cudaAware = true;
+      } else if (strcmp(argv[iarg],"no")==0) {
+	cudaAware = false;
+      } else {
+	arg_ok = false;
+	break;
+      }
+      iarg++;
+    } else if (strcmp(argv[iarg],"-use-pure-recip")==0) {
+      iarg++;
+      if (iarg == argc) {
+	arg_ok = false;
+	break;
+      }
+      if (strcmp(argv[iarg],"yes")==0) {
+	use_pure_recip = true;
+      } else if (strcmp(argv[iarg],"no")==0) {
+	use_pure_recip = false;
+      } else {
+	arg_ok = false;
+	break;
+      }
+      iarg++;
     } else {
       std::cout << "Invalid option " << argv[iarg] << std::endl;
       arg_ok = false;
@@ -48,17 +69,55 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  if (arg_ok) {
+    // Get the local rank within this node from environmental variables
+    int local_rank = get_env_local_rank();
+
+    if (local_rank < 0 && cudaAware) {
+      std::cout << "Requesting CUDA aware MPI but local rank not defined by environment" << std::endl;
+      std::cout << "=> defaulting back to non CUDA aware MPI" << std::endl;
+      cudaAware = false;
+    }
+
+    std::cout << "local_rank = " << local_rank << std::endl;
+    if (local_rank >= 0) {
+      start_gpu(1, local_rank);
+      start_mpi(argc, argv, numnode, mynode);
+    } else {
+      start_mpi(argc, argv, numnode, mynode);
+      start_gpu(1, mynode);
+    }
+
+    if (cudaAware) {
+      if (!test_cudaAware(mynode, numnode)) {
+	std::cout << "CUDA aware test FAILED => defaulting back to non CUDA aware MPI" << std::endl;
+	cudaAware = false;
+      } else {
+	if (mynode == 0) {
+	  std::cout << "CUDA aware tested OK" << std::endl;
+	}
+      }
+    }
+
+  }
+
   int ret_val = 0;
 
   if (arg_ok) {
-    test(nstep);
+    test(nstep, cudaAware, use_pure_recip);
   } else {
-    std::cout << "Usage: mpirun -n X gpu_dyna -nstep N" << std::endl;
+    std::cout << "Usage: mpirun -n X gpu_dyna OPTIONS" << std::endl;
+    std::cout << "OPTIONS:" << std::endl;
+    std::cout << "-nstep N" << std::endl;
+    std::cout << "-cuda-aware <yes|no> " << std::endl;
+    std::cout << "-use-pure-recip <yes|no>" << std::endl;
     ret_val = 1;
   }
 
-  stop_mpi();
-  stop_gpu();
+  if (arg_ok) {
+    stop_mpi();
+    stop_gpu();
+  }
 
   return ret_val;
 }
@@ -272,7 +331,7 @@ void check_holoconst(const double* x, const double* y, const double* z,
 //
 // Test the code using data in test_data/ -directory
 //
-void test(const int nstep) {
+void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
 
   // Settings for the data:
   const double boxx = 62.23;
@@ -288,10 +347,8 @@ void test(const int nstep) {
   const double ron = 7.5;
   const double e14fac = 1.0;
   const int ncoord = 23558;
-  const bool cudaAware = false;
 
   // Very simple node setup
-  bool pure_recip = false;
   int nx;
   int ny;
   int nz;
@@ -299,7 +356,7 @@ void test(const int nstep) {
   bool isRecip;
   std::vector<int> direct_nodes;
   std::vector<int> recip_nodes;
-  if (pure_recip && numnode > 1) {
+  if (use_pure_recip && numnode > 1) {
     // Separate Recip node
     direct_nodes.resize(numnode-1);
     recip_nodes.resize(1);
@@ -591,7 +648,8 @@ void test(const int nstep) {
     cudaCheck(cudaStreamDestroy(integrator_stream));
 
     if (mynode == 0) {
-      if (nstep == 100 || nstep == 2 || (nstep == 1 && !holoconst_on)) {
+      if (nstep == 100 || nstep == 20 || nstep == 10 || nstep == 2 
+	  || (nstep == 1 && !holoconst_on)) {
 	double* fxref = new double[ncoord];
 	double* fyref = new double[ncoord];
 	double* fzref = new double[ncoord];

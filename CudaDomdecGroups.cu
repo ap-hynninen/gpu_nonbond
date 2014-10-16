@@ -183,3 +183,4 @@ void CudaDomdecGroups::syncGroupTables(cudaStream_t stream) {
     tbl_upto_date = true;
   }
 }
+

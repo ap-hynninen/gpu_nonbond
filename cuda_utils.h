@@ -384,6 +384,8 @@ void gpu_range_start(const char *range_name);
 void gpu_range_stop();
 //----------------------------------------------------------------------------------------
 
+bool test_cudaAware(const int mynode, const int numnode);
+
 void start_gpu(int numnode, int mynode);
 void stop_gpu();
 int get_gpu_ind();

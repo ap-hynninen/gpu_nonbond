@@ -34,6 +34,9 @@ __global__ void fill_send_kernel(const int ncoord,
 				 const double* __restrict__ yin,
 				 const double* __restrict__ zin,
 				 const double inv_boxx, const double inv_boxy, const double inv_boxz,
+				 const double lox, const double hix,
+				 const double loy, const double hiy,
+				 const double loz, const double hiz,
 				 const int nx, const int ny, const int nz, const int nneigh,
 				 const int homeix, const int homeiy, const int homeiz,
 				 int* __restrict__ num_send,
@@ -58,6 +61,11 @@ __global__ void fill_send_kernel(const int ncoord,
     y -= floor(y);
     z -= floor(z);
 
+    int dix = -(x < lox) + (x > hix);
+    int diy = -(y < loy) + (y > hiy);
+    int diz = -(z < loz) + (z > hiz);
+
+    /*
     int ix = (int)(x*(double)nx);
     int iy = (int)(y*(double)ny);
     int iz = (int)(z*(double)nz);
@@ -65,9 +73,12 @@ __global__ void fill_send_kernel(const int ncoord,
     int dix = ix-homeix;
     int diy = iy-homeiy;
     int diz = iz-homeiz;
+    */
 
     // Check error flag
-    if (abs(dix) > 1 || abs(diy) > 1 || abs(diz) > 1) error = true;
+    if (abs(dix) > 1 || abs(diy) > 1 || abs(diz) > 1) {
+      error = true;
+    }
 
     int ind = dix2ind(dix, diy, diz, nx, ny, nz, nxt, nxyt);
 
@@ -294,21 +305,33 @@ int CudaDomdecHomezone::build(hostXYZ<double>& h_coord) {
 
   int *h_loc2glo = new int[h_coord.size()];
 
+  double lox = domdec.get_lo_bx();
+  double hix = domdec.get_hi_bx();
+  double loy = domdec.get_lo_by();
+  double hiy = domdec.get_hi_by();
+  double loz = domdec.get_lo_bz();
+  double hiz = domdec.get_hi_bz();
+
   // Find coordinates that are in this sub-box
   int nloc = 0;
   for (int i=0;i < h_coord.size();i++) {
-    double x = (*(h_coord.x()+i))*inv_boxx + 0.5;
-    double y = (*(h_coord.y()+i))*inv_boxy + 0.5;
-    double z = (*(h_coord.z()+i))*inv_boxz + 0.5;    
+    double x = h_coord.x()[i]*inv_boxx + 0.5;
+    double y = h_coord.y()[i]*inv_boxy + 0.5;
+    double z = h_coord.z()[i]*inv_boxz + 0.5;    
     x -= floor(x);
     y -= floor(y);
     z -= floor(z);
+    if (x >= lox && x < hix && y >= loy && y < hiy && z >= loz && z < hiz) {
+      h_loc2glo[nloc++] = i;
+    }
+    /*
     int ix = (int)(x*(double)nx);
     int iy = (int)(y*(double)ny);
     int iz = (int)(z*(double)nz);
     if (ix == homeix && iy == homeiy && iz == homeiz) {
-      h_loc2glo[nloc++] = i;
+
     }
+    */
   }
 
   loc2glo.resize(nloc);
@@ -340,8 +363,11 @@ int CudaDomdecHomezone::update(const int ncoord, cudaXYZ<double>& coord, cudaXYZ
 
   // Assign coordinates into neighboring, or home, sub-boxes
   fill_send_kernel<<< nblock, nthread, 0, stream >>>
-    (ncoord, coord.x(), coord.y(), coord.z(),
+    (ncoord, coord.x(), coord.y(), coord.z(),     
      domdec.get_inv_boxx(), domdec.get_inv_boxy(), domdec.get_inv_boxz(),
+     domdec.get_lo_bx(), domdec.get_hi_bx(),
+     domdec.get_lo_by(), domdec.get_hi_by(),
+     domdec.get_lo_bz(), domdec.get_hi_bz(),
      domdec.get_nx(), domdec.get_ny(), domdec.get_nz(), nneigh,
      domdec.get_homeix(), domdec.get_homeiy(), domdec.get_homeiz(),
      num_send, destind);

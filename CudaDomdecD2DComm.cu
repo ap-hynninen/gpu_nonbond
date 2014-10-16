@@ -141,6 +141,8 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	get_fz_boundary(homeix, homeiy, homeiz-(i+1), rnl, rnl_grouped, zf);
 	//if (homeiz-(i+1) < 0) zf -= 1.0;
 
+	//fprintf(stderr,"%d: zf = %lf\n",domdec.get_mynode(),zf);
+
 	// Get pointer to z coordinates
 	thrust::device_ptr<double> z_ptr(coord.z());
 
@@ -374,7 +376,7 @@ void CudaDomdecD2DComm::comm_force(Force<long long int>& force) {
 			    z_send_node.at(i), DATA_TAG, MPI_STATUS_IGNORE,
 			    &h_psendbuf[3*z_psend.at(i)]));
     }
-  }    
+  }
 
   // Unpack force in z-direction: sendbuf => force
   for (int i=0;i < nz_comm;i++) {
