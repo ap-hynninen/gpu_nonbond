@@ -2,6 +2,7 @@
 #ifndef BONDED_STRUCT_H
 #define BONDED_STRUCT_H
 
+#include <iostream>
 #include <vector>
 
 enum {BOND, UREYB, ANGLE, DIHE, IMDIHE, CMAP, IN14, EX14, PAIR, TRIP, QUAD, SOLVENT};
@@ -15,6 +16,9 @@ struct bond_t {
     atoms.at(0) = i;
     atoms.at(1) = j;
   }
+  void printAtoms() {
+    std::cout << i << " " << j;
+  }
 };
 
 struct angle_t {
@@ -26,6 +30,9 @@ struct angle_t {
     atoms.at(0) = i;
     atoms.at(1) = j;
     atoms.at(2) = k;
+  }
+  void printAtoms() {
+    std::cout << i << " " << j << " " << k;
   }
 };
 
@@ -39,6 +46,9 @@ struct dihe_t {
     atoms.at(1) = j;
     atoms.at(2) = k;
     atoms.at(3) = l;
+  }
+  void printAtoms() {
+    std::cout << i << " " << j << " " << k << " " << l;
   }
 };
 
@@ -57,6 +67,10 @@ struct cmap_t {
     atoms.at(6) = k2;
     atoms.at(7) = l2;
   }
+  void printAtoms() {
+    std::cout << i1 << " " << j1 << " " << k1 << " " << l1 << " "
+	      << i2 << " " << j2 << " " << k2 << " " << l2;
+  }
 };
 
 struct xx14_t {
@@ -67,6 +81,9 @@ struct xx14_t {
     atoms.resize(size());
     atoms.at(0) = i;
     atoms.at(1) = j;
+  }
+  void printAtoms() {
+    std::cout << i << " " << j;
   }
 };
 
@@ -79,6 +96,9 @@ struct solvent_t {
     atoms.at(0) = i;
     atoms.at(1) = j;
     atoms.at(2) = k;
+  }
+  void printAtoms() {
+    std::cout << i << " " << j << " " << k;
   }
 };
 

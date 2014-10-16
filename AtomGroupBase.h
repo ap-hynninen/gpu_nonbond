@@ -22,7 +22,7 @@ private:
   // Type of the group
   int type;
 
-  // Global group list, constant
+  // Number of entries in group list, constant
   const int numGroupList;
 
   // Group tables, change at every neighborlist build
@@ -56,6 +56,8 @@ private:
   int get_numGroupList() {return numGroupList;}
   const char* get_name() {return name.c_str();}
   virtual void resizeTable(const int new_numTable) = 0;
+  virtual void getGroupTableVec(std::vector<int>& tableVec) = 0;
+  virtual void printGroup(const int i)=0;
 };
 
 #endif // ATOMGROUPBASE_H

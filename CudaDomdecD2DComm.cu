@@ -139,9 +139,6 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	// Neighborlist has been updated => update communicated atoms
 	double zf;
 	get_fz_boundary(homeix, homeiy, homeiz-(i+1), rnl, rnl_grouped, zf);
-	//if (homeiz-(i+1) < 0) zf -= 1.0;
-
-	//fprintf(stderr,"%d: zf = %lf\n",domdec.get_mynode(),zf);
 
 	// Get pointer to z coordinates
 	thrust::device_ptr<double> z_ptr(coord.z());

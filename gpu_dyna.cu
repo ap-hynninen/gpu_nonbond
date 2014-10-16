@@ -559,17 +559,17 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
 
     CudaDomdecGroups domdecGroups(domdec);
 
-    AtomGroup<bond_t> bondGroup(nbond, h_bond, "BOND");
-    AtomGroup<bond_t> ureybGroup(nureyb, h_ureyb, "UREYB");
-    AtomGroup<angle_t> angleGroup(nangle, h_angle, "ANGLE");
-    AtomGroup<dihe_t> diheGroup(ndihe, h_dihe, "DIHE");
-    AtomGroup<dihe_t> imdiheGroup(nimdihe, h_imdihe, "IMDIHE");
-    AtomGroup<xx14_t> in14Group(nin14, h_in14, "IN14");
-    AtomGroup<xx14_t> ex14Group(nex14, h_ex14, "EX14");
-    AtomGroup<bond_t>    pairGroup(npair, h_pair_indtype, "PAIR");
-    AtomGroup<angle_t>   tripGroup(ntrip, h_trip_indtype, "TRIP");
-    AtomGroup<dihe_t>    quadGroup(nquad, h_quad_indtype, "QUAD");
-    AtomGroup<solvent_t> solventGroup(nsolvent, h_solvent_ind, "SOLVENT");
+    CudaAtomGroup<bond_t> bondGroup(nbond, h_bond, "BOND");
+    CudaAtomGroup<bond_t> ureybGroup(nureyb, h_ureyb, "UREYB");
+    CudaAtomGroup<angle_t> angleGroup(nangle, h_angle, "ANGLE");
+    CudaAtomGroup<dihe_t> diheGroup(ndihe, h_dihe, "DIHE");
+    CudaAtomGroup<dihe_t> imdiheGroup(nimdihe, h_imdihe, "IMDIHE");
+    CudaAtomGroup<xx14_t> in14Group(nin14, h_in14, "IN14");
+    CudaAtomGroup<xx14_t> ex14Group(nex14, h_ex14, "EX14");
+    CudaAtomGroup<bond_t>    pairGroup(npair, h_pair_indtype, "PAIR");
+    CudaAtomGroup<angle_t>   tripGroup(ntrip, h_trip_indtype, "TRIP");
+    CudaAtomGroup<dihe_t>    quadGroup(nquad, h_quad_indtype, "QUAD");
+    CudaAtomGroup<solvent_t> solventGroup(nsolvent, h_solvent_ind, "SOLVENT");
     // Register groups
     // NOTE: the register IDs (BOND, UREYB, ...) must be unique
     domdecGroups.beginGroups();

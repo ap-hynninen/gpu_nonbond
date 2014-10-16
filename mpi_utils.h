@@ -12,3 +12,4 @@
 void start_mpi(int argc, char *argv[], int &numnode, int &mynode);
 void stop_mpi();
 int get_env_local_rank();
+void MPI_Concatenate(int* sendbuf, int nsend, int* recvbuf, int root, MPI_Comm comm);

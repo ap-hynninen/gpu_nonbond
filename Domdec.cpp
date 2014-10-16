@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cassert>
+#include <algorithm>
 #include "Domdec.h"
 #include "mpi_utils.h"
 
@@ -117,27 +118,61 @@ bool Domdec::checkNumGroups(std::vector<AtomGroupBase*>& atomGroupVector) {
     numGroups.at(i) = atomGroupVector.at(i)->get_numTable();
   }
 
-  int *numGroupsTotp = NULL;
-  if (mynode == 0) {
-    numGroupsTot.resize(atomGroupVector.size());
-    numGroupsTotp = numGroupsTot.data();
-  }
+  numGroupsTot.resize(atomGroupVector.size());
 
-  MPICheck(MPI_Reduce(numGroups.data(), numGroupsTotp, atomGroupVector.size(),
-		      MPI_INT, MPI_SUM, 0, comm));
+  MPICheck(MPI_Allreduce(numGroups.data(), numGroupsTot.data(), atomGroupVector.size(),
+			 MPI_INT, MPI_SUM, comm));
 
   bool ok = true;
-  if (mynode == 0) {
-    for (int i=0;i < atomGroupVector.size();i++) {
-      if (numGroupsTot.at(i) != atomGroupVector.at(i)->get_numGroupList()) {
-	std::cout << "Domdec::checkNumGroups, number of groups does not match for "
-		  << atomGroupVector.at(i)->get_name() << ":"<< std::endl;
-	std::cout << "Counted=" << numGroupsTot.at(i)
-		  << " Correct=" << atomGroupVector.at(i)->get_numGroupList() << std::endl;
-	ok = false;
-      }
+  for (int i=0;i < atomGroupVector.size();i++) {
+    if (!checkGroup(*atomGroupVector.at(i), numGroupsTot.at(i))) ok = false;
+  }
+
+  return ok;
+}
+
+//
+// Check group and output missing/double group members
+//
+bool Domdec::checkGroup(AtomGroupBase& atomGroup, const int numTot) {
+  bool ok = true;
+
+  if (numTot != atomGroup.get_numGroupList()) {
+    ok = false;
+    if (mynode == 0) {
+      std::cout << "Domdec::checkGroup, number of groups does not match for "
+		<< atomGroup.get_name() << ":"<< std::endl;
+      std::cout << "Counted=" << numTot
+		<< " Correct=" << atomGroup.get_numGroupList() << std::endl;
     }
-    if (!ok) exit(1);
+    if (numTot < atomGroup.get_numGroupList()) {
+
+      // Get host version of Group table
+      std::vector<int> tableVec;
+      atomGroup.getGroupTableVec(tableVec);
+
+      std::vector<int> tableVecTot;
+      if (mynode == 0) tableVecTot.resize(numTot);
+
+      // Concatenate all group tables into root node
+      MPI_Concatenate(tableVec.data(), tableVec.size(), tableVecTot.data(), 0, comm);
+
+      if (mynode == 0) {
+	// Print out the missing groups
+	std::sort(tableVecTot.begin(), tableVecTot.end());
+	std::cout << "Missing Groups:" << std::endl;
+	int j=0;
+	for (int i=0;i < tableVecTot.size();i++,j++) {
+	  if (j != tableVecTot.at(i)) {
+	    std::cout << j << " [";
+	    atomGroup.printGroup(j);
+	    std::cout << "]" << std::endl;
+	    j++;
+	  }
+	}
+      }
+
+    }
   }
 
   return ok;

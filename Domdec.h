@@ -33,7 +33,7 @@ private:
 
   // Used for checking the total number of groups
   std::vector<int> numGroups;
-  std::vector<int> numGroupsTot;    // Total number, only used on the root node
+  std::vector<int> numGroupsTot;
 
   // Calculate zone_pcoord
   void update_zone_pcoord() {
@@ -209,6 +209,7 @@ protected:
 		   double *xrecvbuf, double *x, double *xglo);
 
   bool checkNumGroups(std::vector<AtomGroupBase*>& atomGroupVector);
+  bool checkGroup(AtomGroupBase& atomGroup, const int numTot);
 
   bool checkHeuristic(const bool heuristic);
 };

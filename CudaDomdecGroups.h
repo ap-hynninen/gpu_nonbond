@@ -6,7 +6,7 @@
 #include <algorithm>
 #include "Bonded_struct.h"
 #include "CudaDomdec.h"
-#include "AtomGroup.h"
+#include "CudaAtomGroup.h"
 
 class CudaDomdecGroups {
 
@@ -49,7 +49,7 @@ class CudaDomdecGroups {
   // h_groupList[] is the host version of atomGroup.groupList[]
   //
   template <typename T>
-    void insertGroup(int id, AtomGroup<T>& atomGroup, T* h_groupList) {
+    void insertGroup(int id, CudaAtomGroup<T>& atomGroup, T* h_groupList) {
     assert(regGroups.size() == domdec.get_ncoord_glo());
     int type = atomGroups.size();
     int size = T::size();
@@ -70,14 +70,6 @@ class CudaDomdecGroups {
       regGroups.at(t).push_back((size << 16) | type );
       regGroups.at(t).push_back(i);
       regGroups.at(t).insert( regGroups.at(t).end(), atoms.begin(), atoms.end() );
-      /*
-      // Add group to all atoms
-      for (std::vector<int>::iterator it=atoms.begin();it != atoms.end();it++) {
-	regGroups.at(*it).push_back((size << 16) | type );
-	regGroups.at(*it).push_back(i);
-	regGroups.at(*it).insert( regGroups.at(*it).end(), atoms.begin(), atoms.end() );
-      }
-      */
     }
   }
 
@@ -86,11 +78,13 @@ class CudaDomdecGroups {
   void buildGroupTables(cudaStream_t stream=0);
   void syncGroupTables(cudaStream_t stream=0);
 
+  // Return group list.
+  // NOTE: This is constant during the run
   template <typename T>
     T* getGroupList(const int id) {
     std::map<int, AtomGroupBase*>::iterator it = atomGroups.find(id);
     if (it == atomGroups.end()) return NULL;
-    AtomGroup<T>* p = dynamic_cast< AtomGroup<T>* >( it->second );
+    CudaAtomGroup<T>* p = dynamic_cast< CudaAtomGroup<T>* >( it->second );
     if (p == NULL) {
       std::cerr << "CudaDomdecGroups::get_group, dynamic_cast failed" << std::endl;
       exit(1);
@@ -98,12 +92,16 @@ class CudaDomdecGroups {
     return p->get_groupList();
   }
 
+  // Return group table
+  // NOTE: This changes at neighborlist update
   int* getGroupTable(const int id) {
     std::map<int, AtomGroupBase*>::iterator it = atomGroups.find(id);
     if (it == atomGroups.end()) return NULL;
     return it->second->get_table();
   }
 
+  // Return number of entries in group table
+  // NOTE: This changes at neighborlist update
   int getNumGroupTable(const int id) {
     std::map<int, AtomGroupBase*>::iterator it = atomGroups.find(id);
     if (it == atomGroups.end()) return 0;

@@ -36,3 +36,27 @@ int get_env_local_rank() {
 
   return rank;
 }
+
+//
+// Concatenate list of integers among all nodes and place the the result in root
+//
+void MPI_Concatenate(int* sendbuf, int nsend, int* recvbuf, int root, MPI_Comm comm) {
+  // Get number of nodes
+  int numnode;
+  MPICheck(MPI_Comm_size(comm, &numnode));
+
+  int* nrecv = new int[numnode];
+  int* precv = new int[numnode];
+
+  // Send the number of entries to root
+  MPICheck(MPI_Gather(&nsend, 1, MPI_INT, nrecv, 1, MPI_INT, root, comm));
+
+  // Calculate position where to store the result
+  precv[0] = 0;
+  for (int i=1;i < numnode;i++) precv[i] = precv[i-1] + nrecv[i-1];
+
+  MPICheck(MPI_Gatherv(sendbuf, nsend, MPI_INT, recvbuf, nrecv, precv, MPI_INT, root, comm));
+
+  delete [] nrecv;
+  delete [] precv;
+}
