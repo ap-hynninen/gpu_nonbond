@@ -172,6 +172,7 @@ void CudaDomdecGroups::buildGroupTables(cudaStream_t stream) {
 //
 void CudaDomdecGroups::syncGroupTables(cudaStream_t stream) {
   if (domdec.get_numnode() > 1 || !tbl_upto_date) {
+    // Wait for work done in buildGroupTables to finish
     cudaCheck(cudaStreamSynchronize(stream));
 
     for (std::map<int, AtomGroupBase*>::iterator it=atomGroups.begin();it != atomGroups.end();it++) {

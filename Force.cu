@@ -195,6 +195,29 @@ void Force<T>::add(float3 *force_data, int force_n, cudaStream_t stream) {
 }
 
 //
+// Save to file
+//
+template <typename T>
+template <typename T2>
+void Force<T>::save(const char* filename) {
+  assert(sizeof(T) == sizeof(T2));
+  std::ofstream file(filename);
+  if (file.is_open()) {
+    T2 *h_xyz = new T2[_stride*3];
+    copy_DtoH_sync<T2>((T2 *)_xyz, h_xyz, _stride*3);
+    for (int i=0;i < _size;i++) {
+      file << h_xyz[i] << " "
+	   << h_xyz[i + _stride] << " "
+	   << h_xyz[i + _stride*2] << std::endl;
+    }
+    delete [] h_xyz;
+  } else {
+    std::cerr<<"Error opening file "<<filename<<std::endl;
+    exit(1);
+  }
+}
+
+//
 // Explicit instances of Force class
 //
 template class Force<long long int>;
@@ -206,3 +229,6 @@ template void Force<long long int>::convert<float>(Force<float>& force, cudaStre
 template void Force<long long int>::convert<double>(Force<double>& force, cudaStream_t stream);
 template void Force<float>::convert_to<double>(Force<long long int>& force, cudaStream_t stream);
 template void Force<long long int>::add<double>(float3 *force_data, int force_n, cudaStream_t stream);
+template void Force<long long int>::save<double>(const char* filename);
+template void Force<double>::save<double>(const char* filename);
+template void Force<float>::save<float>(const char* filename);

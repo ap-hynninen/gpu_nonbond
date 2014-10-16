@@ -448,9 +448,6 @@ int CudaDomdecHomezone::update(const int ncoord, cudaXYZ<double>& coord, cudaXYZ
   for (int i=0;i < nneigh;i++) {
     if (neighnode.at(i) != domdec.get_mynode()) {
       if (h_num_send[i] > 0 && num_recv.at(i) > 0) {
-	//fprintf(stderr,"%d: nsend=%d nrecv=%d pos_send=%d pos_recv=%d\n",
-	//	domdec.get_mynode(),h_num_send[i],num_recv.at(i),
-	//	h_pos_send[i], pos_recv.at(i));
 	MPICheck(cudaMPI.Sendrecv(&send[h_pos_send[i]], h_num_send[i]*sizeof(neighcomm_t), 
 				  neighnode.at(i), COORD_TAG,
 				  &recv[pos_recv.at(i)], num_recv.at(i)*sizeof(neighcomm_t),
@@ -467,64 +464,11 @@ int CudaDomdecHomezone::update(const int ncoord, cudaXYZ<double>& coord, cudaXYZ
       }
     } else if (num_recv.at(i) > 0) {
       // Copy data from local (home) sub-box
-      //fprintf(stderr,"%d: copy, ncopy=%d pos_send=%d pos_recv=%d\n",
-      //domdec.get_mynode(), num_recv.at(i), h_pos_send[i], pos_recv.at(i));
-      copy_DtoD_sync<neighcomm_t>(&send[h_pos_send[i]], &recv[pos_recv.at(i)], num_recv.at(i));
+      copy_DtoD<neighcomm_t>(&send[h_pos_send[i]], &recv[pos_recv.at(i)], num_recv.at(i), stream);
     }
   }
-
-  /*
-  nrequest = 0;
-  // Send coordinate data
-  for (int i=0;i < nneigh;i++) {
-    if (neighnode.at(i) != domdec.get_mynode()) {
-      if (domdec.get_mynode() == 1) {
-	fprintf(stderr,"node 1 sending to node %d: h_pos_send=%d h_num_send=%d\n",
-		neighnode.at(i),h_pos_send[i],h_num_send[i]);
-      }
-      MPICheck(cudaMPI.Isend(&send[h_pos_send[i]], h_num_send[i]*sizeof(neighcomm_t), 
-			     neighnode.at(i), COORD_TAG, &request.at(nrequest),
-			     &h_send[h_pos_send[i]]));
-      nrequest++;
-    }
-  }
-
-  // Receive coordinate data
-  for (int i=0;i < nneigh;i++) {
-    if (neighnode.at(i) != domdec.get_mynode()) {
-      // Receive data from neighboring sub-box
-      MPICheck(cudaMPI.Irecv(&recv[pos_recv.at(i)], num_recv.at(i)*sizeof(neighcomm_t),
-			     neighnode.at(i), COORD_TAG, &request.at(nrequest),
-			     &h_recv[pos_recv.at(i)]));
-      nrequest++;
-    } else {
-      // Copy data from local (home) sub-box
-      copy_DtoD<neighcomm_t>(&recv[pos_recv.at(i)], &send[h_pos_send[i]], num_recv.at(i), stream);
-    }
-  }
-
-  // Wait for communication to finish
-  MPICheck(MPI_Waitall(nrequest, request.data(), MPI_STATUSES_IGNORE));
-  */
-
-  // Wait here for the stream to finish
-  //cudaCheck(cudaStreamSynchronize(stream));
-
-  /*
-  if (domdec.get_mynode() == 0) {
-    fprintf(stderr,"pos_recv=%d %d %d\n",
-	    pos_recv.at(0),pos_recv.at(1),pos_recv.at(2));
-    for (int i=0;i < 10;i++) {
-      fprintf(stderr,"h_recv: %d %lf\n",i,h_recv[i].x1);
-    }
-  } else {
-    fprintf(stderr,"h_pos_send=%d %d %d\n",
-	    h_pos_send[0],h_pos_send[1],h_pos_send[2]);
-    for (int i=0;i < 10;i++) {
-      fprintf(stderr,"h_send: %d %lf\n",i,h_send[i].x1);
-    }
-  }
-  */
+  // Wait until the copy_DtoD above finishes
+  cudaCheck(cudaStreamSynchronize(stream));
 
   // Re-allocate coord and coord2 if needed
   coord.realloc(num_recv_tot);

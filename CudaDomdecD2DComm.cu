@@ -236,6 +236,9 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
       loc2glo.resize(domdec.get_ncoord() + z_precv.at(nz_comm));
     }
 
+    // Wait until packing is done
+    cudaCheck(cudaDeviceSynchronize());
+
     // Send & Recv data
     for (int i=0;i < nz_comm;i++) {
       if (nsendByte.at(i) > 0 && nrecvByte.at(i) > 0) {
@@ -292,6 +295,9 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
     if (update) {
       domdec.set_zone_ncoord(Domdec::FZ, z_precv.at(nz_comm));
     }
+
+    // Wait until unpacking is done
+    cudaCheck(cudaDeviceSynchronize());
 
   } // if (nz_comm > 0)
   
@@ -359,6 +365,8 @@ void CudaDomdecD2DComm::comm_force(Force<long long int>& force) {
 	    thrust::raw_pointer_cast(z_recv_loc.data())+z_precv.at(i), z_nrecv.at(i),
 	    &precvbuf[3*z_precv.at(i)]);
   }
+  // Wait until packing is done
+  cudaCheck(cudaDeviceSynchronize());
 
   // Send & Recv data in z-direction
   for (int i=0;i < nz_comm;i++) {
@@ -409,6 +417,8 @@ void CudaDomdecD2DComm::comm_force(Force<long long int>& force) {
 		      thrust::plus<double>());
 
   }
+  // Wait until unpacking is done
+  cudaCheck(cudaDeviceSynchronize());
 
 }
 

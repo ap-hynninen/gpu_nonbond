@@ -392,6 +392,10 @@ int get_gpu_ind();
 int get_cuda_arch();
 
 #ifdef __CUDACC__
+void save_float3(const int n, const float3* buf, const char* filename);
+#endif
+
+#ifdef __CUDACC__
 int3 get_max_nblock();
 int get_max_nthread();
 int get_major();

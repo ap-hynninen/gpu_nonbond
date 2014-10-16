@@ -545,8 +545,8 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
     }
     //-------------------------------------------------------------------------------------
 
-    cudaStream_t integrator_stream;
-    cudaCheck(cudaStreamCreate(&integrator_stream));
+    //cudaStream_t integrator_stream;
+    //cudaCheck(cudaStreamCreate(&integrator_stream));
 
     // Neighborlist
     NeighborList<32> nlist(ncoord, h_iblo14, h_inb14, nx, ny, nz);
@@ -645,7 +645,7 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
 
     cudaCheck(cudaDeviceSynchronize());
 
-    cudaCheck(cudaStreamDestroy(integrator_stream));
+    //cudaCheck(cudaStreamDestroy(integrator_stream));
 
     if (mynode == 0) {
       if (nstep == 100 || nstep == 20 || nstep == 10 || nstep == 2 

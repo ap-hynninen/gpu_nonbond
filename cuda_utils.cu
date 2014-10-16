@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <algorithm>
 #include <utility>
@@ -518,4 +519,22 @@ int get_gpu_ind() {
 
 int get_cuda_arch() {
   return cuda_arch;
+}
+
+//
+// Save float3 device buffer on disk
+//
+void save_float3(const int n, const float3* buf, const char* filename) {
+  std::ofstream file(filename);
+  if (file.is_open()) {
+    float3 *h_buf = new float3[n];
+    copy_DtoH_sync<float3>(buf, h_buf, n);
+    for (int i=0;i < n;i++) {
+      file << h_buf[i].x << " " << h_buf[i].y << " " << h_buf[i].z << std::endl;
+    }
+    delete [] h_buf;
+  } else {
+    std::cerr<<"Error opening file "<<filename<<std::endl;
+    exit(1);
+  }
 }

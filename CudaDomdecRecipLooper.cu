@@ -16,11 +16,17 @@ void CudaDomdecRecipLooper::run() {
     // Receive coordinates from Direct nodes
     recipComm.recv_coord(xyzq.xyzq);
 
+    //xyzq.save("xyzq_recip.txt");
+
+    assert(xyzq.xyzq == recipComm.get_coord_ptr());
+
     // Compute forces
     recip.calc(recipComm.get_inv_boxx(), recipComm.get_inv_boxy(), recipComm.get_inv_boxz(),
 	       recipComm.get_coord_ptr(), recipComm.get_ncoord(),
 	       recipComm.get_calc_energy(), recipComm.get_calc_virial(), force);
     cudaCheck(cudaStreamSynchronize(stream));
+
+    //save_float3(recipComm.get_ncoord(), force, "force_recip.txt");
 
     // Send forces to Direct nodes
     recipComm.send_force(force);

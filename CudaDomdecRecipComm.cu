@@ -98,15 +98,23 @@ void CudaDomdecRecipComm::recv_coord(float4* coord) {
     //------------------------------------------------
     // Re-allocate h_commbuf if needed
     if (!cudaMPI.isCudaAware()) {
+      // Count the required h_commbuf size
+      int ncoord_buf = 0;
+      for (int i=0;i < direct_nodes.size();i++) {
+	if (mynode != direct_nodes.at(i)) ncoord_buf += ncomm.at(i);
+      }
       float fac = (recip_nodes.size() == 1) ? 1.0f : 1.2f;
-      reallocate_host<char>(&h_commbuf, &h_commbuf_len, ncoord*sizeof(float4), fac);
+      reallocate_host<char>(&h_commbuf, &h_commbuf_len, ncoord_buf*sizeof(float4), fac);
     }
     float4* h_coordbuf = (float4 *)h_commbuf;
+    int h_coordbuf_pos = 0;
     for (int i=0;i < direct_nodes.size();i++) {
       if (mynode != direct_nodes.at(i)) {
 	// Receive via MPI
 	MPICheck(cudaMPI.Recv(&coord[pcomm.at(i)], ncomm.at(i)*sizeof(float4),
-			      direct_nodes.at(i), TAG, MPI_STATUS_IGNORE, &h_coordbuf[pcomm.at(i)]));
+			      direct_nodes.at(i), TAG, MPI_STATUS_IGNORE,
+			      &h_coordbuf[h_coordbuf_pos]));
+	h_coordbuf_pos += ncomm.at(i);
       } else {
 	// Copy device buffer
 	assert(coord_copy_ptr != NULL);
@@ -134,7 +142,7 @@ void CudaDomdecRecipComm::send_force(float3* force) {
   // Re-allocate h_commbuf if needed
   if (!cudaMPI.isCudaAware()) {
     float fac = (recip_nodes.size() == 1) ? 1.0f : 1.2f;
-    reallocate_host<char>(&h_commbuf, &h_commbuf_len, ncoord*sizeof(float3), fac);
+    reallocate_host<char>(&h_commbuf, &h_commbuf_len, pcomm.at(direct_nodes.size())*sizeof(float3), fac);
   }
 
   //---------------------------------------------------
@@ -144,7 +152,7 @@ void CudaDomdecRecipComm::send_force(float3* force) {
   for (int i=0;i < direct_nodes.size();i++) {
     if (mynode != direct_nodes.at(i)) {
       // Send via MPI
-      MPICheck(cudaMPI.Send(force, ncomm.at(i)*sizeof(float3),
+      MPICheck(cudaMPI.Send(&force[pcomm.at(i)], ncomm.at(i)*sizeof(float3),
 			    direct_nodes.at(i), TAG, &h_coordbuf[pcomm.at(i)]));
     }
   }

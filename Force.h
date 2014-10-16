@@ -12,13 +12,10 @@ class Force {
 
 private:
 
-  // Number of coordinates in the force array
-  //int ncoord;
-
   // Stride of the force data:
-  // x data is in data[0...ncoord-1];
-  // y data is in data[stride...stride+ncoord-1];
-  // z data is in data[stride*2...stride*2+ncoord-1];
+  // x data is in data[0...size-1];
+  // y data is in data[stride...stride+size-1];
+  // z data is in data[stride*2...stride*2+size-1];
   //int stride;
 
   // Force data
@@ -90,6 +87,7 @@ private:
   template <typename T2, typename T3> void convert_to(Force<T3>& force, cudaStream_t stream=0);
   template <typename T2, typename T3> void convert_add(Force<T3>& force, cudaStream_t stream=0);
   template <typename T2> void add(float3 *force_data, int force_n, cudaStream_t stream=0);
+  template <typename T2> void save(const char* filename);
 };
 
 

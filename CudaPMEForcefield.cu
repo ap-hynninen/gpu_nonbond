@@ -202,7 +202,6 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
 		       domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz());
 
     //nlist.set_test(true);
-
     // Sort coordinates
     // NOTE: Builds domdec.loc2glo and nlist->glo2loc
     nlist.sort(domdec.get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec.get_loc2glo_ptr());
@@ -399,6 +398,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   // NOTE: Due to the GPU waits above, this implies that all the other streams have
   //       finished their computation as well
   cudaCheck(cudaStreamSynchronize(direct_stream[0]));
+
   // Communicate Direct-Direct
   domdec.comm_force(force);
 
@@ -481,7 +481,6 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double>& coord, cudaStream
 
   int nthread = 512;
   int nblock = (domdec.get_ncoord() - 1)/nthread + 1;
-
   int shmem_size = (nthread/warpsize)*sizeof(int);
 
   *h_heuristic_flag = 0;
@@ -491,10 +490,12 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double>& coord, cudaStream
     (domdec.get_ncoord(), coord.x(), coord.y(), coord.z(),
      ref_coord.x(), ref_coord.y(), ref_coord.z(),
      rsq_limit, d_heuristic_flag);
-
   cudaCheck(cudaGetLastError());
 
-  copy_DtoH_sync<int>(d_heuristic_flag, h_heuristic_flag, 1);
+  copy_DtoH<int>(d_heuristic_flag, h_heuristic_flag, 1, stream);
+
+  // Make sure above kernel calls finish
+  cudaCheck(cudaStreamSynchronize(stream));
 
   return domdec.checkHeuristic((*h_heuristic_flag != 0));
 }
