@@ -19,8 +19,7 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
   thrust::device_vector<unsigned char> atom_pick;
   thrust::device_vector<int> atom_pos;
   
-  // Local indices that we send
-  // Initial version
+  // Local indices that we send to -z direction, initial version
   std::vector< thrust::device_vector<int> > z_send_loc0;
 
   // Local indices that we send to -z direction
@@ -67,6 +66,9 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
 
   CudaDomdecD2DComm(Domdec& domdec, CudaMPI& cudaMPI);
   ~CudaDomdecD2DComm();
+
+  void packXYZ(double* x, double* y, double* z, int* ind, int n, double *outbuf);
+  void unpackXYZ(double* inbuf, int n, double* x, double* y, double* z, int* ind=NULL);
 
   void comm_coord(cudaXYZ<double>& coord, thrust::device_vector<int>& loc2glo,
 		  const bool update);

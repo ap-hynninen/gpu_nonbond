@@ -1,6 +1,7 @@
 #ifndef NEIGHBORLIST_H
 #define NEIGHBORLIST_H
 
+#include <iostream>
 #include <cuda.h>
 
 // Constants
@@ -68,9 +69,6 @@ struct NeighborListParam_t {
   float inv_celldx[8];
   float inv_celldy[8];
 
-  // z cell boundaries
-  float* cellbx[8];
-
   // Interaction zones
   int zone_patom[9];
   int n_int_zone[8];
@@ -90,6 +88,9 @@ struct NeighborListParam_t {
 
   // Number of cell-cell exclusions
   int nexcl;
+
+  // temporary variable, REMOVE AFTER DEBUGGING
+  //int tmp;
 };
 
 //
@@ -98,6 +99,7 @@ struct NeighborListParam_t {
 struct bb_t {
   float x, y, z;      // Center
   float wx, wy, wz;   // Half-width
+  friend std::ostream& operator<<(std::ostream &o, const bb_t& b);
 };
 
 template<typename AT, typename CT> class CudaPMEDirectForce;
@@ -246,7 +248,7 @@ private:
 		      const int* ncellx, const int* ncelly,
 		      const int ncol_tot,
 		      const float3* min_xyz,
-		      const float* inv_dx, const float* inv_dy,
+		      const float* inv_celldx, const float* inv_celldy,
 		      const float4* xyzq, const float4* xyzq_sorted,
 		      const int* col_patom);
 
@@ -254,9 +256,12 @@ private:
 		 const int* ncellx, const int* ncelly,
 		 const int ncol_tot, const int ncell_max,
 		 const float3* min_xyz,
-		 const float* inv_dx, const float* inv_dy,
+		 const float* inv_celldx, const float* inv_celldy,
 		 const float4* xyzq, const float4* xyzq_sorted,
 		 const int* col_patom, const int* cell_patom);
+
+  void test_build(const double boxx, const double boxy, const double boxz,
+		  const double rcut, const float4 *xyzq, const int *loc2glo);
 
   void set_nlist_param(cudaStream_t stream);
   void get_nlist_param();
@@ -305,10 +310,6 @@ public:
 	     cudaStream_t stream=0);
 
   void reset();
-
-  void test_build(const int *zone_patom,
-		  const double boxx, const double boxy, const double boxz,
-		  const double rcut, const float4 *xyzq, const int *loc2glo);
   
   void build_excl(const float boxx, const float boxy, const float boxz,
 		  const float rcut,

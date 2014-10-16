@@ -1,6 +1,9 @@
 #ifndef XYZ_H
 #define XYZ_H
 
+#include <iostream>
+#include <fstream>
+
 //
 // XYZ array base class
 //
@@ -89,6 +92,25 @@ protected:
     assert(x_capacity == z_capacity);
     this->_size = size;
     this->_capacity = x_capacity;
+  }
+
+  virtual void get_host_xyz(T*& hx, T*& hy, T*& hz)=0;
+  virtual void release_host_xyz(T*& hx, T*& hy, T*& hz)=0;
+  
+  // Save to file
+  void save(const char* filename) {
+    std::ofstream file(filename);
+    if (file.is_open()) {
+      T *hx, *hy, *hz;
+      get_host_xyz(hx, hy, hz);
+      for (int i=0;i < _size;i++) {
+	file << hx[i] << " " << hy[i] << " " << hz[i] << std::endl;
+      }
+      release_host_xyz(hx, hy, hz);
+    } else {
+      std::cerr<<"Error opening file "<<filename<<std::endl;
+      exit(1);
+    }
   }
 
   int size() {return _size;}

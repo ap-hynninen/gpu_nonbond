@@ -163,6 +163,19 @@ public:
 
   //--------------------------------------------------------------------------
 
+  void get_host_xyz(T*& hx, T*& hy, T*& hz) {
+    hx = new T[this->_size];
+    hy = new T[this->_size];
+    hz = new T[this->_size];
+    get_data_sync(this->_size, hx, hy, hz);
+  }
+
+  void release_host_xyz(T*& hx, T*& hy, T*& hz) {
+    delete [] hx;
+    delete [] hy;
+    delete [] hz;
+  }
+
   /*
   void print(const int start, const int end, std::ostream& out) {
     assert((start >= 0) && (end >= start) && (end < this->n));

@@ -132,6 +132,7 @@ void DomdecRecipComm::recv_ncoord(const int ncoord_in) {
       ncomm.at(i) = ncoord_in;
     }
   }
+
   // Total number of coordinates
   ncoord = calc_pcomm();
 
@@ -188,8 +189,8 @@ bool DomdecRecipComm::recv_header() {
 //
 int DomdecRecipComm::calc_pcomm() {
   pcomm.at(0) = 0;
-  for (int i=1;i < direct_nodes.size()+1;i++) {
-    pcomm.at(i) = pcomm.at(i-1) + ncomm.at(i-i);
+  for (int i=1;i <= direct_nodes.size();i++) {
+    pcomm.at(i) = pcomm.at(i-1) + ncomm.at(i-1);
   }
   return pcomm.at(direct_nodes.size());
 }

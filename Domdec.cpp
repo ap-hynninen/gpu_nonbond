@@ -142,3 +142,13 @@ bool Domdec::checkNumGroups(std::vector<AtomGroupBase*>& atomGroupVector) {
 
   return ok;
 }
+
+//
+// Combines heuristic flags among all nodes
+//
+bool Domdec::checkHeuristic(const bool heuristic) {
+  int heuristic_in = (int)heuristic;
+  int heuristic_out;
+  MPICheck(MPI_Allreduce(&heuristic_in, &heuristic_out, 1, MPI_INT, MPI_LOR, comm));
+  return (bool)heuristic_out;
+}

@@ -201,6 +201,8 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     xyzq_copy.set_xyzq(coord, glo_q, domdec.get_loc2glo_ptr(), domdec.get_xyz_shift(),
 		       domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz());
 
+    //nlist.set_test(true);
+
     // Sort coordinates
     // NOTE: Builds domdec.loc2glo and nlist->glo2loc
     nlist.sort(domdec.get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec.get_loc2glo_ptr());
@@ -208,16 +210,13 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Build neighborlist
     nlist.build(domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), domdec.get_rnl(),
 		xyzq.xyzq, domdec.get_loc2glo_ptr());
-    //cudaCheck(cudaDeviceSynchronize());
 
     // Build bonded tables
     domdecGroups.buildGroupTables();
     domdecGroups.syncGroupTables();
 
     // Check the total number of groups
-    if (domdec.checkNumGroups(domdecGroups.get_atomGroupVector())) {
-      fprintf(stderr,"checkNumGroups OK\n");
-    }
+    domdec.checkNumGroups(domdecGroups.get_atomGroupVector());
     
     // Setup bonded interaction lists
     bonded.setup_list(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
@@ -255,8 +254,6 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Update and re-order communication buffers
     domdec.comm_update(nlist.get_glo2loc(), coord);
 
-    if (domdec.get_mynode() == 0) xyzq.save("xyzq0.txt");
-
   } else {
     neighborlist_updated = false;
     // Copy local coordinates to xyzq -array
@@ -267,12 +264,6 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Copy import volume coordinates to xyzq -array
     xyzq.set_xyz(coord, domdec.get_ncoord(), domdec.get_ncoord_tot()-1, domdec.get_xyz_shift(),
 		 domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), direct_stream[0]);
-
-    //xyzq_copy.set_xyzq(coord, glo_q, domdec.get_loc2glo_ptr(), domdec.get_xyz_shift(),
-    //domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz());
-
-    cudaCheck(cudaDeviceSynchronize());
-    if (domdec.get_mynode() == 0) xyzq.save("xyzq1.txt");
 
   }
 
@@ -287,7 +278,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   force.realloc(domdec.get_ncoord_tot());
 
   bool do_recipcomm = recipComm.get_hasPureRecip() || 
-    (recipComm.get_num_recip() > 0  && recipComm.get_num_direct() > 1);
+    (recipComm.get_num_recip() > 0 && recipComm.get_num_direct() > 1);
 
   if (do_recipcomm) {
     if (recipComm.get_isRecip() && recip == NULL) {
@@ -307,6 +298,9 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
       } else {
 	recipComm.send_ncoord(domdec.get_ncoord());
       }
+    }
+    if (recipComm.get_isRecip() && recipComm.get_num_recip() == 1) {
+      assert(recipComm.get_ncoord() == domdec.get_ncoord_glo());
     }
     // Re-allocate recip_xyzq and recip_force if needed
     if (recipComm.get_isRecip() && recipComm.get_num_direct() > 1) {
@@ -346,7 +340,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   cudaCheck(cudaStreamWaitEvent(bonded_stream, done_force_clear_event, 0));
   bonded.calc_force(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
     		    calc_energy, calc_virial, force.stride(), force.xyz(),
-		    calc_bond, calc_ureyb, calc_angle, calc_dihe, calc_imdihe, calc_cmap,
+  		    calc_bond, calc_ureyb, calc_angle, calc_dihe, calc_imdihe, calc_cmap,
   		    bonded_stream);
   cudaCheck(cudaEventRecord(done_bonded_event, bonded_stream));
 
@@ -496,8 +490,8 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double>& coord, cudaStream
   cudaCheck(cudaGetLastError());
 
   copy_DtoH_sync<int>(d_heuristic_flag, h_heuristic_flag, 1);
-  
-  return (*h_heuristic_flag != 0);
+
+  return domdec.checkHeuristic((*h_heuristic_flag != 0));
 }
 
 //

@@ -209,6 +209,8 @@ protected:
 		   double *xrecvbuf, double *x, double *xglo);
 
   bool checkNumGroups(std::vector<AtomGroupBase*>& atomGroupVector);
+
+  bool checkHeuristic(const bool heuristic);
 };
 
 #endif // DOMDEC_H

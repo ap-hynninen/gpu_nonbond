@@ -134,7 +134,6 @@ void test() {
   nlist.sort(zone_patom, xyzq_unsorted.xyzq, xyzq_sorted.xyzq, loc2glo);
   nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq, loc2glo);
   cudaCheck(cudaDeviceSynchronize());
-  nlist.test_build(zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq, loc2glo);
 
   std::cout << "================ nlist ================" << std::endl;
   nlist.analyze();

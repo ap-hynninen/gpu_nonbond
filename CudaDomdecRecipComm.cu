@@ -110,7 +110,7 @@ void CudaDomdecRecipComm::recv_coord(float4* coord) {
       } else {
 	// Copy device buffer
 	assert(coord_copy_ptr != NULL);
-	copy_DtoD<float4>(coord_copy_ptr, &coord[pcomm.at(i)], ncomm.at(i));
+	copy_DtoD_sync<float4>(coord_copy_ptr, &coord[pcomm.at(i)], ncomm.at(i));
       }
     }
     // Store pointer to where coordinates are found

@@ -147,6 +147,14 @@ public:
     }
   }
 
+  void get_host_xyz(T*& hx, T*& hy, T*& hz) {
+    hx = this->_x;
+    hy = this->_y;
+    hz = this->_z;
+  }
+
+  void release_host_xyz(T*& hx, T*& hy, T*& hz) {}
+
 };
 
 

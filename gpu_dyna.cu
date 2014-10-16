@@ -586,6 +586,8 @@ void test(const int nstep) {
     leapfrog.set_timestep(2.0);
     leapfrog.run(nstep);
 
+    cudaCheck(cudaDeviceSynchronize());
+
     cudaCheck(cudaStreamDestroy(integrator_stream));
 
     if (mynode == 0) {
