@@ -32,11 +32,6 @@ int CudaMPI::Waitall(int nrequest, MPI_Request *request) {
 }
 */
 
-//
-// NOTE: Seems like cuda aware MPI calls require MPI_Barrier() before sending/receiving.
-// This was noticed under OpenMPI 1.8.1, gcc 4.8.3, cuda 6.5
-//
-
 int CudaMPI::Sendrecv(void *sendbuf, int sendcount, int dest, int sendtag,
 		      void *recvbuf, int recvcount, int source, int recvtag, MPI_Status *status,
 		      void *h_sendbuf, void *h_recvbuf) {
@@ -44,7 +39,6 @@ int CudaMPI::Sendrecv(void *sendbuf, int sendcount, int dest, int sendtag,
 
   if (CudaAware) {
     gpu_range_start("MPI_Sendrecv (CudaAware)");
-    MPI_Barrier(comm);
     retval = MPI_Sendrecv(sendbuf, sendcount, MPI_BYTE, dest, sendtag,
 			  recvbuf, recvcount, MPI_BYTE, source, recvtag, comm, status);
     gpu_range_stop();
@@ -65,7 +59,6 @@ int CudaMPI::Send(void *buf, int count, int dest, int tag, void *h_buf) {
 
   if (CudaAware) {
     gpu_range_start("MPI_Send (CudaAware)");
-    MPI_Barrier(comm);
     retval = MPI_Send(buf, count, MPI_BYTE, dest, tag, comm);
     gpu_range_stop();
   } else {
@@ -83,7 +76,6 @@ int CudaMPI::Recv(void *buf, int count, int source, int tag, MPI_Status *status,
 
   if (CudaAware) {
     gpu_range_start("MPI_Recv (CudaAware)");
-    MPI_Barrier(comm);
     retval = MPI_Recv(buf, count, MPI_BYTE, source, tag, comm, status);
     gpu_range_stop();
   } else {

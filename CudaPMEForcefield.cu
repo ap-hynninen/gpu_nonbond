@@ -395,10 +395,15 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
     recip->get_energy_virial(calc_energy, calc_virial, energy_ewksum, energy_ewself, vir);
   }
 
+  // Make CPU wait until all direct_stream[0] has finished
+  // NOTE: Due to the GPU waits above, this implies that all the other streams have
+  //       finished their computation as well
+  cudaCheck(cudaStreamSynchronize(direct_stream[0]));
   // Communicate Direct-Direct
   domdec.comm_force(force);
 
   if (do_recipcomm) {
+    cudaCheck(cudaStreamSynchronize(recip_stream));
     // Communicate Direct-Recip forces
     if (recipComm.get_isRecip()) recipComm.send_force(recip_force);
     recipComm.recv_force(recip_force);

@@ -20,6 +20,7 @@ void CudaDomdecRecipLooper::run() {
     recip.calc(recipComm.get_inv_boxx(), recipComm.get_inv_boxy(), recipComm.get_inv_boxz(),
 	       recipComm.get_coord_ptr(), recipComm.get_ncoord(),
 	       recipComm.get_calc_energy(), recipComm.get_calc_virial(), force);
+    cudaCheck(cudaStreamSynchronize(stream));
 
     // Send forces to Direct nodes
     recipComm.send_force(force);
