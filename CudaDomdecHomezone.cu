@@ -96,9 +96,6 @@ __global__ void fill_send_kernel(const int ncoord,
     if (diz == 3) error = true;
     diz = (diz % 3);
 
-    //if (error) printf("z=%lf zlo=%lf %lf %lf zhi=%lf %lf %lf\n",
-    //z,sh_lozp[0],sh_lozp[1],sh_lozp[2],sh_hizp[0],sh_hizp[1],sh_hizp[2]);
-
     // Transform into (-1,0,1)
     dix--;
     diy--;

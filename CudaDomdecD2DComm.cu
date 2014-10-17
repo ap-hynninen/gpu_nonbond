@@ -155,6 +155,8 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	z_nsend.at(i) = atom_pos[domdec.get_ncoord()];
 	z_psend.at(i+1) = z_psend.at(i) + z_nsend.at(i);
 
+	z_send_glo.resize(z_psend.at(i+1));
+
 	z_send_loc0.at(i).resize(z_nsend.at(i));
 
 	// atom_pos[] now contains position to store each atom
@@ -177,6 +179,10 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	// Pack in atom global indices to sendbuf[]
 	thrust::gather(z_send_loc0.at(i).begin(), z_send_loc0.at(i).end(),
 		       loc2glo.begin(), sendbuf_ind_ptr);
+
+	// Make a copy of global indices to z_send_glo
+	thrust::copy(sendbuf_ind_ptr, sendbuf_ind_ptr+z_nsend.at(i),
+		     z_send_glo.begin()+z_psend.at(i));
 
 	// Advance sendbuf position
 	pos += alignInt(z_nsend.at(i),2)*sizeof(int);
@@ -332,10 +338,8 @@ void CudaDomdecD2DComm::comm_update(int* glo2loc, cudaXYZ<double>& coord) {
     for (int i=0;i < nz_comm;i++) {
       // Map:
       // z_send_loc = glo2loc[z_send_glo]
-      // z_send_glo is in sendbuf[psendByte.at(i)]
-      thrust::device_ptr<int> z_send_glo((int *)&sendbuf[psendByte.at(i)]);
-      thrust::copy(thrust::make_permutation_iterator(glo2loc_ptr, z_send_glo),
-		   thrust::make_permutation_iterator(glo2loc_ptr, z_send_glo+z_nsend.at(i)),
+      thrust::copy(thrust::make_permutation_iterator(glo2loc_ptr, z_send_glo.begin()+z_psend.at(i)),
+		   thrust::make_permutation_iterator(glo2loc_ptr, z_send_glo.begin()+z_psend.at(i+1)),
 		   z_send_loc.begin()+z_psend.at(i));
     }
 

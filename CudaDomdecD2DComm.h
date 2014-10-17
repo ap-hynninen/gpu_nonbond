@@ -23,7 +23,10 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
   std::vector< thrust::device_vector<int> > z_send_loc0;
 
   // Local indices that we send to -z direction
-  thrust::device_vector<int> z_send_loc;  
+  thrust::device_vector<int> z_send_loc;
+
+  // Global indices that we send to -z direction
+  thrust::device_vector<int> z_send_glo;
 
   // Local indices that we receive from +z direction
   thrust::device_vector<int> z_recv_loc;
