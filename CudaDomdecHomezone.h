@@ -65,6 +65,9 @@ class CudaDomdecHomezone {
   // neighnode[nneigh]
   std::vector<int> neighnode;
 
+  // Communication order
+  std::vector<int> comm_order;
+
   // Index of mynode in neighnode (i.e. neighnode[imynode] = domdec.get_mynode())
   int imynode;
 

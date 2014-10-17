@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <vector>
 #include <cstring>
 #include <cuda.h>
 #include "cuda_utils.h"
@@ -20,6 +21,7 @@ int main(int argc, char *argv[]) {
   int nstep = 1;
   bool cudaAware = false;
   bool use_pure_recip = false;
+  std::vector<int> devices;
 
   int iarg = 1;
   bool arg_ok = true;
@@ -62,6 +64,17 @@ int main(int argc, char *argv[]) {
 	break;
       }
       iarg++;
+    } else if (strcmp(argv[iarg],"-devices")==0) {
+      iarg++;
+      if (iarg == argc) {
+	arg_ok = false;
+	break;
+      }
+      while (iarg < argc && isdigit(argv[iarg][0])) {
+	//fprintf(stderr,"%d\n",atoi(argv[iarg]));
+	devices.push_back(atoi(argv[iarg]));
+	iarg++;
+      }
     } else {
       std::cout << "Invalid option " << argv[iarg] << std::endl;
       arg_ok = false;
@@ -72,6 +85,7 @@ int main(int argc, char *argv[]) {
   if (arg_ok) {
     // Get the local rank within this node from environmental variables
     int local_rank = get_env_local_rank();
+    int local_size = get_env_local_size();
 
     if (local_rank < 0 && cudaAware) {
       std::cout << "Requesting CUDA aware MPI but local rank not defined by environment" << std::endl;
@@ -79,13 +93,13 @@ int main(int argc, char *argv[]) {
       cudaAware = false;
     }
 
-    std::cout << "local_rank = " << local_rank << std::endl;
-    if (local_rank >= 0) {
-      start_gpu(1, local_rank);
+    std::cout << "local_rank=" << local_rank << " local_size=" << local_size << std::endl;
+    if (local_rank >= 0 && local_size > 1) {
+      start_gpu(local_size, local_rank, devices);
       start_mpi(argc, argv, numnode, mynode);
     } else {
       start_mpi(argc, argv, numnode, mynode);
-      start_gpu(1, mynode);
+      start_gpu(numnode, mynode, devices);
     }
 
     if (cudaAware) {
@@ -111,6 +125,7 @@ int main(int argc, char *argv[]) {
     std::cout << "-nstep N" << std::endl;
     std::cout << "-cuda-aware <yes|no> " << std::endl;
     std::cout << "-use-pure-recip <yes|no>" << std::endl;
+    std::cout << "-devices 0 1 2 3" << std::endl;
     ret_val = 1;
   }
 

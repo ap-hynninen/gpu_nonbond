@@ -1,4 +1,5 @@
 #include <cassert>
+#include <algorithm>
 #include "CudaDomdecHomezone.h"
 #include "CudaMPI.h"
 #include "mpi_utils.h"
@@ -94,6 +95,9 @@ __global__ void fill_send_kernel(const int ncoord,
     if (z >= sh_lozp[2] && z < sh_hizp[2]) diz = 2;
     if (diz == 3) error = true;
     diz = (diz % 3);
+
+    //if (error) printf("z=%lf zlo=%lf %lf %lf zhi=%lf %lf %lf\n",
+    //z,sh_lozp[0],sh_lozp[1],sh_lozp[2],sh_hizp[0],sh_hizp[1],sh_hizp[2]);
 
     // Transform into (-1,0,1)
     dix--;
@@ -291,6 +295,23 @@ CudaDomdecHomezone::CudaDomdecHomezone(Domdec& domdec, CudaMPI& cudaMPI) :
     }
   }
 
+  //
+  // Neighbor node communication order. This is setup such that the self node comes first and the
+  // rest of the nodes are according to their MPI rank
+  //
+  // Get an ordered array of neighbor nodes without the self node
+  std::vector<int> neighnode_sort(neighnode);
+  neighnode_sort.erase(neighnode_sort.begin() + imynode);
+  std::sort(neighnode_sort.begin(), neighnode_sort.end());
+  // Place the self node at front, and the rest of the neighbors in sorted order after it
+  comm_order.resize(nneigh);
+  comm_order.at(0) = imynode;
+  for (int i=1;i < nneigh;i++) {
+    // MPI rank we're looking for
+    int rank = neighnode_sort.at(i-1);
+    comm_order.at(i) = (int)(std::find(neighnode.begin(), neighnode.end(), rank) - neighnode.begin());
+  }
+
 }
 
 //
@@ -410,7 +431,7 @@ int CudaDomdecHomezone::update(const int ncoord, cudaXYZ<double>& coord, cudaXYZ
 
   // Check for error flag
   if (h_num_send[nneigh] != 0) {
-    std::cout << "CudaDomdecHomezone::update, atom(s) moved more than a single box length"
+    std::cerr << "CudaDomdecHomezone::update, atom(s) moved more than a single box length"
 	      << std::endl;
     exit(1);
   }
@@ -464,7 +485,8 @@ int CudaDomdecHomezone::update(const int ncoord, cudaXYZ<double>& coord, cudaXYZ
   const int COORD_TAG = 1;
 
   // Send & Recv coordinate data
-  for (int i=0;i < nneigh;i++) {
+  for (int j=0;j < nneigh;j++) {
+    int i = comm_order.at(j);
     if (neighnode.at(i) != domdec.get_mynode()) {
       if (h_num_send[i] > 0 && num_recv.at(i) > 0) {
 	MPICheck(cudaMPI.Sendrecv(&send[h_pos_send[i]], h_num_send[i]*sizeof(neighcomm_t), 

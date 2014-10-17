@@ -18,7 +18,8 @@ int main(int argc, char *argv[]) {
   //  start_mpi(argc, argv, numnode, mynode);
   //#endif
 
-  start_gpu(numnode, mynode);
+  std::vector<int> devices;
+  start_gpu(numnode, mynode, devices);
 
   //  time_transpose();
 

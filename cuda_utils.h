@@ -3,6 +3,7 @@
 #define CUDA_UTILS_H
 
 #include <stdio.h>
+#include <vector>
 
 #define cudaCheck(stmt) do {                                 \
         cudaError_t err = stmt;                            \
@@ -386,7 +387,7 @@ void gpu_range_stop();
 
 bool test_cudaAware(const int mynode, const int numnode);
 
-void start_gpu(int numnode, int mynode);
+void start_gpu(int numnode, int mynode, std::vector<int>& devices);
 void stop_gpu();
 int get_gpu_ind();
 int get_cuda_arch();

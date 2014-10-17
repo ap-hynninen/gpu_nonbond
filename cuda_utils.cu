@@ -1,6 +1,5 @@
 #include <iostream>
 #include <fstream>
-#include <vector>
 #include <algorithm>
 #include <utility>
 #include <cuda.h>
@@ -430,8 +429,7 @@ bool test_cudaAware(const int mynode, const int numnode) {
   return ok;
 }
 
-void start_gpu(int numnode, int mynode) {
-  //int devices[4] = {0, 1, 2, 3};
+void start_gpu(int numnode, int mynode, std::vector<int>& devices) {
 
   int deviceNum;
   cudaCheck(cudaGetDeviceCount(&deviceNum));
@@ -440,16 +438,22 @@ void start_gpu(int numnode, int mynode) {
     exit(1);
   }
 
-  // Get all device properties and sort "most powerful first"
-  std::vector<int> deviceID(deviceNum);
-  std::vector<std::pair<int, cudaDeviceProp> > gpuList(deviceNum);
-  for (int i=0;i < deviceNum;i++) {
-    gpuList.at(i).first = i;
-    cudaCheck(cudaGetDeviceProperties(&gpuList.at(i).second, i));
+  if (devices.size() != numnode) {
+    if (mynode == 0) std::cout << "Selecting GPUs most powerful first" << std::endl;
+    // Get all device properties and sort "most powerful first"
+    std::vector<int> deviceID(deviceNum);
+    std::vector<std::pair<int, cudaDeviceProp> > gpuList(deviceNum);
+    for (int i=0;i < deviceNum;i++) {
+      gpuList.at(i).first = i;
+      cudaCheck(cudaGetDeviceProperties(&gpuList.at(i).second, i));
+    }
+    std::sort(gpuList.begin(), gpuList.end(), gpuDevCompare);
+    gpu_ind = gpuList.at(mynode % deviceNum).first;
+  } else {
+    if (mynode == 0) std::cout << "Selecting GPUs using device list" << std::endl;
+    // Use devices in order determined by "devices"
+    gpu_ind = devices.at(mynode % deviceNum);
   }
-  std::sort(gpuList.begin(), gpuList.end(), gpuDevCompare);
-
-  gpu_ind = gpuList.at(mynode % deviceNum).first;
 
   cudaCheck(cudaSetDevice(gpu_ind));
 

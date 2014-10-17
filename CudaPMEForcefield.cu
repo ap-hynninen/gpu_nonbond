@@ -214,6 +214,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     domdecGroups.buildGroupTables();
     domdecGroups.syncGroupTables();
 
+
     // Check the total number of groups
     if (!domdec.checkNumGroups(domdecGroups.get_atomGroupVector())) exit(1);
     

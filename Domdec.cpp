@@ -295,5 +295,4 @@ void Domdec::copy_lohi_buf(double *buf) {
     
   }
   */
-
 }

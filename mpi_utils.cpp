@@ -38,6 +38,31 @@ int get_env_local_rank() {
 }
 
 //
+// Returns the local size set by environment variable
+// Returns -1 if no local size found
+//
+int get_env_local_size() {
+  char *localRankStr = NULL;
+  int size;
+
+  // We extract the local rank initialization using an environment variable
+  if ((localRankStr = getenv("OMPI_COMM_WORLD_LOCAL_SIZE")) != NULL) {
+    // OpenMPI found
+    size = atoi(localRankStr);
+  } else if ((localRankStr = getenv("MV2_COMM_WORLD_LOCAL_SIZE")) != NULL) {
+    // MVAPICH found
+    size = atoi(localRankStr);
+  } else {
+    size = -1;
+  }
+
+  return size;
+}
+
+
+
+
+//
 // Concatenate list of integers among all nodes and place the the result in root
 //
 void MPI_Concatenate(int* sendbuf, int nsend, int* recvbuf, int root, MPI_Comm comm) {

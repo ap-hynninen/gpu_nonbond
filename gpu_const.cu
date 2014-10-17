@@ -17,7 +17,8 @@ int main(int argc, char *argv[]) {
   int numnode = 1;
   int mynode = 0;
 
-  start_gpu(numnode, mynode);
+  std::vector<int> devices;
+  start_gpu(numnode, mynode, devices);
   
   test();
 
