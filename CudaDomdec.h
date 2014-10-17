@@ -38,6 +38,10 @@ class CudaDomdec : public Domdec {
   // Domain decomposition direct-direct communication
   CudaDomdecD2DComm D2Dcomm;
 
+  // Error flag for calc_xyz_shift. Used for detecting atoms that are out of bounds
+  int* error_flag;
+  int* h_error_flag;
+
  public:
 
   CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,

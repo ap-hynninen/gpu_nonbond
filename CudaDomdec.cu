@@ -16,8 +16,10 @@ __global__ void calc_xyz_shift(const int ncoord,
 			       const double loy, const double hiy,
 			       const double loz, const double hiz,
 			       float3* __restrict__ xyz_shift,
-			       char* __restrict__ coordLoc) {
+			       char* __restrict__ coordLoc,
+			       int* __restrict__ error_flag) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
+  bool error = false;
   if (i < ncoord) {
     double xi = x[i]*inv_boxx + 0.5 - lox;
     double yi = y[i]*inv_boxy + 0.5 - loy;
@@ -39,7 +41,11 @@ __global__ void calc_xyz_shift(const int ncoord,
     //      ((zf >= loz && zf < hiz) << 2);
     int loca = (xf >= 0.0 && xf < hix) | ((yf >= 0.0 && yf < hiy) << 1) | 
       ((zf >= 0.0 && zf < hiz) << 2);
+    if (loca == 0) error = true;
     coordLoc[iglo] = (char)loca;
+  }
+  if (error) {
+    *error_flag = 1;
   }
 }
 
@@ -118,6 +124,9 @@ CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, do
 
   allocate<char>(&coordLoc, ncoord_glo);
   clear_gpu_array_sync<char>(coordLoc, ncoord_glo);
+
+  allocate<int>(&error_flag, 1);
+  allocate_host<int>(&h_error_flag, 1);
 }
 
 //
@@ -125,6 +134,8 @@ CudaDomdec::CudaDomdec(int ncoord_glo, double boxx, double boxy, double boxz, do
 //
 CudaDomdec::~CudaDomdec() {
   deallocate<char>(&coordLoc);
+  deallocate<int>(&error_flag);
+  deallocate_host<int>(&h_error_flag);
   if (xyz_shift0 != NULL) deallocate<float3>(&xyz_shift0);
   if (xyz_shift1 != NULL) deallocate<float3>(&xyz_shift1);
   if (mass_tmp != NULL) deallocate<float>(&mass_tmp);
@@ -171,6 +182,7 @@ void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStrea
     reallocate<float3>(&xyz_shift1, &xyz_shift1_len, this->get_ncoord_tot(), fac);    
 
     clear_gpu_array<char>(coordLoc, ncoord_glo, stream);
+    clear_gpu_array<int>(error_flag, 1, stream);
 
     nthread = 512;
     nblock = (this->get_ncoord_tot() - 1)/nthread + 1;
@@ -181,8 +193,16 @@ void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStrea
        this->get_lo_bx(), this->get_hi_bx()-this->get_lo_bx(),
        this->get_lo_by(), this->get_hi_by()-this->get_lo_by(),
        this->get_lo_bz(), this->get_hi_bz()-this->get_lo_bz(),
-       xyz_shift0, coordLoc);
+       xyz_shift0, coordLoc, error_flag);
     cudaCheck(cudaGetLastError());
+
+    copy_DtoH<int>(error_flag, h_error_flag, 1, stream);
+    cudaCheck(cudaStreamSynchronize(stream));
+    
+    if (*h_error_flag != 0) {
+      std::cout << "CudaDomdec::comm_coord, coordinate out of bounds detected in calc_xyz_shit" << std::endl;
+      exit(1);
+    }
   }
 
 }

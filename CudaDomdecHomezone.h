@@ -29,6 +29,10 @@ class CudaDomdecHomezone {
   // Number of neighbors, including the current node
   int nneigh;
 
+  // Lo-Hi fractional coordinates buffer, size 78
+  double* lohi_buf;
+  double* h_lohi_buf;
+
   // ------------
   // Device memory
   // ------------

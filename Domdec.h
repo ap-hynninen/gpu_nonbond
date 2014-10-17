@@ -97,19 +97,36 @@ protected:
   Domdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,
 	 int nx, int ny, int nz, int mynode, MPI_Comm comm);
 
-  // Returns fractional boundaries for this node
-  double get_lo_bx() {return bx.at(homeix);}
-  double get_hi_bx() {return bx.at(homeix+1);}
-  double get_lo_by() {return by.at(homeix).at(homeiy);}
-  double get_hi_by() {return by.at(homeix).at(homeiy+1);}
-  double get_lo_bz() {return bz.at(homeix).at(homeiy).at(homeiz);}
-  double get_hi_bz() {return bz.at(homeix).at(homeiy).at(homeiz+1);}
+  // Returns fractional boundaries for nodes relative to this node
+  double get_lo_bx(int x=0) {return bx.at((homeix+x+nx)%nx);}
+  double get_hi_bx(int x=0) {return bx.at((homeix+x+nx)%nx+1);}
+  double get_lo_by(int x=0,int y=0) {return by.at((homeix+x+nx)%nx).at((homeiy+y+ny)%ny);}
+  double get_hi_by(int x=0,int y=0) {return by.at((homeix+x+nx)%nx).at((homeiy+y+ny)%ny+1);}
+  double get_lo_bz(int x=0,int y=0,int z=0) {
+    return bz.at((homeix+x+nx)%nx).at((homeiy+y+ny)%ny).at((homeiz+z+nz)%nz);
+  }
+  double get_hi_bz(int x=0,int y=0,int z=0) {
+    return bz.at((homeix+x+nx)%nx).at((homeiy+y+ny)%ny).at((homeiz+z+nz)%nz+1);
+  }
+  double get_lo_bx(int x=0) const {return bx.at((homeix+x+nx)%nx);}
+  double get_hi_bx(int x=0) const {return bx.at((homeix+x+nx)%nx+1);}
+  double get_lo_by(int x=0,int y=0) const {return by.at((homeix+x+nx)%nx).at((homeiy+y+ny)%ny);}
+  double get_hi_by(int x=0,int y=0) const {return by.at((homeix+x+nx)%nx).at((homeiy+y+ny)%ny+1);}
+  double get_lo_bz(int x=0,int y=0,int z=0) const {
+    return bz.at((homeix+x+nx)%nx).at((homeiy+y+ny)%ny).at((homeiz+z+nz)%nz);
+  }
+  double get_hi_bz(int x=0,int y=0,int z=0) const {
+    return bz.at((homeix+x+nx)%nx).at((homeiy+y+ny)%ny).at((homeiz+z+nz)%nz+1);
+  }
+
+  /*
   double get_lo_bx() const {return bx.at(homeix);}
   double get_hi_bx() const {return bx.at(homeix+1);}
   double get_lo_by() const {return by.at(homeix).at(homeiy);}
   double get_hi_by() const {return by.at(homeix).at(homeiy+1);}
   double get_lo_bz() const {return bz.at(homeix).at(homeiy).at(homeiz);}
   double get_hi_bz() const {return bz.at(homeix).at(homeiy).at(homeiz+1);}
+  */
 
   // Return the global total number of coordinates
   int get_ncoord_glo() {return ncoord_glo;}
@@ -212,6 +229,7 @@ protected:
   bool checkGroup(AtomGroupBase& atomGroup, const int numTot);
 
   bool checkHeuristic(const bool heuristic);
+  void copy_lohi_buf(double *buf);
 };
 
 #endif // DOMDEC_H

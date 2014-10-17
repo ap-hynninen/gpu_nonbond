@@ -2,6 +2,7 @@
 #include "CudaDomdecHomezone.h"
 #include "CudaMPI.h"
 #include "mpi_utils.h"
+#include "gpu_utils.h"
 
 //
 // Returns index from (dix, diy, diz)
@@ -34,22 +35,30 @@ __global__ void fill_send_kernel(const int ncoord,
 				 const double* __restrict__ yin,
 				 const double* __restrict__ zin,
 				 const double inv_boxx, const double inv_boxy, const double inv_boxz,
-				 const double lox, const double hix,
-				 const double loy, const double hiy,
-				 const double loz, const double hiz,
+				 const double* __restrict__ lohi_buf,
 				 const int nx, const int ny, const int nz, const int nneigh,
-				 const int homeix, const int homeiy, const int homeiz,
 				 int* __restrict__ num_send,
 				 int* __restrict__ destind) {
   // Shared memory
-  // Requires: 27*sizeof(int)
-  __shared__ int sh_num_send[27];
+  // Requires: 2*3*sizeof(double) + 2*9*sizeof(double) + 2*27*sizeof(double) + nneigh*sizeof(int)
+  extern __shared__ double sh_buf[];
+  double *sh_lox = &sh_buf[0];      // In total this is 2*3+2*9+2*27=78 doubles
+  double *sh_hix = &sh_buf[3];
+  double *sh_loy = &sh_buf[6];
+  double *sh_hiy = &sh_buf[15];
+  double *sh_loz = &sh_buf[24];
+  double *sh_hiz = &sh_buf[51];
+  int* sh_num_send = (int *)&sh_buf[78];
 
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
   int nxt = min(3, nx);
   int nxyt = nxt*min(3, ny);
-  if (threadIdx.x < nneigh) {
-    sh_num_send[threadIdx.x] = 0;
+  if (threadIdx.x < 78) {
+    sh_buf[threadIdx.x] = lohi_buf[threadIdx.x];
+  }
+  const int warpstart = ((78-1)/warpsize+1)*warpsize;
+  if (threadIdx.x >= warpstart && threadIdx.x-warpstart < nneigh) {
+    sh_num_send[threadIdx.x-warpstart] = 0;
   }
   __syncthreads();
   bool error = false;
@@ -61,24 +70,35 @@ __global__ void fill_send_kernel(const int ncoord,
     y -= floor(y);
     z -= floor(z);
 
-    int dix = -(x < lox) + (x > hix);
-    int diy = -(y < loy) + (y > hiy);
-    int diz = -(z < loz) + (z > hiz);
+    int dix=3;
+    if (x >= sh_lox[0] && x < sh_hix[0]) dix = 0;
+    if (x >= sh_lox[1] && x < sh_hix[1]) dix = 1;
+    if (x >= sh_lox[2] && x < sh_hix[2]) dix = 2;
+    if (dix == 3) error = true;
+    dix = (dix % 3);   // simple error recovery
 
-    /*
-    int ix = (int)(x*(double)nx);
-    int iy = (int)(y*(double)ny);
-    int iz = (int)(z*(double)nz);
+    double *sh_loyp = &sh_loy[dix*3];
+    double *sh_hiyp = &sh_hiy[dix*3];
+    int diy=3;
+    if (y >= sh_loyp[0] && y < sh_hiyp[0]) diy = 0;
+    if (y >= sh_loyp[1] && y < sh_hiyp[1]) diy = 1;
+    if (y >= sh_loyp[2] && y < sh_hiyp[2]) diy = 2;
+    if (diy == 3) error = true;
+    diy = (diy % 3);
 
-    int dix = ix-homeix;
-    int diy = iy-homeiy;
-    int diz = iz-homeiz;
-    */
+    double *sh_lozp = &sh_loz[dix*9 + diy*3];
+    double *sh_hizp = &sh_hiz[dix*9 + diy*3];
+    int diz=3;
+    if (z >= sh_lozp[0] && z < sh_hizp[0]) diz = 0;
+    if (z >= sh_lozp[1] && z < sh_hizp[1]) diz = 1;
+    if (z >= sh_lozp[2] && z < sh_hizp[2]) diz = 2;
+    if (diz == 3) error = true;
+    diz = (diz % 3);
 
-    // Check error flag
-    if (abs(dix) > 1 || abs(diy) > 1 || abs(diz) > 1) {
-      error = true;
-    }
+    // Transform into (-1,0,1)
+    dix--;
+    diy--;
+    diz--;
 
     int ind = dix2ind(dix, diy, diz, nx, ny, nz, nxt, nxyt);
 
@@ -206,6 +226,9 @@ CudaDomdecHomezone::CudaDomdecHomezone(Domdec& domdec, CudaMPI& cudaMPI) :
   allocate<int>(&pos_send, nneigh+1);
   allocate_host<int>(&h_num_send, nneigh+1);
 
+  allocate<double>(&lohi_buf, 78);
+  allocate_host<double>(&h_lohi_buf, 78);
+
   destind_len = 0;
   destind = NULL;
 
@@ -277,6 +300,8 @@ CudaDomdecHomezone::~CudaDomdecHomezone() {
   deallocate<int>(&num_send);
   deallocate<int>(&pos_send);
   deallocate_host<int>(&h_num_send);
+  deallocate<double>(&lohi_buf);
+  deallocate_host<double>(&h_lohi_buf);
   delete [] h_pos_send;
   if (destind != NULL) deallocate<int>(&destind);
   if (send != NULL) deallocate<neighcomm_t>(&send);
@@ -324,14 +349,6 @@ int CudaDomdecHomezone::build(hostXYZ<double>& h_coord) {
     if (x >= lox && x < hix && y >= loy && y < hiy && z >= loz && z < hiz) {
       h_loc2glo[nloc++] = i;
     }
-    /*
-    int ix = (int)(x*(double)nx);
-    int iy = (int)(y*(double)ny);
-    int iz = (int)(z*(double)nz);
-    if (ix == homeix && iy == homeiy && iz == homeiz) {
-
-    }
-    */
   }
 
   loc2glo.resize(nloc);
@@ -358,18 +375,20 @@ int CudaDomdecHomezone::update(const int ncoord, cudaXYZ<double>& coord, cudaXYZ
 
   clear_gpu_array<int>(num_send, nneigh+1, stream);
 
+  // Get a copy of lohi_buf and copy it to GPU
+  domdec.copy_lohi_buf(h_lohi_buf);
+  copy_HtoD<double>(h_lohi_buf, lohi_buf, 78, stream);
+
   int nthread = 1024;
   int nblock = (ncoord - 1)/nthread + 1;
+  int shmem = 2*3*sizeof(double) + 2*9*sizeof(double) + 2*27*sizeof(double) + nneigh*sizeof(int);
 
   // Assign coordinates into neighboring, or home, sub-boxes
-  fill_send_kernel<<< nblock, nthread, 0, stream >>>
+  fill_send_kernel<<< nblock, nthread, shmem, stream >>>
     (ncoord, coord.x(), coord.y(), coord.z(),     
      domdec.get_inv_boxx(), domdec.get_inv_boxy(), domdec.get_inv_boxz(),
-     domdec.get_lo_bx(), domdec.get_hi_bx(),
-     domdec.get_lo_by(), domdec.get_hi_by(),
-     domdec.get_lo_bz(), domdec.get_hi_bz(),
+     lohi_buf,
      domdec.get_nx(), domdec.get_ny(), domdec.get_nz(), nneigh,
-     domdec.get_homeix(), domdec.get_homeiy(), domdec.get_homeiz(),
      num_send, destind);
   cudaCheck(cudaGetLastError());
 

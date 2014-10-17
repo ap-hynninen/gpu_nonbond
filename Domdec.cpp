@@ -146,7 +146,6 @@ bool Domdec::checkGroup(AtomGroupBase& atomGroup, const int numTot) {
 		<< " Correct=" << atomGroup.get_numGroupList() << std::endl;
     }
     if (numTot < atomGroup.get_numGroupList()) {
-
       // Get host version of Group table
       std::vector<int> tableVec;
       atomGroup.getGroupTableVec(tableVec);
@@ -186,4 +185,115 @@ bool Domdec::checkHeuristic(const bool heuristic) {
   int heuristic_out;
   MPICheck(MPI_Allreduce(&heuristic_in, &heuristic_out, 1, MPI_INT, MPI_LOR, comm));
   return (bool)heuristic_out;
+}
+
+//
+// Copies fractional boundary buffer a contigiuous buffer of size 78
+// 
+//
+void Domdec::copy_lohi_buf(double *buf) {
+
+  int p=0;
+  for (int x=-1;x <= 1;x++) {
+    int xt = (homeix+x+nx) % nx - homeix;
+    buf[p++] = (x == 0 || xt != 0) ? get_lo_bx(x) : 2.0;
+  }
+  for (int x=-1;x <= 1;x++) {
+    int xt = (homeix+x+nx) % nx - homeix;
+    buf[p++] = (x == 0 || xt != 0) ? get_hi_bx(x) : 2.0;
+  }
+
+  for (int x=-1;x <= 1;x++) {
+    int xt = (homeix+x+nx) % nx - homeix;
+    for (int y=-1;y <= 1;y++) {
+      int yt = (homeiy+y+ny) % ny - homeiy;
+      buf[p++] = ((x == 0 || xt != 0) && (y == 0 || yt != 0)) ? get_lo_by(x,y) : 2.0;
+    }
+  }
+
+  for (int x=-1;x <= 1;x++) {
+    int xt = (homeix+x+nx) % nx - homeix;
+    for (int y=-1;y <= 1;y++) {
+      int yt = (homeiy+y+ny) % ny - homeiy;
+      buf[p++] = ((x == 0 || xt != 0) && (y == 0 || yt != 0)) ? get_hi_by(x,y) : 2.0;
+    }
+  }
+
+  for (int x=-1;x <= 1;x++) {
+    int xt = (homeix+x+nx) % nx - homeix;
+    for (int y=-1;y <= 1;y++) {
+      int yt = (homeiy+y+ny) % ny - homeiy;
+      for (int z=-1;z <= 1;z++) {
+	int zt = (homeiz+z+nz) % nz - homeiz;
+	buf[p++] = ((x == 0 || xt != 0) && 
+		    (y == 0 || yt != 0) && 
+		    (z == 0 || zt != 0)) ? get_lo_bz(x,y,z) : 2.0;
+	//if (buf[p-1] != 2.0) fprintf(stderr,"xyz=%d %d %d\n",x,y,z);
+      }
+    }
+  }
+
+  for (int x=-1;x <= 1;x++) {
+    int xt = (homeix+x+nx) % nx - homeix;
+    for (int y=-1;y <= 1;y++) {
+      int yt = (homeiy+y+ny) % ny - homeiy;
+      for (int z=-1;z <= 1;z++) {
+	int zt = (homeiz+z+nz) % nz - homeiz;
+	buf[p++] = ((x == 0 || xt != 0) && 
+		    (y == 0 || yt != 0) && 
+		    (z == 0 || zt != 0)) ? get_hi_bz(x,y,z) : 2.0;
+      }
+    }
+  }
+
+  assert(p == 78);
+
+  /*
+  if (mynode == 0) {
+
+    p=0;
+    for (int x=-1;x <= 1;x++) {
+      fprintf(stderr,"%lf ",buf[p++]);
+    }
+    fprintf(stderr,"\n");
+    for (int x=-1;x <= 1;x++) {
+      fprintf(stderr,"%lf ",buf[p++]);
+    }
+    fprintf(stderr,"\n");
+    
+    for (int x=-1;x <= 1;x++) {
+      for (int y=-1;y <= 1;y++) {
+	fprintf(stderr,"%lf ",buf[p++]);
+      }
+    }
+    fprintf(stderr,"\n");
+    
+    for (int x=-1;x <= 1;x++) {
+      for (int y=-1;y <= 1;y++) {
+	fprintf(stderr,"%lf ",buf[p++]);
+      }
+    }
+    fprintf(stderr,"\n");
+    
+    for (int x=-1;x <= 1;x++) {
+      for (int y=-1;y <= 1;y++) {
+	for (int z=-1;z <= 1;z++) {
+	  fprintf(stderr,"%lf ",buf[p++]);
+	}
+      }
+    }
+    fprintf(stderr,"\n");
+    
+    for (int x=-1;x <= 1;x++) {
+      for (int y=-1;y <= 1;y++) {
+	for (int z=-1;z <= 1;z++) {
+	  fprintf(stderr,"%lf ",buf[p++]);
+	}
+      }
+    }
+    fprintf(stderr,"\n");
+    
+  }
+  */
+
 }
