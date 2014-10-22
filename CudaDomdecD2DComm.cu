@@ -5,6 +5,7 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/gather.h>
 #include "CudaDomdecD2DComm.h"
+#include "hostXYZ.h"
 #include "mpi_utils.h"
 
 //################################################################################
@@ -313,7 +314,47 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
     std::cout << "CudaDomdecD2DComm::comm_coord, x-communication not yet implemented" << std::endl;
     exit(1);
   }
+  
+}
 
+//
+// Test comm_coord() method
+//
+void CudaDomdecD2DComm::test_comm_coord(cudaXYZ<double>& coord) {
+  // Allocate temporary arrays
+  int* loc2glo = new int[domdec.get_ncoord()];
+  int* loc2glo_glo = new int[domdec.get_ncoord_glo()];
+  int* nrecv = new int[domdec.get_numnode()];
+  int* precv = new int[domdec.get_numnode()];
+  double* recvbuf = new double[domdec.get_ncoord_glo()];
+  double *x = new double[domdec.get_ncoord_glo()];
+  double *y = new double[domdec.get_ncoord_glo()];
+  double *z = new double[domdec.get_ncoord_glo()];
+
+  hostXYZ<double> h_coord(domdec.get_ncoord(), NON_PINNED);
+
+  copy_DtoH_sync<int>(domdec.get_loc2glo_ptr(), loc2glo, domdec.get_ncoord());
+  domdec.buildGlobal_loc2glo(loc2glo, loc2glo_glo, nrecv, precv);
+
+  // Set global coordinates to (x, y, z)
+  h_coord.set_data_sync(domdec.get_ncoord(), coord);
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, h_coord.x(), x);
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, h_coord.y(), y);
+  domdec.combineData(loc2glo_glo, nrecv, precv, recvbuf, h_coord.z(), z);
+  // Set local coordinates to h_coord
+  h_coord.set_data_sync(domdec.get_ncoord_tot(), coord);
+
+  // Test
+  test_comm_coord2(loc2glo, h_coord.x(), h_coord.y(), h_coord.z(), x, y, z);
+  // Deallocate temporary arrays
+  delete [] loc2glo;
+  delete [] loc2glo_glo;
+  delete [] nrecv;
+  delete [] precv;
+  delete [] recvbuf;
+  delete [] x;
+  delete [] y;
+  delete [] z;
 }
 
 //

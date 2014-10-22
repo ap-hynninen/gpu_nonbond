@@ -859,3 +859,31 @@ void DomdecD2DComm::get_z0_for_c(const int ix, const int iy, const int iz, doubl
   */
 
 }
+
+//
+// Test comm_coord() method
+//
+// (xloc, yloc, zloc) = coordinate in local order (ncoord_tot() size)
+// (xglo, yglo, zglo) = coordinates in global order (ncoord_glo() size)
+//
+bool DomdecD2DComm::test_comm_coord2(const int* loc2glo,
+				     const double *xloc, const double *yloc, const double *zloc,
+				     const double *xglo, const double *yglo, const double *zglo) {
+
+  for (int i=0;i < domdec.get_ncoord();i++) {
+    if (loc2glo[i] > 0) {
+      // This node has the coordinate
+      int j = loc2glo[i];
+      
+    } else {
+      // This node does not have the coordinate
+      // Check that coordinate is set correctly and is not NaN
+      if (std::isnan(xloc[i]) || std::isnan(yloc[i]) || std::isnan(zloc[i])) {
+	std::cout << "DomdecD2DComm::test_comm_coord2, NaN coordinate" << std::endl;
+	exit(1);
+      }
+    }
+  }
+
+  return true;
+}

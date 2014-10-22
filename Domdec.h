@@ -230,6 +230,10 @@ protected:
 
   bool checkHeuristic(const bool heuristic);
   void copy_lohi_buf(double *buf);
+
+  virtual int* get_loc2glo_ptr()=0;
+  //const int* get_loc2glo_ptr() const {return homezone.get_loc2glo_ptr();}
+
 };
 
 #endif // DOMDEC_H

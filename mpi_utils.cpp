@@ -59,13 +59,10 @@ int get_env_local_size() {
   return size;
 }
 
-
-
-
 //
-// Concatenate list of integers among all nodes and place the the result in root
+// Concatenate list of elements among all nodes and place the the result in root
 //
-void MPI_Concatenate(int* sendbuf, int nsend, int* recvbuf, int root, MPI_Comm comm) {
+void MPI_Concat(int* sendbuf, int nsend, int* recvbuf, int root, MPI_Comm comm) {
   // Get number of nodes
   int numnode;
   MPICheck(MPI_Comm_size(comm, &numnode));
@@ -81,6 +78,32 @@ void MPI_Concatenate(int* sendbuf, int nsend, int* recvbuf, int root, MPI_Comm c
   for (int i=1;i < numnode;i++) precv[i] = precv[i-1] + nrecv[i-1];
 
   MPICheck(MPI_Gatherv(sendbuf, nsend, MPI_INT, recvbuf, nrecv, precv, MPI_INT, root, comm));
+
+  delete [] nrecv;
+  delete [] precv;
+}
+
+//
+// Concatenate list of elements among all nodes and place the the result in all nodes
+//
+void MPI_Allconcat_T(void* sendbuf, int nsend, void* recvbuf, MPI_Comm comm, int sizeofT) {
+  // Get number of nodes
+  int numnode;
+  MPICheck(MPI_Comm_size(comm, &numnode));
+
+  int* nrecv = new int[numnode];
+  int* precv = new int[numnode];
+
+  // Send the number of entries to root
+  MPICheck(MPI_Allgather(&nsend, 1, MPI_INT, nrecv, 1, MPI_INT, comm));
+
+  for (int i=0;i < numnode;i++) nrecv[i] *= sizeofT;
+
+  // Calculate position where to store the result
+  precv[0] = 0;
+  for (int i=1;i < numnode;i++) precv[i] = precv[i-1] + nrecv[i-1];
+
+  MPICheck(MPI_Allgatherv(sendbuf, nsend*sizeofT, MPI_BYTE, recvbuf, nrecv, precv, MPI_BYTE, comm));
 
   delete [] nrecv;
   delete [] precv;

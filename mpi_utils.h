@@ -13,4 +13,14 @@ void start_mpi(int argc, char *argv[], int &numnode, int &mynode);
 void stop_mpi();
 int get_env_local_rank();
 int get_env_local_size();
-void MPI_Concatenate(int* sendbuf, int nsend, int* recvbuf, int root, MPI_Comm comm);
+
+void MPI_Concat(int* sendbuf, int nsend, int* recvbuf, int root, MPI_Comm comm);
+
+void MPI_Allconcat_T(void* sendbuf, int nsend, void* recvbuf, MPI_Comm comm, int sizeofT);
+
+#ifdef __cplusplus
+template<class T>
+void MPI_Allconcat(T* sendbuf, int nsend, T* recvbuf, MPI_Comm comm) {
+  MPI_Allconcat_T(sendbuf, nsend, recvbuf, comm, sizeof(T));
+}
+#endif

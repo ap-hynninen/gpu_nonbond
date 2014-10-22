@@ -154,7 +154,7 @@ bool Domdec::checkGroup(AtomGroupBase& atomGroup, const int numTot) {
       if (mynode == 0) tableVecTot.resize(numTot);
 
       // Concatenate all group tables into root node
-      MPI_Concatenate(tableVec.data(), tableVec.size(), tableVecTot.data(), 0, comm);
+      MPI_Concat(tableVec.data(), tableVec.size(), tableVecTot.data(), 0, comm);
 
       if (mynode == 0) {
 	// Print out the missing groups
