@@ -185,6 +185,13 @@ protected:
   int get_nx() const {return nx;}
   int get_ny() const {return ny;}
   int get_nz() const {return nz;}
+  
+  double get_boxx() {return boxx;}
+  double get_boxy() {return boxy;}
+  double get_boxz() {return boxz;}
+  double get_boxx() const {return boxx;}
+  double get_boxy() const {return boxy;}
+  double get_boxz() const {return boxz;}
 
   double get_inv_boxx() {return 1.0/boxx;}
   double get_inv_boxy() {return 1.0/boxy;}

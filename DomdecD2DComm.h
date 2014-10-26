@@ -119,7 +119,7 @@ class DomdecD2DComm {
 		      double& group_y, double& group_z, bool& q_checkgrouped);
   void get_z0_for_c(const int ix, const int iy, const int iz, double& z0);
 
-  bool test_comm_coord2(const int* loc2glo,
+  bool test_comm_coord2(const int* glo2loc,
 			const double *xloc, const double *yloc, const double *zloc,
 			const double *xglo, const double *yglo, const double *zglo);
 

@@ -222,6 +222,14 @@ void CudaDomdec::comm_force(Force<long long int>& force, cudaStream_t stream) {
 }
 
 //
+// Test comm_coord method
+//
+void CudaDomdec::test_comm_coord(const int* glo2loc, cudaXYZ<double>& coord) {
+  cudaCheck(cudaDeviceSynchronize());
+  D2Dcomm.test_comm_coord(glo2loc, coord);
+}
+
+//
 // Re-order coordinates using ind_sorted: coord_src => coord_dst
 //
 void CudaDomdec::reorder_homezone_coord(cudaXYZ<double>& coord_src, cudaXYZ<double>& coord_dst,

@@ -3,19 +3,30 @@
 OS := $(shell uname -s)
 
 YES := $(shell which make | wc -l 2> /dev/null)
+NO := $(shell which pikaboo | wc -l 2> /dev/null)
 
 # Set optimization level
 #OPTLEV = -g
 OPTLEV = -O3
 
 # Detect CUDA, Intel compiler, and MPI
+ifdef $(CRAY_CPU_TARGET)
+MPI_FOUND := YES
+else
+MPI_FOUND := $(shell which mpicc | wc -l 2> /dev/null)
+endif
+
 CUDA_COMPILER := $(shell which nvcc | wc -l 2> /dev/null)
 INTEL_COMPILER := $(shell which icc | wc -l 2> /dev/null)
-MPI_FOUND := $(shell which mpicc | wc -l 2> /dev/null)
 
 ifeq ($(MPI_FOUND), $(YES))
 
 DEFS = -D USE_MPI
+
+ifdef $(CRAY_CPU_TARGET)
+CC = CC
+CL = CC
+else  # CRAY_CPU_TARGET
 
 ifeq ($(INTEL_COMPILER), $(YES))
 CC = mpicc
@@ -26,7 +37,9 @@ CC = mpic++
 CL = mpic++
 endif
 
-else
+endif  # CRAY_CPU_TARGET
+
+else   # MPI_FOUND
 
 DEFS = -D DONT_USE_MPI
 
@@ -42,7 +55,7 @@ CC = g++
 CL = g++
 endif
 
-endif
+endif  # MPI_FOUND
 
 OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o Force.o reduce.o cuda_utils.o gpu_recip.o
 
@@ -78,7 +91,11 @@ CUDAROOT = $(subst /bin/,,$(dir $(shell which nvcc)))
 endif
 
 ifeq ($(MPI_FOUND), $(YES))
+ifdef $(CRAY_CPU_TARGET)
+MPIROOT = $(subst /bin/,,$(dir $(shell which icc)))
+else
 MPIROOT = $(subst /bin/,,$(dir $(shell which mpicc)))
+endif
 endif
 
 ifeq ($(INTEL_COMPILER), $(YES))

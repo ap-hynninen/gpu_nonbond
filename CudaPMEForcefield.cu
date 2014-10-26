@@ -206,6 +206,8 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // NOTE: Builds domdec.loc2glo and nlist->glo2loc
     nlist.sort(domdec.get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec.get_loc2glo_ptr());
 
+    //domdec.test_comm_coord(nlist.get_glo2loc(), coord);
+
     // Build neighborlist
     nlist.build(domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), domdec.get_rnl(),
 		xyzq.xyzq, domdec.get_loc2glo_ptr());

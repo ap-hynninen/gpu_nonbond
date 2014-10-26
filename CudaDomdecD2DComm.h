@@ -78,7 +78,7 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
   void comm_update(int* glo2loc, cudaXYZ<double>& coord);
   void comm_force(Force<long long int>& force);
 
-  void test_comm_coord(cudaXYZ<double>& coord);
+  void test_comm_coord(const int* glo2loc, cudaXYZ<double>& coord);
 };
 
 #endif // CUDADOMDECD2DCOMM_H

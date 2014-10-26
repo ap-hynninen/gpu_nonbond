@@ -320,7 +320,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 //
 // Test comm_coord() method
 //
-void CudaDomdecD2DComm::test_comm_coord(cudaXYZ<double>& coord) {
+void CudaDomdecD2DComm::test_comm_coord(const int* glo2loc, cudaXYZ<double>& coord) {
   // Allocate temporary arrays
   int* loc2glo = new int[domdec.get_ncoord()];
   int* loc2glo_glo = new int[domdec.get_ncoord_glo()];
@@ -330,6 +330,9 @@ void CudaDomdecD2DComm::test_comm_coord(cudaXYZ<double>& coord) {
   double *x = new double[domdec.get_ncoord_glo()];
   double *y = new double[domdec.get_ncoord_glo()];
   double *z = new double[domdec.get_ncoord_glo()];
+  int *h_glo2loc = new int[domdec.get_ncoord_glo()];
+  
+  copy_DtoH_sync<int>(glo2loc, h_glo2loc, domdec.get_ncoord_glo());
 
   hostXYZ<double> h_coord(domdec.get_ncoord(), NON_PINNED);
 
@@ -345,7 +348,7 @@ void CudaDomdecD2DComm::test_comm_coord(cudaXYZ<double>& coord) {
   h_coord.set_data_sync(domdec.get_ncoord_tot(), coord);
 
   // Test
-  test_comm_coord2(loc2glo, h_coord.x(), h_coord.y(), h_coord.z(), x, y, z);
+  test_comm_coord2(h_glo2loc, h_coord.x(), h_coord.y(), h_coord.z(), x, y, z);
   // Deallocate temporary arrays
   delete [] loc2glo;
   delete [] loc2glo_glo;
@@ -355,6 +358,7 @@ void CudaDomdecD2DComm::test_comm_coord(cudaXYZ<double>& coord) {
   delete [] x;
   delete [] y;
   delete [] z;
+  delete [] h_glo2loc;
 }
 
 //
