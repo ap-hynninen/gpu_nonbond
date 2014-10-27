@@ -16,15 +16,22 @@ int main(int argc, char *argv[]) {
   start_mpi(argc, argv, numnode, mynode);
   //  time_transpose();
 
+  int nthread = 1;
 #ifdef _OPENMP
 #pragma omp parallel
 #pragma omp master
   {
+    nthread = omp_get_num_threads();
     if (mynode == 0) {
-      std::cout << "number of OpenMP threads = " << omp_get_num_threads() << std::endl;
+      std::cout << "number of OpenMP threads = " << nthread << std::endl;
     }
   }
 #endif
+
+  float** buf_th = new float*[nthread];
+  for (int i=0;i < nthread;i++) {
+    buf_th[i] = new float[32*32];
+  }
 
   const int N = 64;
 
@@ -44,8 +51,9 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
-  if (mynode == 0)
+  if (mynode == 0) {
     std::cout << "ny = " << ny << " nz = " << nz << std::endl;
+  }
 
   {
     CpuMultiNodeMatrix3d<float> mat(N, N, N, 1, ny, nz, mynode, "test_data/q_real_double.txt");
@@ -91,6 +99,56 @@ int main(int argc, char *argv[]) {
     }
 
   }
+
+  {
+    CpuMultiNodeMatrix3d<float> mat(N, N, N, 1, ny, nz, mynode, "test_data/q_real_double.txt");
+    //CpuMultiNodeMatrix3d<float> mat(N, N, N, 1, ny, nz, mynode);
+    CpuMultiNodeMatrix3d<float> mat_t(N, N, N, 1, ny, nz, mynode);
+
+    double max_diff;
+    bool mat_comp = mat.compare(&q, 0.0, max_diff);
+    if (!mat_comp) {
+      std::cout << "mat vs. q comparison FAILED" << std::endl;
+    } else {
+      if (mynode == 0) std::cout << "mat vs. q comparison OK" << std::endl;
+    }
+    
+    // Setup transposes
+    mat.setup_transpose_xyz_yzx(&mat_t);
+    mat_t.setup_transpose_xyz_yzx(&mat);
+    
+    const int nrep = 20000;
+    MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+    double begin = MPI_Wtime();
+    for (int i=0;i < nrep;i++) {
+      mat.transpose_xyz_yzx_tiled(&mat_t, buf_th);
+    }
+    MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+    double end = MPI_Wtime();
+    
+    double time_spent = end - begin;
+    
+    if (mynode == 0) {
+      std::cout << "nrep = " << nrep << std::endl;
+      std::cout << "time_spent (sec) = " << time_spent
+		<< " per transpose (micro sec) = "
+		<< time_spent*1.0e6/(double)(nrep*2) << std::endl;
+    }
+    
+    mat.transpose_xyz_yzx_tiled(&mat_t, buf_th);
+    mat_comp = mat_t.compare(&q_t, 0.0, max_diff);
+    if (!mat_comp) {
+      std::cout << "mat_t vs. q_t comparison FAILED" << std::endl;
+    } else {
+      if (mynode == 0) std::cout << "mat_t vs. q_t comparison OK" << std::endl;
+    }
+
+  }
+
+  for (int i=0;i < nthread;i++) {
+    delete [] buf_th[i];
+  }
+  delete [] buf_th;
 
   stop_mpi();
 

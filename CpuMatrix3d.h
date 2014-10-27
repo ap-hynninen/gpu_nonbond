@@ -51,6 +51,12 @@ public:
 			 const int xlen, const int ylen, const int zlen,
 			 CpuMatrix3d<T>* mat);
 
+  void transpose_xyz_yzx_tiled(CpuMatrix3d<T>* mat, T** buf_th);
+  void transpose_xyz_yzx_tiled(const int src_x0, const int src_y0, const int src_z0,
+			       const int dst_x0, const int dst_y0, const int dst_z0,
+			       const int xlen, const int ylen, const int zlen,
+			       CpuMatrix3d<T>* mat, T** buf_th);
+
   void transpose_xyz_zxy(CpuMatrix3d<T>* mat);
 
   void copy(int src_x0, int src_y0, int src_z0,
