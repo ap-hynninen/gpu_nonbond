@@ -334,7 +334,7 @@ void CudaDomdecD2DComm::test_comm_coord(const int* glo2loc, cudaXYZ<double>& coo
   
   copy_DtoH_sync<int>(glo2loc, h_glo2loc, domdec.get_ncoord_glo());
 
-  hostXYZ<double> h_coord(domdec.get_ncoord(), NON_PINNED);
+  hostXYZ<double> h_coord(domdec.get_ncoord_tot(), NON_PINNED);
 
   copy_DtoH_sync<int>(domdec.get_loc2glo_ptr(), loc2glo, domdec.get_ncoord());
   domdec.buildGlobal_loc2glo(loc2glo, loc2glo_glo, nrecv, precv);

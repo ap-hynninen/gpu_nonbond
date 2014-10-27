@@ -237,6 +237,12 @@ private:
 			   float *celldx, float *celldy, float *celldz_min,
 			   float rcut, int &n_tile_est, int &n_ientry_est);
 
+  double calc_volume_overlap(double Ax0, double Ay0, double Az0, 
+			     double Ax1, double Ay1, double Az1, double rcut,
+			     double Bx0, double By0, double Bz0, 
+			     double Bx1, double By1, double Bz1,
+			     double& dx, double& dy, double& dz);
+
   void set_int_zone(const int *zone_natom, int *n_int_zone, int int_zone[][8]);
 
   void set_cell_sizes(const int *zone_natom,
@@ -263,6 +269,19 @@ private:
   void test_build(const double boxx, const double boxy, const double boxz,
 		  const double rcut, const float4 *xyzq, const int *loc2glo);
 
+  template<typename T>
+  int calc_gpu_pairlist(const int n_ientry, const ientry_t* ientry, const int* tile_indj,
+			const tile_excl_t<tilesize>* tile_excl,
+			const float4* xyzq, const double boxx, const double boxy,
+			const double boxz, const double rcut);
+
+  template<typename T>
+  int calc_cpu_pairlist(const int* zone_patom, const float4* xyzq,
+			const int* loc2glo, const int* atom_excl_pos,
+			const int* atom_excl, const double boxx,
+			const double boxy, const double boxz,
+			const double rcut);
+  
   void set_nlist_param(cudaStream_t stream);
   void get_nlist_param();
 

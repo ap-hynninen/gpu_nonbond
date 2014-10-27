@@ -1960,7 +1960,7 @@ void NeighborList<tilesize>::set_cell_sizes(const int *zone_natom,
       ncellz_max[izone] = max(1, 2*zone_natom[izone]/(ncellx[izone]*ncelly[izone]*tilesize));
       celldx[izone] = xsize/(float)(ncellx[izone]);
       celldy[izone] = ysize/(float)(ncelly[izone]);
-      celldz_min[izone] = ysize/(float)(ncellz_max[izone]);
+      celldz_min[izone] = zsize/(float)(ncellz_max[izone]);
       if (test) {
 	std::cerr << izone << ": " << min_xyz[izone].z << " ... " << max_xyz[izone].z << std::endl;
       }
@@ -2075,6 +2075,8 @@ bool NeighborList<tilesize>::test_sort(const int* zone_patom,
 				       const float* inv_celldx, const float* inv_celldy,
 				       const float4* xyzq, const float4* xyzq_sorted,
 				       const int* col_patom, const int* cell_patom) {
+
+  cudaCheck(cudaDeviceSynchronize());
 
   int ncoord = zone_patom[8];
   float4 *h_xyzq = new float4[ncoord];
@@ -2218,21 +2220,86 @@ void NeighborList<tilesize>::get_tile_ientry_est(int *n_int_zone, int int_zone[]
   for (int izone=0;izone < 8;izone++) {
     for (int j=0;j < n_int_zone[izone];j++) {
       int jzone = int_zone[izone][j];
-      int ncell_i = ncellx[izone]*ncelly[izone]*ncellz_max[izone];
-      int ncell_j = ncellx[jzone]*ncelly[jzone]*ncellz_max[jzone];
-      // Estimate the number of neighbors in each direction for the positive direction and multiply
-      // by the number of cells
-      int n_neigh_ij = ((int)ceilf(rcut/celldx[izone])+1)*((int)ceilf(rcut/celldy[izone])+1)
-	*((int)ceilf(rcut/celldz_min[izone])+1)*ncell_j;
-      int n_neigh_ji = ((int)ceilf(rcut/celldx[jzone])+1)*((int)ceilf(rcut/celldy[jzone])+1)
-	*((int)ceilf(rcut/celldz_min[jzone])+1)*ncell_i;
-      n_tile_est += max(n_neigh_ij, n_neigh_ji);
+      if (izone != jzone) {
+	// Calculate the amount of volume overlap on zone j
+	double dx_j, dy_j, dz_j;
+	calc_volume_overlap(h_nlist_param->min_xyz[izone].x,
+			    h_nlist_param->min_xyz[izone].y,
+			    h_nlist_param->min_xyz[izone].z,
+			    h_nlist_param->max_xyz[izone].x,
+			    h_nlist_param->max_xyz[izone].y,
+			    h_nlist_param->max_xyz[izone].z, rcut,
+			    h_nlist_param->min_xyz[jzone].x,
+			    h_nlist_param->min_xyz[jzone].y,
+			    h_nlist_param->min_xyz[jzone].z,
+			    h_nlist_param->max_xyz[jzone].x,
+			    h_nlist_param->max_xyz[jzone].y,
+			    h_nlist_param->max_xyz[jzone].z, dx_j, dy_j, dz_j);
+	// Calculate the amount of volume overlap on zone i
+	double dx_i, dy_i, dz_i;
+	calc_volume_overlap(h_nlist_param->min_xyz[jzone].x,
+			    h_nlist_param->min_xyz[jzone].y,
+			    h_nlist_param->min_xyz[jzone].z,
+			    h_nlist_param->max_xyz[jzone].x,
+			    h_nlist_param->max_xyz[jzone].y,
+			    h_nlist_param->max_xyz[jzone].z, rcut,
+			    h_nlist_param->min_xyz[izone].x,
+			    h_nlist_param->min_xyz[izone].y,
+			    h_nlist_param->min_xyz[izone].z,
+			    h_nlist_param->max_xyz[izone].x,
+			    h_nlist_param->max_xyz[izone].y,
+			    h_nlist_param->max_xyz[izone].z, dx_i, dy_i, dz_i);
+	// Number of cells in each direction that are needed to fill the overlap volume
+	int ncellx_j = (int)ceil(dx_j/celldx[jzone]);
+	int ncelly_j = (int)ceil(dy_j/celldy[jzone]);
+	int ncellz_j = (int)ceil(dz_j/celldz_min[jzone]);
+	int ncell_j = ncellx_j*ncelly_j*ncellz_j;
+	int ncellx_i = (int)ceil(dx_i/celldx[izone]);
+	int ncelly_i = (int)ceil(dy_i/celldy[izone]);
+	int ncellz_i = (int)ceil(dz_i/celldz_min[izone]);
+	int ncell_i = ncellx_i*ncelly_i*ncellz_i;
+	n_tile_est += ncell_j*ncell_i;
+      } else {
+	int ncell_i = ncellx[izone]*ncelly[izone]*ncellz_max[izone];
+	// Estimate the number of neighbors in each direction for the positive direction and multiply
+	// by the number of cells
+	int n_neigh_ij = ((int)ceilf(rcut/celldx[izone])+1)*((int)ceilf(rcut/celldy[izone])+1)
+	  *((int)ceilf(rcut/celldz_min[izone])+1)*ncell_i;
+	n_tile_est += n_neigh_ij;
+      }
     }
   }
 
   // Assume every i-j tile is in a separate ientry (worst case)
   n_ientry_est = n_tile_est;
 }
+
+//
+// Calculates overlap between volumes
+//
+template <int tilesize>
+double NeighborList<tilesize>::calc_volume_overlap(double Ax0, double Ay0, double Az0, 
+						   double Ax1, double Ay1, double Az1, double rcut,
+						   double Bx0, double By0, double Bz0, 
+						   double Bx1, double By1, double Bz1,
+						   double& dx, double& dy, double& dz) {
+  double x0 = Ax0-rcut;
+  double y0 = Ay0-rcut;
+  double z0 = Az0-rcut;
+  double x1 = Ax1+rcut;
+  double y1 = Ay1+rcut;
+  double z1 = Az1+rcut;
+
+  dx = min(x1, Bx1) - max(x0, Bx0);
+  dy = min(y1, By1) - max(y0, By0);
+  dz = min(z1, Bz1) - max(z0, Bz0);
+  dx = (dx > 0.0) ? dx : 0.0;
+  dy = (dy > 0.0) ? dy : 0.0;
+  dz = (dz > 0.0) ? dz : 0.0;
+
+  return dx*dy*dz;
+}
+
 
 //
 // Sorts atoms, when minimum and maximum coordinate values are known
@@ -2271,7 +2338,6 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
 
   // Test sort
   if (test) {
-    cudaCheck(cudaDeviceSynchronize());
     test_sort(h_nlist_param->zone_patom, h_nlist_param->ncellx, h_nlist_param->ncelly,
 	      ncol_tot, ncell_max, min_xyz, h_nlist_param->inv_celldx, h_nlist_param->inv_celldy,
 	      xyzq, xyzq_sorted, col_patom, cell_patom);
@@ -2351,7 +2417,6 @@ void NeighborList<tilesize>::sort(const int *zone_patom,
 
   // Test sort
   if (test) {
-    cudaCheck(cudaDeviceSynchronize());
     test_sort(h_nlist_param->zone_patom, h_nlist_param->ncellx, h_nlist_param->ncelly,
 	      ncol_tot, ncell_max, h_nlist_param->min_xyz,
 	      h_nlist_param->inv_celldx, h_nlist_param->inv_celldy,
@@ -2610,16 +2675,6 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
   int nthread, nblock, shmem_size;
 
   get_nlist_param();
-
-  if (test) {
-    std::cout << "ncell = " << h_nlist_param->ncell << " ncell_max = " << ncell_max << std::endl;
-    for (int izone=0;izone < 8;izone++) {
-      std::cout << izone << ": " << h_nlist_param->ncellx[izone]
-		<< " " << h_nlist_param->ncelly[izone]
-		<< " " << h_nlist_param->ncellz_max[izone]
-		<< std::endl;
-    }
-  }
   
   int n_tile_est, n_ientry_est;
   get_tile_ientry_est(h_nlist_param->n_int_zone, h_nlist_param->int_zone,
@@ -2627,6 +2682,17 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
 		      h_nlist_param->celldx, h_nlist_param->celldy, h_nlist_param->celldz_min,
 		      rcut, n_tile_est, n_ientry_est);
   //std::cout << "n_ientry_est = " << n_ientry_est << " n_tile_est = " << n_tile_est << std::endl;
+
+  if (test) {
+    std::cout << "ncell = " << h_nlist_param->ncell << " ncell_max = " << ncell_max
+	      << " n_tile_est = " << n_tile_est << std::endl;
+    for (int izone=0;izone < 8;izone++) {
+      std::cout << izone << ": " << h_nlist_param->ncellx[izone]
+		<< " " << h_nlist_param->ncelly[izone]
+		<< " " << h_nlist_param->ncellz_max[izone]
+		<< std::endl;
+    }
+  }
 
   reallocate<ientry_t>(&ientry, &ientry_len, n_ientry_est, 1.0f);
   reallocate<tile_excl_t<tilesize> >(&tile_excl, &tile_excl_len, n_tile_est, 1.0f);
@@ -2687,6 +2753,16 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
 
   n_ientry = h_nlist_param->n_ientry;
   n_tile = h_nlist_param->n_tile;
+
+  if (n_tile > n_tile_est) {
+    std::cout << "NeighborList::build, Limit blown: n_tile > n_tile_est"<< std::endl;
+    exit(1);
+  }
+
+  if (n_ientry > n_ientry_est) {
+    std::cout << "NeighborList::build, Limit blown: n_ientry > n_ientry_est"<< std::endl;
+    exit(1);
+  }
 
   if (test) test_build(boxx, boxy, boxz, rcut, xyzq, loc2glo);
 }
@@ -2774,82 +2850,22 @@ void NeighborList<tilesize>::test_build(const double boxx, const double boxy, co
   copy_DtoH_sync<float>(cell_bz, h_cell_bz, ncell);
 
   double rcut2 = rcut*rcut;
-  float rcut2f = (float)rcut2;
 
-  float boxxf = (float)boxx;
-  float boxyf = (float)boxy;
-  float boxzf = (float)boxz;
+  //float boxxf = (float)boxx;
+  //float boxyf = (float)boxy;
+  //float boxzf = (float)boxz;
 
   double hboxx = 0.5*boxx;
   double hboxy = 0.5*boxy;
   double hboxz = 0.5*boxz;
-  float hboxxf = (float)hboxx;
-  float hboxyf = (float)hboxy;
-  float hboxzf = (float)hboxz;
+  //float hboxxf = (float)hboxx;
+  //float hboxyf = (float)hboxy;
+  //float hboxzf = (float)hboxz;
 
-  //fprintf(stderr,"h_nlist_param->tmp = %d\n",h_nlist_param->tmp);
-
-  int npair_cpu = 0;
-  for (int izone=0;izone < 8;izone++) {
-    for (int jzone=0;jzone < 8;jzone++) {
-      if (izone == 1 && jzone != 5) continue;
-      if (izone == 2 && jzone != 1 && jzone != 6) continue;
-      if (izone == 4 && jzone != 1 && jzone != 2 && jzone != 3) continue;
-
-      int istart = h_nlist_param->zone_patom[izone];
-      int iend   = h_nlist_param->zone_patom[izone+1] - 1;
-      int jstart = h_nlist_param->zone_patom[jzone];
-      int jend   = h_nlist_param->zone_patom[jzone+1] - 1;
-
-      for (int i=istart;i <= iend;i++) {
-	float xi = h_xyzq[i].x;
-	float yi = h_xyzq[i].y;
-	float zi = h_xyzq[i].z;
-	int ig = h_loc2glo[i];
-	int excl_start = h_atom_excl_pos[ig];
-	int excl_end   = h_atom_excl_pos[ig+1]-1;
-	if (izone == 0 && jzone == 0) jstart = i + 1;
-	for (int j=jstart;j <= jend;j++) {
-	  float xj = h_xyzq[j].x;
-	  float yj = h_xyzq[j].y;
-	  float zj = h_xyzq[j].z;
-	  float dx = xi - xj;
-	  float dy = yi - yj;
-	  float dz = zi - zj;
-	  if (dx > hboxxf) {
-	    dx = (xi-boxxf) - xj;
-	  } else if (dx < -hboxxf) {
-	    dx = (xi+boxxf) - xj;
-	  }
-	  if (dy > hboxyf) {
-	    dy = (yi-boxyf) - yj;
-	  } else if (dy < -hboxyf) {
-	    dy = (yi+boxyf) - yj;
-	  }
-	  if (dz > hboxzf) {
-	    dz = (zi-boxzf) - zj;
-	  } else if (dz < -hboxzf) {
-	    dz = (zi+boxzf) - zj;
-	  }
-	  float r2 = dx*dx + dy*dy + dz*dz;
-
-	  if (r2 < rcut2f) {
-	    int jg = h_loc2glo[j];
-	    bool excl_flag = false;
-	    for (int excl=excl_start;excl <= excl_end;excl++) {
-	      if (h_atom_excl[excl] == jg) {
-	      	excl_flag = true;
-		break;
-	      }
-	    }
-	    if (excl_flag == false) npair_cpu++;
-	  }
-
-	}
-	//
-      }
-    }
-  }
+  // Calculate number of pairs
+  int npair_cpu = calc_cpu_pairlist<double>(h_nlist_param->zone_patom, h_xyzq, h_loc2glo,
+					    h_atom_excl_pos, h_atom_excl,
+					    boxx, boxy, boxz, rcut);
 
   std::cout << "npair_cpu=" << npair_cpu << std::endl;
 
@@ -2863,46 +2879,9 @@ void NeighborList<tilesize>::test_build(const double boxx, const double boxy, co
   copy_DtoH_sync<int>(tile_indj, h_tile_indj, n_tile);
   copy_DtoH_sync<int>(cell_patom, h_cell_patom, ncell+1);
 
-  //
-  // Go through the cell neighbor list
-  //
-  int npair_gpu = 0;
-  int n = 0;
-  for (int ind=0;ind < n_ientry;ind++) {
-    int istart = h_ientry[ind].indi;
-    int ish    = h_ientry[ind].ish;
-    int startj = h_ientry[ind].startj;
-    int endj   = h_ientry[ind].endj;
-
-    int ish_tmp = ish;
-    float shz = (ish_tmp/9 - 1)*boxz;
-    ish_tmp -= (ish_tmp/9)*9;
-    float shy = (ish_tmp/3 - 1)*boxy;
-    ish_tmp -= (ish_tmp/3)*3;
-    float shx = (ish_tmp - 1)*boxx;
-
-    n += endj - startj + 1;
-    for (int jtile=startj;jtile <= endj;jtile++) {
-      for (int i=istart;i < istart+tilesize;i++) {
-	float xi = h_xyzq[i].x + shx;
-	float yi = h_xyzq[i].y + shy;
-	float zi = h_xyzq[i].z + shz;
-	int jstart = h_tile_indj[jtile];
-	for (int j=jstart;j < jstart+tilesize;j++) {
-	  int bitpos = ((i-istart) - (j-jstart) + tilesize) % tilesize;
-	  int excl = h_tile_excl[jtile].excl[j-jstart] >> bitpos;
-	  float xj = h_xyzq[j].x;
-	  float yj = h_xyzq[j].y;
-	  float zj = h_xyzq[j].z;
-	  float dx = xi - xj;
-	  float dy = yi - yj;
-	  float dz = zi - zj;
-	  float r2 = dx*dx + dy*dy + dz*dz;
-	  if (r2 < rcut2f && !(excl & 1)) npair_gpu++;
-	}
-      }
-    }
-  }
+  // Calculate number of pairs on the GPU list
+  int npair_gpu = calc_gpu_pairlist<double>(n_ientry, h_ientry, h_tile_indj, h_tile_excl,
+					    h_xyzq, boxx, boxy, boxz, rcut);
 
   std::cout << "npair_gpu=" << npair_gpu << std::endl;
 
@@ -2911,7 +2890,7 @@ void NeighborList<tilesize>::test_build(const double boxx, const double boxy, co
   std::vector<int2> ijvec;
 
   //
-  // Go through all cell pairs
+  // Go through all cell pairs and check that the gpu caught all of them
   //
   int npair_gpu2 = 0;
   int ncell_pair = 0;
@@ -3133,7 +3112,7 @@ void NeighborList<tilesize>::test_build(const double boxx, const double boxy, co
 		    int excl_start = h_atom_excl_pos[ig];
 		    int excl_end   = h_atom_excl_pos[ig+1]-1;
 		    int jg = h_loc2glo[jt];
-		    bool excl_flag = false;
+		    //bool excl_flag = false;
 		    for (int excl=excl_start;excl <= excl_end;excl++) {
 		      if (h_atom_excl[excl] == jg) {
 			fprintf(stderr,"======================= EXCLUSION FOUND! ==================\n");
@@ -3183,7 +3162,6 @@ void NeighborList<tilesize>::test_build(const double boxx, const double boxy, co
   if (npair_cpu != npair_gpu || !okloop) {
     std::cout << "##################################################" << std::endl;
     std::cout << "test_build FAILED" << std::endl;
-    std::cout << "n = " << n << " ncell_pair = " << ncell_pair << std::endl;
     std::cout << "n_ientry = " << n_ientry << " n_tile = " << n_tile << std::endl;
     std::cout << "npair_cpu = " << npair_cpu << " npair_gpu = " << npair_gpu 
 	      << " npair_gpu2 = " << npair_gpu2 << std::endl;
@@ -3194,6 +3172,140 @@ void NeighborList<tilesize>::test_build(const double boxx, const double boxy, co
 
   if (!okloop) exit(1);
 
+}
+
+//
+// Calculates GPU pair list
+//
+template <int tilesize> template <typename T>
+int NeighborList<tilesize>::calc_gpu_pairlist(const int n_ientry, const ientry_t* ientry,
+					      const int* tile_indj,
+					      const tile_excl_t<tilesize>* tile_excl, const float4* xyzq,
+					      const double boxx, const double boxy, const double boxz,
+					      const double rcut) {
+  T rcut2 = rcut*rcut;
+  T boxxT = boxx;
+  T boxyT = boxy;
+  T boxzT = boxz;
+
+  int npair = 0;
+  for (int ind=0;ind < n_ientry;ind++) {
+    int istart = ientry[ind].indi;
+    int ish    = ientry[ind].ish;
+    int startj = ientry[ind].startj;
+    int endj   = ientry[ind].endj;
+
+    int ish_tmp = ish;
+    T shz = (ish_tmp/9 - 1)*boxzT;
+    ish_tmp -= (ish_tmp/9)*9;
+    T shy = (ish_tmp/3 - 1)*boxyT;
+    ish_tmp -= (ish_tmp/3)*3;
+    T shx = (ish_tmp - 1)*boxxT;
+
+    for (int jtile=startj;jtile <= endj;jtile++) {
+      for (int i=istart;i < istart+tilesize;i++) {
+	T xi = (T)xyzq[i].x + shx;
+	T yi = (T)xyzq[i].y + shy;
+	T zi = (T)xyzq[i].z + shz;
+	int jstart = tile_indj[jtile];
+	for (int j=jstart;j < jstart+tilesize;j++) {
+	  int bitpos = ((i-istart) - (j-jstart) + tilesize) % tilesize;
+	  int excl = tile_excl[jtile].excl[j-jstart] >> bitpos;
+	  T xj = xyzq[j].x;
+	  T yj = xyzq[j].y;
+	  T zj = xyzq[j].z;
+	  T dx = xi - xj;
+	  T dy = yi - yj;
+	  T dz = zi - zj;
+	  T r2 = dx*dx + dy*dy + dz*dz;
+	  if (r2 < rcut2 && !(excl & 1)) npair++;
+	}
+      }
+    }
+  }
+
+  return npair;
+}
+
+//
+// Calculates CPU pair list
+//
+template <int tilesize> template <typename T>
+int NeighborList<tilesize>::calc_cpu_pairlist(const int* zone_patom, const float4* xyzq,
+					      const int* loc2glo, const int* atom_excl_pos,
+					      const int* atom_excl, const double boxx,
+					      const double boxy, const double boxz, const double rcut) {
+  T rcut2 = rcut*rcut;
+  T boxxT = boxx;
+  T boxyT = boxy;
+  T boxzT = boxz;
+  T hboxx = 0.5*boxx;
+  T hboxy = 0.5*boxy;
+  T hboxz = 0.5*boxz;
+
+  int npair = 0;
+  for (int izone=0;izone < 8;izone++) {
+    for (int jzone=0;jzone < 8;jzone++) {
+      if (izone == 1 && jzone != 5) continue;
+      if (izone == 2 && jzone != 1 && jzone != 6) continue;
+      if (izone == 4 && jzone != 1 && jzone != 2 && jzone != 3) continue;
+
+      int istart = zone_patom[izone];
+      int iend   = zone_patom[izone+1] - 1;
+      int jstart = zone_patom[jzone];
+      int jend   = zone_patom[jzone+1] - 1;
+
+      for (int i=istart;i <= iend;i++) {
+	T xi = xyzq[i].x;
+	T yi = xyzq[i].y;
+	T zi = xyzq[i].z;
+	int ig = loc2glo[i];
+	int excl_start = atom_excl_pos[ig];
+	int excl_end   = atom_excl_pos[ig+1]-1;
+	if (izone == 0 && jzone == 0) jstart = i + 1;
+	for (int j=jstart;j <= jend;j++) {
+	  T xj = xyzq[j].x;
+	  T yj = xyzq[j].y;
+	  T zj = xyzq[j].z;
+	  T dx = xi - xj;
+	  T dy = yi - yj;
+	  T dz = zi - zj;
+	  if (dx > hboxx) {
+	    dx = (xi-boxxT) - xj;
+	  } else if (dx < -hboxx) {
+	    dx = (xi+boxxT) - xj;
+	  }
+	  if (dy > hboxy) {
+	    dy = (yi-boxyT) - yj;
+	  } else if (dy < -hboxy) {
+	    dy = (yi+boxyT) - yj;
+	  }
+	  if (dz > hboxz) {
+	    dz = (zi-boxzT) - zj;
+	  } else if (dz < -hboxz) {
+	    dz = (zi+boxzT) - zj;
+	  }
+	  T r2 = dx*dx + dy*dy + dz*dz;
+
+	  if (r2 < rcut2) {
+	    int jg = loc2glo[j];
+	    bool excl_flag = false;
+	    for (int excl=excl_start;excl <= excl_end;excl++) {
+	      if (atom_excl[excl] == jg) {
+	      	excl_flag = true;
+		break;
+	      }
+	    }
+	    if (excl_flag == false) npair++;
+	  }
+
+	}
+	//
+      }
+    }
+  }
+
+  return npair;
 }
 
 //
@@ -3793,3 +3905,31 @@ void NeighborList<tilesize>::load(const char *filename) {
 //
 //template class NeighborList<16>;
 template class NeighborList<32>;
+
+template int NeighborList<32>::calc_gpu_pairlist<double>(const int n_ientry, const ientry_t* ientry,
+							 const int* tile_indj,
+							 const tile_excl_t<32>* tile_excl,
+							 const float4* xyzq,
+							 const double boxx, const double boxy,
+							 const double boxz,
+							 const double rcut);
+
+template int NeighborList<32>::calc_cpu_pairlist<double>(const int* zone_patom, const float4* xyzq,
+							 const int* loc2glo, const int* atom_excl_pos,
+							 const int* atom_excl, const double boxx,
+							 const double boxy, const double boxz,
+							 const double rcut);
+
+template int NeighborList<32>::calc_gpu_pairlist<float>(const int n_ientry, const ientry_t* ientry,
+							const int* tile_indj,
+							const tile_excl_t<32>* tile_excl,
+							const float4* xyzq,
+							const double boxx, const double boxy,
+							const double boxz,
+							const double rcut);
+
+template int NeighborList<32>::calc_cpu_pairlist<float>(const int* zone_patom, const float4* xyzq,
+							const int* loc2glo, const int* atom_excl_pos,
+							const int* atom_excl, const double boxx,
+							const double boxy, const double boxz,
+							const double rcut);

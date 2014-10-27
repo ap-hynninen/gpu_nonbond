@@ -902,14 +902,19 @@ bool DomdecD2DComm::test_comm_coord2(const int* glo2loc,
       // This node has the coordinate
       // Check that coordinate is set correctly and is not NaN
       ncoord++;
-      if (std::isnan(xloc[i]) || std::isnan(yloc[i]) || std::isnan(zloc[i])) {
+      if (std::isnan(xloc[j]) || std::isnan(yloc[j]) || std::isnan(zloc[j])) {
 	std::cout << "DomdecD2DComm::test_comm_coord2, NaN coordinate" << std::endl;
 	exit(1);
       }
+      /*
       if (xloc[j] != xglo[i] || yloc[j] != yglo[i] || zloc[j] != zglo[i]) {
 	std::cout << "DomdecD2DComm::test_comm_coord2, loc/glo coordinates do not match" << std::endl;
+	std::cout << "i = " << i << " j = " << j << std::endl;
+	std::cout << "loc = " << xloc[j] << " " << yloc[j] << " " << zloc[j] << std::endl;
+	std::cout << "glo = " << xglo[i] << " " << yglo[i] << " " << zglo[i] << std::endl;
 	exit(1);
       }
+      */
     }
   }
 
