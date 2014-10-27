@@ -1,6 +1,16 @@
 
 # Detect OS
-OS := $(shell uname -s)
+ifeq ($(shell uname -a|grep Linux|wc -l), 1)
+OS = linux
+endif
+
+ifeq ($(shell uname -a|grep titan|wc -l), 1)
+OS = titan
+endif
+
+ifeq ($(shell uname -a|grep Darwin|wc -l), 1)
+OS = osx
+endif
 
 YES := $(shell which make | wc -l 2> /dev/null)
 NO := $(shell which pikaboo | wc -l 2> /dev/null)
@@ -10,8 +20,8 @@ NO := $(shell which pikaboo | wc -l 2> /dev/null)
 OPTLEV = -O3
 
 # Detect CUDA, Intel compiler, and MPI
-ifdef $(CRAY_CPU_TARGET)
-MPI_FOUND := YES
+ifeq ($(OS),titan)
+MPI_FOUND := $(YES)
 else
 MPI_FOUND := $(shell which mpicc | wc -l 2> /dev/null)
 endif
@@ -23,10 +33,10 @@ ifeq ($(MPI_FOUND), $(YES))
 
 DEFS = -D USE_MPI
 
-ifdef $(CRAY_CPU_TARGET)
+ifeq ($(OS),titan)
 CC = CC
 CL = CC
-else  # CRAY_CPU_TARGET
+else  # ifeq ($(OS),titan)
 
 ifeq ($(INTEL_COMPILER), $(YES))
 CC = mpicc
@@ -37,14 +47,11 @@ CC = mpic++
 CL = mpic++
 endif
 
-endif  # CRAY_CPU_TARGET
+endif  # ifeq ($(OS),titan)
 
 else   # MPI_FOUND
 
 DEFS = -D DONT_USE_MPI
-
-echo $(YES)
-echo $(INTEL_COMPILER)
 
 ifeq ($(INTEL_COMPILER), $(YES))
 CC = icc
@@ -91,8 +98,10 @@ CUDAROOT = $(subst /bin/,,$(dir $(shell which nvcc)))
 endif
 
 ifeq ($(MPI_FOUND), $(YES))
-ifdef $(CRAY_CPU_TARGET)
-MPIROOT = $(subst /bin/,,$(dir $(shell which icc)))
+ifeq ($(OS),titan)
+# NOTE: Assumes we're using Intel compiler
+#MPIROOT = $(subst /bin/,,$(dir $(shell which icc)))
+MPIROOT = /opt/cray/mpt/6.3.0/gni/mpich2-intel/130
 else
 MPIROOT = $(subst /bin/,,$(dir $(shell which mpicc)))
 endif
@@ -115,11 +124,11 @@ endif
 # NVCC_CFLAGS = flags for nvcc compiler
 # CUDA_LFLAGS = flags for linking with CUDA
 
-CUDA_CFLAGS = -I${CUDAROOT}/include $(OPTLEV) -std=c++0x
+CUDA_CFLAGS = -I${CUDAROOT}/include $(OPTLEV) $(OPENMP_OPT) -std=c++0x
 NVCC_CFLAGS = $(OPTLEV) -lineinfo -fmad=true -use_fast_math $(GENCODE_FLAGS)
 MPI_CFLAGS = -I${MPIROOT}/include
 
-ifeq ($(OS),Linux)
+ifeq ($(OS),linux)
 CUDA_LFLAGS = -L$(CUDAROOT)/lib64
 else
 CUDA_LFLAGS = -L$(CUDAROOT)/lib
@@ -151,7 +160,7 @@ gpu_dyna : $(OBJS_DYNA)
 	$(CL) $(OPTLEV) $(CUDA_LFLAGS) -o gpu_dyna $(OBJS_DYNA)
 
 cpu_transpose : $(OBJS_TRANSPOSE)
-	$(CL) $(CUDA_LFLAGS) -o cpu_transpose $(OBJS_TRANSPOSE)
+	$(CL) $(CUDA_LFLAGS) $(OPENMP_OPT) -o cpu_transpose $(OBJS_TRANSPOSE)
 
 clean: 
 	rm -f *.o

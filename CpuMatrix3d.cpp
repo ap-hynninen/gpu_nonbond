@@ -1,6 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <cassert>
+#include <cstdlib>
 #include <math.h>
 #include "cpu_utils.h"
 #include "CpuMatrix3d.h"

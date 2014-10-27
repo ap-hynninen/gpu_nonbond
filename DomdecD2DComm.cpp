@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cmath>             // ceil
+#include <cstdlib>
 #include "DomdecD2DComm.h"
 
 //

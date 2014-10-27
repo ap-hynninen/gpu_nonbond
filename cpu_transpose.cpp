@@ -64,7 +64,7 @@ int main(int argc, char *argv[]) {
     mat.setup_transpose_xyz_yzx(&mat_t);
     mat_t.setup_transpose_xyz_yzx(&mat);
     
-    const int nrep = 200000;
+    const int nrep = 20000;
     MPICheck(MPI_Barrier( MPI_COMM_WORLD));
     double begin = MPI_Wtime();
     for (int i=0;i < nrep;i++) {
