@@ -328,18 +328,34 @@ void CpuMatrix3d<T>::transpose_xyz_yzx(const int src_x0, const int src_y0, const
 
   int xysize = mat->xsize*mat->ysize;
 
-  int x, y, z;
-  int dst_pos, src_pos;
+  /*
+  int z;
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) private(z, y, x, dst_pos, src_pos)
+#pragma omp parallel for schedule(static) private(z)
 #endif
   for (z=0;z < zlen;z++) {
-    for (y=0;y < ylen;y++) {
-      dst_pos = y+dst_x0 + (z+dst_y0 + (dst_z0)*mat->ysize)*mat->xsize;
-      src_pos = src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize;
-      for (x=0;x < xlen;x++) {
+    for (int y=0;y < ylen;y++) {
+      int dst_pos = y+dst_x0 + (z+dst_y0 + (dst_z0)*mat->ysize)*mat->xsize;
+      int src_pos = src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize;
+      for (int x=0;x < xlen;x++) {
 	mat->data[dst_pos + x*xysize] = data[src_pos + x];
       }
+    }
+  }
+  */
+
+  int yzlen = ylen*zlen;
+  int yz;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) private(yz)
+#endif
+  for (yz=0;yz < yzlen;yz++) {
+    int z = yz/ylen;
+    int y = yz - z*ylen;
+    int dst_pos = y+dst_x0 + (z+dst_y0 + (dst_z0)*mat->ysize)*mat->xsize;
+    int src_pos = src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize;
+    for (int x=0;x < xlen;x++) {
+      mat->data[dst_pos + x*xysize] = data[src_pos + x];
     }
   }
 
@@ -349,11 +365,11 @@ void CpuMatrix3d<T>::transpose_xyz_yzx(const int src_x0, const int src_y0, const
 // Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
 //
 template <typename T>
-void CpuMatrix3d<T>::transpose_xyz_yzx_tiled(CpuMatrix3d<T>* mat, T** buf_th) {
+void CpuMatrix3d<T>::transpose_xyz_yzx_tiled(CpuMatrix3d<T>* mat, const int tiledim, T** buf_th) {
   assert(mat->nx == ny);
   assert(mat->ny == nz);
   assert(mat->nz == nx);
-  transpose_xyz_yzx(0,0,0, 0,0,0, nx,ny,nz, mat);
+  transpose_xyz_yzx_tiled(0,0,0, 0,0,0, nx,ny,nz, mat, tiledim, buf_th);
 }
 
 //
@@ -364,7 +380,7 @@ template <typename T>
 void CpuMatrix3d<T>::transpose_xyz_yzx_tiled(const int src_x0, const int src_y0, const int src_z0,
 					     const int dst_x0, const int dst_y0, const int dst_z0,
 					     const int xlen, const int ylen, const int zlen,
-					     CpuMatrix3d<T>* mat, T** buf_th) {
+					     CpuMatrix3d<T>* mat, const int tiledim, T** buf_th) {
   assert(xlen > 0);
   assert(ylen > 0);
   assert(zlen > 0);
@@ -377,19 +393,22 @@ void CpuMatrix3d<T>::transpose_xyz_yzx_tiled(const int src_x0, const int src_y0,
   assert(dst_y0 >= 0 && dst_y0 + zlen <= mat->ny);
   assert(dst_z0 >= 0 && dst_z0 + xlen <= mat->nz);
 
-#ifdef _OPENMP
-  const int TILEDIM=32;
-  int tid;
-  int ntilex = (xlen-1)/TILEDIM+1;
-  int ntiley = (ylen-1)/TILEDIM+1;
+  int xysize = mat->xsize*mat->ysize;
+  int tid = 0;
+  int ntilex = (xlen-1)/tiledim+1;
+  int ntiley = (ylen-1)/tiledim+1;
   int ntile = ntilex*ntiley*zlen;
   T* buf;
+#ifdef _OPENMP
 #pragma omp parallel private(tid, buf)
+#endif
   {
     tid = omp_get_thread_num();
     buf = buf_th[tid];
     int tile;
+#ifdef _OPENMP
 #pragma omp for schedule(static) private(tile)
+#endif
     for (tile=0;tile < ntile;tile++) {
       // Calculate position (tilex, tiley, z)
       int tmp = tile;
@@ -398,49 +417,30 @@ void CpuMatrix3d<T>::transpose_xyz_yzx_tiled(const int src_x0, const int src_y0,
       int tiley = tmp/ntilex;
       int tilex = tmp - tiley*ntilex;
       //
-      int xstart = tilex*TILEDIM;
-      int xend   = (tilex+1)*TILEDIM;
+      int xstart = tilex*tiledim;
+      int xend   = (tilex+1)*tiledim;
       xend = (xend > xlen) ? xlen : xend;
-      int ystart = tiley*TILEDIM;
-      int yend   = (tiley+1)*TILEDIM;
+      int ystart = tiley*tiledim;
+      int yend   = (tiley+1)*tiledim;
       yend = (yend > ylen) ? ylen : yend;
       // Read in data
       for (int y=ystart;y < yend;y++) {
 	int src_pos = src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize;
-	int dst_pos = (y-ystart)*TILEDIM + (0-xstart);
+	int dst_pos = (y-ystart)*tiledim + (0-xstart);
 	for (int x=xstart;x < xend;x++) {
 	  buf[dst_pos + x] = data[src_pos + x];
 	}
       }
       // Write out data
       for (int x=xstart;x < xend;x++) {
-	int dst_pos = ystart+dst_x0 + (z+dst_y0 + (dst_z0 + x)*mat->ysize)*mat->xsize;
-	int src_pos = x+src_x0 + (ystart+src_y0 + (z+src_z0)*ysize)*xsize;
+	int src_pos = (x-xstart) + (0-ystart)*tiledim;
+	int dst_pos = dst_x0 + (z+dst_y0 + (dst_z0 + x)*mat->ysize)*mat->xsize;
 	for (int y=ystart;y < yend;y++) {
-	  mat->data[dst_pos + y] = buf[src_pos + y*TILEDIM];
+	  mat->data[dst_pos + y] = buf[src_pos + y*tiledim];
 	}
       }
     }
   }
-#endif
-
-  /*
-  int xysize = mat->xsize*mat->ysize;
-  int x, y, z;
-  int dst_pos, src_pos;
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) private(z, y, x, dst_pos, src_pos)
-#endif
-  for (z=0;z < zlen;z++) {
-    for (y=0;y < ylen;y++) {
-      dst_pos = y+dst_x0 + (z+dst_y0 + (dst_z0)*mat->ysize)*mat->xsize;
-      src_pos = src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize;
-      for (x=0;x < xlen;x++) {
-	mat->data[dst_pos + x*xysize] = data[src_pos + x];
-      }
-    }
-  }
-  */
 
 }
 

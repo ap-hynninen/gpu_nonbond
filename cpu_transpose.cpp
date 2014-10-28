@@ -8,6 +8,9 @@
 #include <omp.h>
 #endif
 
+template<typename T>
+void test(const int N, const int TILEDIM, const int nthread, const int ny, const int nz);
+
 int numnode;
 int mynode;
 
@@ -30,13 +33,12 @@ int main(int argc, char *argv[]) {
 
   float** buf_th = new float*[nthread];
   for (int i=0;i < nthread;i++) {
-    buf_th[i] = new float[32*32];
+    buf_th[i] = new float[64*64];
   }
 
-  const int N = 64;
+  int N = 64;
 
   CpuMatrix3d<float> q(N, N, N, "test_data/q_real_double.txt");
-  //CpuMatrix3d<float> q(N, N, N);
   CpuMatrix3d<float> q_t(N, N, N);
   q.transpose_xyz_yzx_ref(&q_t);
 
@@ -121,7 +123,7 @@ int main(int argc, char *argv[]) {
     MPICheck(MPI_Barrier( MPI_COMM_WORLD));
     double begin = MPI_Wtime();
     for (int i=0;i < nrep;i++) {
-      mat.transpose_xyz_yzx_tiled(&mat_t, buf_th);
+      mat.transpose_xyz_yzx_tiled(&mat_t, 64, buf_th);
     }
     MPICheck(MPI_Barrier( MPI_COMM_WORLD));
     double end = MPI_Wtime();
@@ -135,7 +137,7 @@ int main(int argc, char *argv[]) {
 		<< time_spent*1.0e6/(double)(nrep*2) << std::endl;
     }
     
-    mat.transpose_xyz_yzx_tiled(&mat_t, buf_th);
+    mat.transpose_xyz_yzx_tiled(&mat_t, 64, buf_th);
     mat_comp = mat_t.compare(&q_t, 0.0, max_diff);
     if (!mat_comp) {
       std::cout << "mat_t vs. q_t comparison FAILED" << std::endl;
@@ -150,8 +152,54 @@ int main(int argc, char *argv[]) {
   }
   delete [] buf_th;
 
+  for (N=64;N <= 512;N*=2) {
+    for (int tiledim=32;tiledim <= N;tiledim*=2) {
+      test<float>(N, tiledim, nthread, ny, nz);
+    }
+  }
+
   stop_mpi();
 
   return 0;
 }
 
+template<typename T>
+void test(const int N, const int TILEDIM, const int nthread, const int ny, const int nz) {
+
+  CpuMultiNodeMatrix3d<T> mat(N, N, N, 1, ny, nz, mynode);
+  CpuMultiNodeMatrix3d<T> mat_t(N, N, N, 1, ny, nz, mynode);
+
+  T** buf_th = new T*[nthread];
+  for (int i=0;i < nthread;i++) {
+    buf_th[i] = new T[TILEDIM*TILEDIM];
+  }
+
+  // Setup transposes
+  mat.setup_transpose_xyz_yzx(&mat_t);
+  mat_t.setup_transpose_xyz_yzx(&mat);
+    
+  const int nrep = 1000000/((N/64)*(N/64)*(N/64));
+  MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+  double begin = MPI_Wtime();
+  for (int i=0;i < nrep;i++) {
+    mat.transpose_xyz_yzx_tiled(&mat_t, TILEDIM, buf_th);
+  }
+  MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+  double end = MPI_Wtime();
+    
+  double time_spent = end - begin;
+    
+  if (mynode == 0) {
+    std::cout << "N = " << N << " TILEDIM = " << TILEDIM << std::endl;
+    std::cout << "nrep = " << nrep << std::endl;
+    std::cout << "time_spent (sec) = " << time_spent
+	      << " per transpose (micro sec) = "
+	      << time_spent*1.0e6/(double)(nrep*2) << std::endl;
+  }
+
+  for (int i=0;i < nthread;i++) {
+    delete [] buf_th[i];
+  }
+  delete [] buf_th;
+
+}
