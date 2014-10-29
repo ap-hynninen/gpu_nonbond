@@ -1,7 +1,28 @@
 #ifndef CPUMATRIX3D_H
 #define CPUMATRIX3D_H
+#include <iostream>
 
 enum {YZX=0, ZXY=1};
+
+struct float2 {
+  float x, y;
+};
+
+struct double2 {
+  double x, y;
+};
+
+inline float2 operator*(float2 lhs, const float2& rhs) {
+  lhs.x *= rhs.x;
+  lhs.y *= rhs.y;
+  return lhs;
+}
+
+inline double2 operator*(double2 lhs, const double2& rhs) {
+  lhs.x *= rhs.x;
+  lhs.y *= rhs.y;
+  return lhs;
+}
 
 template <typename T>
 class CpuMatrix3d {
@@ -16,7 +37,6 @@ private:
 
   // Storage for tile: tilebuf_th[0..num_tilebuf_th-1][0..tiledim*tiledim-1]
   T** tilebuf_th;
-  T* tilebuf_heap;
 
   // Initializes (allocates) data
   void init(const int size, T* ext_data = NULL);

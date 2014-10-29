@@ -74,17 +74,10 @@ void CpuMatrix3d<T>::alloc_tile() {
       num_tilebuf_th = omp_get_num_threads();
     }
 #endif
-    tilebuf_heap = new T[num_tilebuf_th*tiledim*tiledim];
-    tilebuf_th = new T*[num_tilebuf_th];
-    for (int i=0;i < num_tilebuf_th;i++) {
-      tilebuf_th[i] = &tilebuf_heap[i*tiledim*tiledim];
-    }
-    /*
     tilebuf_th = new T*[num_tilebuf_th];
     for (int i=0;i < num_tilebuf_th;i++) {
       tilebuf_th[i] = new T[tiledim*tiledim];
     }
-    */
   }
 }
 
@@ -94,13 +87,10 @@ void CpuMatrix3d<T>::alloc_tile() {
 template <typename T>
 void CpuMatrix3d<T>::dealloc_tile() {
   if (tilebuf_th != NULL) {
-    delete [] tilebuf_heap;
-    /*
     for (int i=0;i < num_tilebuf_th;i++) {
       if (tilebuf_th[i] != NULL) delete [] tilebuf_th[i];
     }
     delete [] tilebuf_th;
-    */
   }
 }
 
@@ -115,7 +105,6 @@ void CpuMatrix3d<T>::init(const int size, T* ext_data) {
     external_storage = true;
   }
   tilebuf_th = NULL;
-  tilebuf_heap = NULL;
 }
 
 //
@@ -147,6 +136,20 @@ inline double CpuMatrix3d<double>::norm(double a, double b) {
   return fabs(a-b);
 }
 
+template <>
+inline double CpuMatrix3d<float2>::norm(float2 a, float2 b) {
+  float dx = a.x-b.x;
+  float dy = a.y-b.y;
+  return (double)sqrtf(dx*dx + dy*dy);
+}
+
+template <>
+inline double CpuMatrix3d<double2>::norm(double2 a, double2 b) {
+  double dx = a.x-b.x;
+  double dy = a.y-b.y;
+  return sqrt(dx*dx + dy*dy);
+}
+
 template<>
 inline bool CpuMatrix3d<long long int>::is_nan(long long int a) {return false;};
 
@@ -161,6 +164,36 @@ inline bool CpuMatrix3d<float>::is_nan(float a) {
 template<>
 inline bool CpuMatrix3d<double>::is_nan(double a) {
   return isnan(a);
+}
+
+template<>
+inline bool CpuMatrix3d<float2>::is_nan(float2 a) {
+  return isnan(a.x) || isnan(a.y);
+}
+
+template<>
+inline bool CpuMatrix3d<double2>::is_nan(double2 a) {
+  return isnan(a.x) || isnan(a.y);
+}
+
+std::ostream& operator<<(std::ostream& os, float2& a) {
+  os << a.x << " " << a.y;
+  return os;
+}
+
+std::istream& operator>>(std::istream& is, float2& a) {
+  is >> a.x >> a.y;
+  return is;
+}
+
+std::ostream& operator<<(std::ostream& os, double2& a) {
+  os << a.x << " " << a.y;
+  return os;
+}
+
+std::istream& operator>>(std::istream& is, double2& a) {
+  is >> a.x >> a.y;
+  return is;
 }
 
 //
@@ -417,13 +450,6 @@ void CpuMatrix3d<T>::transpose_zxy(const int src_x0, const int src_y0, const int
   assert(dst_x0 >= 0 && dst_x0 + zlen <= mat.nx);
   assert(dst_y0 >= 0 && dst_y0 + xlen <= mat.ny);
   assert(dst_z0 >= 0 && dst_z0 + ylen <= mat.nz);
-
-  /*
-  transpose_zxy_legacy(src_x0, src_y0, src_z0,
-		       dst_x0, dst_y0, dst_z0,
-		       xlen, ylen, zlen,
-		       mat);
-  */
 
   int tid = 0;
   int ntilex = (xlen-1)/tiledim+1;
@@ -705,6 +731,7 @@ void CpuMatrix3d<T>::load(const int nx, const int ny, const int nz,
 
 }
 
+/*
 //
 // Scales the matrix by a factor "fac"
 //
@@ -715,11 +742,14 @@ void CpuMatrix3d<T>::scale(const T fac) {
       for (int x=0;x < nx;x++)
 	data[x + (y + z*ysize)*xsize] *= fac;
 }
+*/
 
 //
 // Explicit instances of CpuMatrix3d
 //
 template class CpuMatrix3d<float>;
+template class CpuMatrix3d<float2>;
 template class CpuMatrix3d<double>;
+template class CpuMatrix3d<double2>;
 template class CpuMatrix3d<long long int>;
 template class CpuMatrix3d<int>;

@@ -174,7 +174,7 @@ int main(int argc, char *argv[]) {
   // ------------------------------------------------------------
   // Test performance
   // ------------------------------------------------------------
-  for (N=64;N <= 64;N*=2) {
+  for (N=64;N <= 512;N*=2) {
     for (int tiledim=32;tiledim <= N;tiledim*=2) {
       test_performance<float>(N, tiledim, ny, nz);
     }
@@ -255,25 +255,37 @@ void test_performance(const int N, const int TILEDIM, const int ny, const int nz
 
   // Setup transposes
   mat.setup_transpose_yzx(mat_t);
-  mat_t.setup_transpose_yzx(mat);
+
+  double begin, end, time_yzx, time_zxy;
     
   const int nrep = 1000000/((N/64)*(N/64)*(N/64));
   MPICheck(MPI_Barrier( MPI_COMM_WORLD));
-  double begin = MPI_Wtime();
+  begin = MPI_Wtime();
   for (int i=0;i < nrep;i++) {
-    mat.transpose_yzx(mat_t);
+    mat.CpuMatrix3d<T>::transpose_yzx(mat_t);
   }
   MPICheck(MPI_Barrier( MPI_COMM_WORLD));
-  double end = MPI_Wtime();
-    
-  double time_spent = end - begin;
+  end = MPI_Wtime();
+  time_yzx = end - begin;
+
+  mat.setup_transpose_zxy(mat_t);
+
+  MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+  begin = MPI_Wtime();
+  for (int i=0;i < nrep;i++) {
+    mat.CpuMatrix3d<T>::transpose_zxy(mat_t);
+  }
+  MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+  end = MPI_Wtime();
+  time_zxy = end - begin;
     
   if (mynode == 0) {
     std::cout << "N = " << N << " TILEDIM = " << TILEDIM << std::endl;
     std::cout << "nrep = " << nrep << std::endl;
-    std::cout << "time_spent (sec) = " << time_spent
-	      << " per transpose (micro sec) = "
-	      << time_spent*1.0e6/(double)(nrep*2) << std::endl;
+    std::cout << "time(s) = " << time_yzx << " " << time_zxy
+	      << " per transpose (us) = "
+	      << time_yzx*1.0e6/(double)(nrep*2) << " "
+	      << time_zxy*1.0e6/(double)(nrep*2) << std::endl;
   }
 
 }
