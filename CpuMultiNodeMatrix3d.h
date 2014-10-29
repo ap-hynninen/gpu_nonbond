@@ -85,42 +85,51 @@ private:
   int zsizetot;
 
   // Stuff for matrix transpose
-  CpuMultiNodeMatrix3d<T>* mat_yzx;
-  int nsend;
-  node_t<T> *send;
+  CpuMultiNodeMatrix3d<T>* mat_t[2];
+  int nsend[2];
+  node_t<T> *send[2];
 
-  int nrecv;
-  node_t<T> *recv;
+  int nrecv[2];
+  node_t<T> *recv[2];
 
-  bool loc_transpose;
-  int loc_x0, loc_x1;
-  int loc_y0, loc_y1;
-  int loc_z0, loc_z1;
+  bool loc_transpose[2];
+  int loc_x0[2], loc_x1[2];
+  int loc_y0[2], loc_y1[2];
+  int loc_z0[2], loc_z1[2];
 
 #ifdef use_onesided
-  bool win_set;
-  MPI_Win win;
+  bool win_set[2];
+  MPI_Win win[2];
 #else
-  MPI_Request *recv_req;
-  MPI_Request *send_req;
+  MPI_Request *recv_req[2];
+  MPI_Request *send_req[2];
 #endif
 
-  void deallocate_transpose();
+  void deallocate_transpose(const int order);
+  void setup_transpose(CpuMultiNodeMatrix3d<T>& mat, const int order);
+  void transpose(CpuMultiNodeMatrix3d<T>& mat, const int order);
 
 public:
 
   CpuMultiNodeMatrix3d(const int nxtot, const int nytot, const int nztot,
-		    const int nnodex, const int nnodey, const int nnodez,
-		    const int mynode,
-		    const char *filename = NULL);
+		       const int nnodex, const int nnodey, const int nnodez,
+		       const int mynode, const int tiledim=64,
+		       const char *filename = NULL);
   ~CpuMultiNodeMatrix3d();
 
-  bool compare(CpuMatrix3d<T>* mat, const double tol, double& max_diff);
+  bool compare(CpuMatrix3d<T>& mat, const double tol, double& max_diff);
 
   void print_info();
-  void setup_transpose_xyz_yzx(CpuMultiNodeMatrix3d<T>* mat);
-  void transpose_xyz_yzx(const CpuMultiNodeMatrix3d<T>* mat);
 
+  void setup_transpose_yzx(CpuMultiNodeMatrix3d<T>& mat);
+  void setup_transpose_zxy(CpuMultiNodeMatrix3d<T>& mat);
+
+  void transpose_yzx(CpuMultiNodeMatrix3d<T>& mat);
+  void transpose_zxy(CpuMultiNodeMatrix3d<T>& mat);
+
+  void setData(const int x, const int y, const int z, const T val);
+  T getData(const int x, const int y, const int z);
+  bool hasData(const int x, const int y, const int z);
 };
 
 #endif // CPUMULTINODEMATRIX3D_H

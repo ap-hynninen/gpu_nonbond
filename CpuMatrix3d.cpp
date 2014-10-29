@@ -9,103 +9,29 @@
 #include <omp.h>
 #endif
 
-/*
-const int TILEDIM = 32;
-const int TILEROWS = 8;
-
-template <typename T>
-__global__ void transpose_xyz_yzx_kernel() {
-}
-
-//
-// Transposes a 3d matrix out-of-place: data_in(x, y, z) -> data_out(y, z, x)
-//
-template <typename T>
-__global__ void transpose_xyz_yzx_kernel(const int nx, const int ny, const int nz,
-					  const int xsize_in, const int ysize_in, const int zsize_in,
-					  const int xsize_out, const int ysize_out, const int zsize_out,
-					  const T* data_in, T* data_out) {
-
-  // Shared memory
-  __shared__ T tile[TILEDIM][TILEDIM+1];
-
-  int x = blockIdx.x * TILEDIM + threadIdx.x;
-  int y = blockIdx.y * TILEDIM + threadIdx.y;
-  int z = blockIdx.z           + threadIdx.z;
-
-  // Read (x,y) data_in into tile (shared memory)
-  for (int j=0;j < TILEDIM;j += TILEROWS)
-    if ((x < nx) && (y + j < ny) && (z < nz))
-      tile[threadIdx.y + j][threadIdx.x] = data_in[x + (y + j + z*ysize_in)*xsize_in];
-
-  __syncthreads();
-
-  // Write (y,x) tile into data_out
-  x = blockIdx.x * TILEDIM + threadIdx.y;
-  y = blockIdx.y * TILEDIM + threadIdx.x;
-  for (int j=0;j < TILEDIM;j += TILEROWS)
-    if ((x + j < nx) && (y < ny) && (z < nz))
-      data_out[y + (z + (x+j)*ysize_out)*xsize_out] = tile[threadIdx.x][threadIdx.y + j];
-
-}
-
-//
-// Transposes a 3d matrix out-of-place: data_in(x, y, z) -> data_out(z, x, y)
-//
-template <typename T>
-__global__ void transpose_xyz_zxy_kernel(const int nx, const int ny, const int nz,
-					 const int xsize, const int ysize, const int zsize,
-					 const T* data_in, T* data_out) {
-
-  // Shared memory
-  __shared__ T tile[TILEDIM][TILEDIM+1];
-
-  int x = blockIdx.x * TILEDIM + threadIdx.x;
-  int y = blockIdx.z           + threadIdx.z;
-  int z = blockIdx.y * TILEDIM + threadIdx.y;
-
-  // Read (x,z) data_in into tile (shared memory)
-  for (int k=0;k < TILEDIM;k += TILEROWS)
-    if ((x < nx) && (y < ny) && (z + k < nz))
-      tile[threadIdx.y + k][threadIdx.x] = data_in[x + (y + (z + k)*ysize)*xsize];
-
-  __syncthreads();
-
-  // Write (z,x) tile into data_out
-  x = blockIdx.x * TILEDIM + threadIdx.y;
-  z = blockIdx.y * TILEDIM + threadIdx.x;
-  for (int k=0;k < TILEDIM;k += TILEROWS)
-    if ((x + k < nx) && (y < ny) && (z < nz))
-      data_out[z + (x + k + y*xsize)*zsize] = tile[threadIdx.x][threadIdx.y + k];
-
-}
-
-__device__ inline float2 operator*(float2 lhs, const float2& rhs) {
-  lhs.x *= rhs.x;
-  lhs.y *= rhs.y;
-  return lhs;
-}
-*/
-
 //
 // Class Creators
 //
 template <typename T>
-CpuMatrix3d<T>::CpuMatrix3d(const int nx, const int ny, const int nz, T* ext_data) : 
-  nx(nx), ny(ny), nz(nz), xsize(nx), ysize(ny), zsize(nz) {
+CpuMatrix3d<T>::CpuMatrix3d(const int nx, const int ny, const int nz,
+			    const int tiledim, T* ext_data) : 
+  nx(nx), ny(ny), nz(nz), xsize(nx), ysize(ny), zsize(nz), tiledim(tiledim) {
   assert(nx > 0);
   assert(ny > 0);
   assert(nz > 0);
+  assert(tiledim > 0);
   init(xsize*ysize*zsize, ext_data);
 }
 
 template <typename T>
 CpuMatrix3d<T>::CpuMatrix3d(const int nx, const int ny, const int nz,
-		      const int xsize, const int ysize, const int zsize, T* ext_data) : 
-  nx(nx), ny(ny), nz(nz), xsize(xsize), ysize(ysize), zsize(zsize) {
+			    const int xsize, const int ysize, const int zsize,
+			    const int tiledim, T* ext_data) : 
+  nx(nx), ny(ny), nz(nz), xsize(xsize), ysize(ysize), zsize(zsize), tiledim(tiledim) {
   assert(nx > 0);
   assert(ny > 0);
   assert(nz > 0);
+  assert(tiledim > 0);
   assert(xsize >= nx);
   assert(ysize >= ny);
   assert(zsize >= nz);
@@ -114,11 +40,12 @@ CpuMatrix3d<T>::CpuMatrix3d(const int nx, const int ny, const int nz,
 
 template <typename T>
 CpuMatrix3d<T>::CpuMatrix3d(const int nx, const int ny, const int nz,
-		      const char *filename, T* ext_data) : 
-  nx(nx), ny(ny), nz(nz), xsize(nx), ysize(ny), zsize(nz) {
+			    const char *filename, const int tiledim, T* ext_data) : 
+  nx(nx), ny(ny), nz(nz), xsize(nx), ysize(ny), zsize(nz), tiledim(tiledim) {
   assert(nx > 0);
   assert(ny > 0);
   assert(nz > 0);
+  assert(tiledim > 0);
   init(xsize*ysize*zsize, ext_data);
   load(nx, ny, nz, filename);
 }
@@ -130,6 +57,51 @@ template <typename T>
 CpuMatrix3d<T>::~CpuMatrix3d() {
   if (external_storage == false)
     delete [] data;
+  dealloc_tile();
+}
+
+//
+// Allocate tilebuf_th
+//
+template <typename T>
+void CpuMatrix3d<T>::alloc_tile() {
+  if (tilebuf_th == NULL) {
+    num_tilebuf_th = 1;
+#ifdef _OPENMP
+#pragma omp parallel
+#pragma omp master
+    {
+      num_tilebuf_th = omp_get_num_threads();
+    }
+#endif
+    tilebuf_heap = new T[num_tilebuf_th*tiledim*tiledim];
+    tilebuf_th = new T*[num_tilebuf_th];
+    for (int i=0;i < num_tilebuf_th;i++) {
+      tilebuf_th[i] = &tilebuf_heap[i*tiledim*tiledim];
+    }
+    /*
+    tilebuf_th = new T*[num_tilebuf_th];
+    for (int i=0;i < num_tilebuf_th;i++) {
+      tilebuf_th[i] = new T[tiledim*tiledim];
+    }
+    */
+  }
+}
+
+//
+// Deallocate tilebuf_th
+//
+template <typename T>
+void CpuMatrix3d<T>::dealloc_tile() {
+  if (tilebuf_th != NULL) {
+    delete [] tilebuf_heap;
+    /*
+    for (int i=0;i < num_tilebuf_th;i++) {
+      if (tilebuf_th[i] != NULL) delete [] tilebuf_th[i];
+    }
+    delete [] tilebuf_th;
+    */
+  }
 }
 
 template <typename T>
@@ -142,6 +114,8 @@ void CpuMatrix3d<T>::init(const int size, T* ext_data) {
     data = ext_data;
     external_storage = true;
   }
+  tilebuf_th = NULL;
+  tilebuf_heap = NULL;
 }
 
 //
@@ -194,11 +168,11 @@ inline bool CpuMatrix3d<double>::is_nan(double a) {
 // NOTE: Comparison is done in double precision
 //
 template <typename T>
-bool CpuMatrix3d<T>::compare(CpuMatrix3d<T>* mat, const double tol, double& max_diff) {
+bool CpuMatrix3d<T>::compare(CpuMatrix3d<T>& mat, const double tol, double& max_diff) {
 
-  assert(mat->nx == nx);
-  assert(mat->ny == ny);
-  assert(mat->nz == nz);
+  assert(mat.nx == nx);
+  assert(mat.ny == ny);
+  assert(mat.nz == nz);
 
   bool ok = true;
 
@@ -211,8 +185,8 @@ bool CpuMatrix3d<T>::compare(CpuMatrix3d<T>* mat, const double tol, double& max_
       for (y=0;y < ny;y++)
 	for (x=0;x < nx;x++) {
 	  if (is_nan(data[x + (y + z*ysize)*xsize]) || 
-	      is_nan(mat->data[x + (y + z*mat->ysize)*mat->xsize])) throw 1;
-	  diff = norm(data[x + (y + z*ysize)*xsize], mat->data[x + (y + z*mat->ysize)*mat->xsize]);
+	      is_nan(mat.data[x + (y + z*mat.ysize)*mat.xsize])) throw 1;
+	  diff = norm(data[x + (y + z*ysize)*xsize], mat.data[x + (y + z*mat.ysize)*mat.xsize]);
 	  max_diff = (diff > max_diff) ? diff : max_diff;
 	  if (diff > tol) throw 2;
 	}
@@ -220,7 +194,7 @@ bool CpuMatrix3d<T>::compare(CpuMatrix3d<T>* mat, const double tol, double& max_
   catch (int a) {
     std::cout << "x y z = " << x << " "<< y << " "<< z << std::endl;
     std::cout << "this: " << data[x + (y + z*ysize)*xsize] << std::endl;
-    std::cout << "mat:  " << mat->data[x + (y + z*mat->ysize)*mat->xsize] << std::endl;
+    std::cout << "mat:  " << mat.data[x + (y + z*mat.ysize)*mat.xsize] << std::endl;
     if (a == 2) std::cout << "difference: " << diff << std::endl;
     ok = false;
   }
@@ -233,10 +207,10 @@ bool CpuMatrix3d<T>::compare(CpuMatrix3d<T>* mat, const double tol, double& max_
 // NOTE: this is a slow reference calculation
 //
 template <typename T>
-void CpuMatrix3d<T>::transpose_xyz_yzx_ref(int src_x0, int src_y0, int src_z0,
-					   int dst_x0, int dst_y0, int dst_z0,
-					   int xlen, int ylen, int zlen,
-					   CpuMatrix3d<T>* mat) {
+void CpuMatrix3d<T>::transpose_yzx_ref(const int src_x0, const int src_y0, const int src_z0,
+				       const int dst_x0, const int dst_y0, const int dst_z0,
+				       const int xlen, const int ylen, const int zlen,
+				       CpuMatrix3d<T>& mat) {
 
   assert(xlen > 0);
   assert(ylen > 0);
@@ -246,14 +220,14 @@ void CpuMatrix3d<T>::transpose_xyz_yzx_ref(int src_x0, int src_y0, int src_z0,
   assert(src_y0 >= 0 && src_y0 + ylen <= ny);
   assert(src_z0 >= 0 && src_z0 + zlen <= nz);
 
-  assert(dst_x0 >= 0 && dst_x0 + ylen <= mat->nx);
-  assert(dst_y0 >= 0 && dst_y0 + zlen <= mat->ny);
-  assert(dst_z0 >= 0 && dst_z0 + xlen <= mat->nz);
+  assert(dst_x0 >= 0 && dst_x0 + ylen <= mat.nx);
+  assert(dst_y0 >= 0 && dst_y0 + zlen <= mat.ny);
+  assert(dst_z0 >= 0 && dst_z0 + xlen <= mat.nz);
 
   for (int z=0;z < zlen;z++)
     for (int y=0;y < ylen;y++)
       for (int x=0;x < xlen;x++) {
-	mat->data[y+dst_x0 + (z+dst_y0 + (x+dst_z0)*mat->ysize)*mat->xsize] = 
+	mat.data[y+dst_x0 + (z+dst_y0 + (x+dst_z0)*mat.ysize)*mat.xsize] = 
 	  data[x+src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize];
       }
   
@@ -264,13 +238,13 @@ void CpuMatrix3d<T>::transpose_xyz_yzx_ref(int src_x0, int src_y0, int src_z0,
 // NOTE: this is a slow reference calculation performed on the host
 //
 template <typename T>
-void CpuMatrix3d<T>::transpose_xyz_yzx_ref(CpuMatrix3d<T>* mat) {
+void CpuMatrix3d<T>::transpose_yzx_ref(CpuMatrix3d<T>& mat) {
 
-  assert(mat->nx == ny);
-  assert(mat->ny == nz);
-  assert(mat->nz == nx);
+  assert(mat.nx == ny);
+  assert(mat.ny == nz);
+  assert(mat.nz == nx);
 
-  transpose_xyz_yzx_ref(0,0,0, 0,0,0, nx,ny,nz, mat);
+  transpose_yzx_ref(0,0,0, 0,0,0, nx,ny,nz, mat);
 }
 
 //
@@ -278,31 +252,63 @@ void CpuMatrix3d<T>::transpose_xyz_yzx_ref(CpuMatrix3d<T>* mat) {
 // NOTE: this is a slow reference calculation
 //
 template <typename T>
-void CpuMatrix3d<T>::transpose_xyz_zxy_ref(CpuMatrix3d<T>* mat) {
+void CpuMatrix3d<T>::transpose_zxy_ref(const int src_x0, const int src_y0, const int src_z0,
+				       const int dst_x0, const int dst_y0, const int dst_z0,
+				       const int xlen, const int ylen, const int zlen,
+				       CpuMatrix3d<T>& mat) {
 
-  assert(mat->nx == nz);
-  assert(mat->ny == nx);
-  assert(mat->nz == ny);
-  assert(mat->xsize == zsize);
-  assert(mat->ysize == xsize);
-  assert(mat->zsize == ysize);
+  assert(xlen > 0);
+  assert(ylen > 0);
+  assert(zlen > 0);
+
+  assert(src_x0 >= 0 && src_x0 + xlen <= nx);
+  assert(src_y0 >= 0 && src_y0 + ylen <= ny);
+  assert(src_z0 >= 0 && src_z0 + zlen <= nz);
+
+  assert(dst_x0 >= 0 && dst_x0 + zlen <= mat.nx);
+  assert(dst_y0 >= 0 && dst_y0 + xlen <= mat.ny);
+  assert(dst_z0 >= 0 && dst_z0 + ylen <= mat.nz);
 
   for (int z=0;z < nz;z++)
     for (int y=0;y < ny;y++)
       for (int x=0;x < nx;x++)
-	mat->data[z + (x + y*xsize)*zsize] = data[x + (y + z*ysize)*xsize];
+	mat.data[z+dst_x0 + (x+dst_y0 + (y+dst_z0)*mat.ysize)*mat.xsize] = 
+	  data[x+src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize];
 
 }
 
 //
 // Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
+// NOTE: this is a slow reference calculation performed on the host
 //
 template <typename T>
-void CpuMatrix3d<T>::transpose_xyz_yzx(CpuMatrix3d<T>* mat) {
-  assert(mat->nx == ny);
-  assert(mat->ny == nz);
-  assert(mat->nz == nx);
-  transpose_xyz_yzx(0,0,0, 0,0,0, nx,ny,nz, mat);
+void CpuMatrix3d<T>::transpose_zxy_ref(CpuMatrix3d<T>& mat) {
+
+  assert(mat.nx == nz);
+  assert(mat.ny == nx);
+  assert(mat.nz == ny);
+
+  transpose_zxy_ref(0,0,0, 0,0,0, nx,ny,nz, mat);
+}
+
+//
+// Transpose with order
+//
+template <typename T>
+void CpuMatrix3d<T>::transpose(const int src_x0, const int src_y0, const int src_z0,
+			       const int dst_x0, const int dst_y0, const int dst_z0,
+			       const int xlen, const int ylen, const int zlen,
+			       CpuMatrix3d<T>& mat, const int order) {
+  assert(order == YZX || order == ZXY);
+  if (order == YZX) {
+    transpose_yzx(src_x0, src_y0, src_z0,
+		  dst_x0, dst_y0, dst_z0,
+		  xlen, ylen, zlen, mat);
+  } else {
+    transpose_zxy(src_x0, src_y0, src_z0,
+		  dst_x0, dst_y0, dst_z0,
+		  xlen, ylen, zlen, mat);
+  }
 }
 
 //
@@ -310,10 +316,12 @@ void CpuMatrix3d<T>::transpose_xyz_yzx(CpuMatrix3d<T>* mat) {
 // Sub block is: (x0...x1) x (y0...y1) x (z0...z1)
 //
 template <typename T>
-void CpuMatrix3d<T>::transpose_xyz_yzx(const int src_x0, const int src_y0, const int src_z0,
-				       const int dst_x0, const int dst_y0, const int dst_z0,
-				       const int xlen, const int ylen, const int zlen,
-				       CpuMatrix3d<T>* mat) {
+void CpuMatrix3d<T>::transpose_yzx(const int src_x0, const int src_y0, const int src_z0,
+				   const int dst_x0, const int dst_y0, const int dst_z0,
+				   const int xlen, const int ylen, const int zlen,
+				   CpuMatrix3d<T>& mat) {
+  alloc_tile();
+
   assert(xlen > 0);
   assert(ylen > 0);
   assert(zlen > 0);
@@ -322,89 +330,21 @@ void CpuMatrix3d<T>::transpose_xyz_yzx(const int src_x0, const int src_y0, const
   assert(src_y0 >= 0 && src_y0 + ylen <= ny);
   assert(src_z0 >= 0 && src_z0 + zlen <= nz);
 
-  assert(dst_x0 >= 0 && dst_x0 + ylen <= mat->nx);
-  assert(dst_y0 >= 0 && dst_y0 + zlen <= mat->ny);
-  assert(dst_z0 >= 0 && dst_z0 + xlen <= mat->nz);
+  assert(dst_x0 >= 0 && dst_x0 + ylen <= mat.nx);
+  assert(dst_y0 >= 0 && dst_y0 + zlen <= mat.ny);
+  assert(dst_z0 >= 0 && dst_z0 + xlen <= mat.nz);
 
-  int xysize = mat->xsize*mat->ysize;
-
-  /*
-  int z;
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) private(z)
-#endif
-  for (z=0;z < zlen;z++) {
-    for (int y=0;y < ylen;y++) {
-      int dst_pos = y+dst_x0 + (z+dst_y0 + (dst_z0)*mat->ysize)*mat->xsize;
-      int src_pos = src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize;
-      for (int x=0;x < xlen;x++) {
-	mat->data[dst_pos + x*xysize] = data[src_pos + x];
-      }
-    }
-  }
-  */
-
-  int yzlen = ylen*zlen;
-  int yz;
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) private(yz)
-#endif
-  for (yz=0;yz < yzlen;yz++) {
-    int z = yz/ylen;
-    int y = yz - z*ylen;
-    int dst_pos = y+dst_x0 + (z+dst_y0 + (dst_z0)*mat->ysize)*mat->xsize;
-    int src_pos = src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize;
-    for (int x=0;x < xlen;x++) {
-      mat->data[dst_pos + x*xysize] = data[src_pos + x];
-    }
-  }
-
-}
-
-//
-// Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
-//
-template <typename T>
-void CpuMatrix3d<T>::transpose_xyz_yzx_tiled(CpuMatrix3d<T>* mat, const int tiledim, T** buf_th) {
-  assert(mat->nx == ny);
-  assert(mat->ny == nz);
-  assert(mat->nz == nx);
-  transpose_xyz_yzx_tiled(0,0,0, 0,0,0, nx,ny,nz, mat, tiledim, buf_th);
-}
-
-//
-// Transposes a sub block of a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
-// Sub block is: (x0...x1) x (y0...y1) x (z0...z1)
-//
-template <typename T>
-void CpuMatrix3d<T>::transpose_xyz_yzx_tiled(const int src_x0, const int src_y0, const int src_z0,
-					     const int dst_x0, const int dst_y0, const int dst_z0,
-					     const int xlen, const int ylen, const int zlen,
-					     CpuMatrix3d<T>* mat, const int tiledim, T** buf_th) {
-  assert(xlen > 0);
-  assert(ylen > 0);
-  assert(zlen > 0);
-
-  assert(src_x0 >= 0 && src_x0 + xlen <= nx);
-  assert(src_y0 >= 0 && src_y0 + ylen <= ny);
-  assert(src_z0 >= 0 && src_z0 + zlen <= nz);
-
-  assert(dst_x0 >= 0 && dst_x0 + ylen <= mat->nx);
-  assert(dst_y0 >= 0 && dst_y0 + zlen <= mat->ny);
-  assert(dst_z0 >= 0 && dst_z0 + xlen <= mat->nz);
-
-  int xysize = mat->xsize*mat->ysize;
   int tid = 0;
   int ntilex = (xlen-1)/tiledim+1;
   int ntiley = (ylen-1)/tiledim+1;
   int ntile = ntilex*ntiley*zlen;
-  T* buf;
+  T* tilebuf;
 #ifdef _OPENMP
-#pragma omp parallel private(tid, buf)
+#pragma omp parallel private(tid, tilebuf)
 #endif
   {
     tid = omp_get_thread_num();
-    buf = buf_th[tid];
+    tilebuf = tilebuf_th[tid];
     int tile;
 #ifdef _OPENMP
 #pragma omp for schedule(static) private(tile)
@@ -428,15 +368,15 @@ void CpuMatrix3d<T>::transpose_xyz_yzx_tiled(const int src_x0, const int src_y0,
 	int src_pos = src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize;
 	int dst_pos = (y-ystart)*tiledim + (0-xstart);
 	for (int x=xstart;x < xend;x++) {
-	  buf[dst_pos + x] = data[src_pos + x];
+	  tilebuf[dst_pos + x] = data[src_pos + x];
 	}
       }
       // Write out data
       for (int x=xstart;x < xend;x++) {
 	int src_pos = (x-xstart) + (0-ystart)*tiledim;
-	int dst_pos = dst_x0 + (z+dst_y0 + (dst_z0 + x)*mat->ysize)*mat->xsize;
+	int dst_pos = dst_x0 + (z+dst_y0 + (dst_z0 + x)*mat.ysize)*mat.xsize;
 	for (int y=ystart;y < yend;y++) {
-	  mat->data[dst_pos + y] = buf[src_pos + y*tiledim];
+	  mat.data[dst_pos + y] = tilebuf[src_pos + y*tiledim];
 	}
       }
     }
@@ -448,37 +388,23 @@ void CpuMatrix3d<T>::transpose_xyz_yzx_tiled(const int src_x0, const int src_y0,
 // Transposes a 3d matrix out-of-place: data(x, y, z) -> data(z, x, y)
 //
 template <typename T>
-void CpuMatrix3d<T>::transpose_xyz_zxy(CpuMatrix3d<T>* mat) {
-
-  assert(mat->nx == nz);
-  assert(mat->ny == nx);
-  assert(mat->nz == ny);
-  assert(mat->xsize == zsize);
-  assert(mat->ysize == xsize);
-  assert(mat->zsize == ysize);
-
-  std::cerr << "CpuMatrix3d<T>::transpose_xyz_zxy NOT IMPLEMENTED" << std::endl;
-  exit(1);
-
-  /*
-  dim3 nthread(TILEDIM, TILEROWS, 1);
-  dim3 nblock((nx-1)/TILEDIM+1, (nz-1)/TILEDIM+1, ny);
-
-  transpose_xyz_zxy_kernel<<< nblock, nthread >>>(nx, ny, nz, xsize, ysize, zsize,
-						  data, mat->data);
-
-  cudaCheck(cudaGetLastError());
-  */
+void CpuMatrix3d<T>::transpose_zxy(CpuMatrix3d<T>& mat) {
+  assert(mat.nx == nz);
+  assert(mat.ny == nx);
+  assert(mat.nz == ny);
+  transpose_zxy(0,0,0, 0,0,0, nx,ny,nz, mat);
 }
 
 //
-// Copies a 3d matrix this->data(x, y, z) -> mat->data(x, y, z)
+// Transposes a sub block of a 3d matrix out-of-place: data(x, y, z) -> data(z, x, y)
+// Sub block is: (x0...x1) x (y0...y1) x (z0...z1)
 //
 template <typename T>
-void CpuMatrix3d<T>::copy(int src_x0, int src_y0, int src_z0,
-			  int dst_x0, int dst_y0, int dst_z0,
-			  int xlen, int ylen, int zlen,
-			  CpuMatrix3d<T>* mat) {
+void CpuMatrix3d<T>::transpose_zxy(const int src_x0, const int src_y0, const int src_z0,
+				   const int dst_x0, const int dst_y0, const int dst_z0,
+				   const int xlen, const int ylen, const int zlen,
+				   CpuMatrix3d<T>& mat) {
+  alloc_tile();
 
   assert(xlen > 0);
   assert(ylen > 0);
@@ -488,27 +414,215 @@ void CpuMatrix3d<T>::copy(int src_x0, int src_y0, int src_z0,
   assert(src_y0 >= 0 && src_y0 + ylen <= ny);
   assert(src_z0 >= 0 && src_z0 + zlen <= nz);
 
-  assert(dst_x0 >= 0 && dst_x0 + xlen <= mat->nx);
-  assert(dst_y0 >= 0 && dst_y0 + ylen <= mat->ny);
-  assert(dst_z0 >= 0 && dst_z0 + zlen <= mat->nz);
+  assert(dst_x0 >= 0 && dst_x0 + zlen <= mat.nx);
+  assert(dst_y0 >= 0 && dst_y0 + xlen <= mat.ny);
+  assert(dst_z0 >= 0 && dst_z0 + ylen <= mat.nz);
 
-  copy3D_HtoH<T>(this->data, mat->data,
+  /*
+  transpose_zxy_legacy(src_x0, src_y0, src_z0,
+		       dst_x0, dst_y0, dst_z0,
+		       xlen, ylen, zlen,
+		       mat);
+  */
+
+  int tid = 0;
+  int ntilex = (xlen-1)/tiledim+1;
+  int ntilez = (zlen-1)/tiledim+1;
+  int ntile = ntilex*ntilez*ylen;
+  T* tilebuf;
+#ifdef _OPENMP
+#pragma omp parallel private(tid, tilebuf)
+#endif
+  {
+    tid = omp_get_thread_num();
+    tilebuf = tilebuf_th[tid];
+    int tile;
+#ifdef _OPENMP
+#pragma omp for schedule(static) private(tile)
+#endif
+    for (tile=0;tile < ntile;tile++) {
+      // Calculate position (tilex, tilez, y)
+      int tmp = tile;
+      int y = tmp/(ntilex*ntilez);
+      tmp -= y*(ntilex*ntilez);
+      int tilez = tmp/ntilex;
+      int tilex = tmp - tilez*ntilex;
+      //
+      int xstart = tilex*tiledim;
+      int xend   = (tilex+1)*tiledim;
+      xend = (xend > xlen) ? xlen : xend;
+      int zstart = tilez*tiledim;
+      int zend   = (tilez+1)*tiledim;
+      zend = (zend > zlen) ? zlen : zend;
+      // Read in data
+      for (int z=zstart;z < zend;z++) {
+	int src_pos = src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize;
+	int dst_pos = (z-zstart)*tiledim + (0-xstart);
+	for (int x=xstart;x < xend;x++) {
+	  tilebuf[dst_pos + x] = data[src_pos + x];
+	}
+      }
+      // Write out data
+      for (int x=xstart;x < xend;x++) {
+	int src_pos = (x-xstart) + (0-zstart)*tiledim;
+	int dst_pos = dst_x0 + (x+dst_y0 + (y+dst_z0)*mat.ysize)*mat.xsize;
+	for (int z=zstart;z < zend;z++) {
+	  mat.data[dst_pos + z] = tilebuf[src_pos + z*tiledim];
+	}
+      }
+    }
+  }
+}
+
+//
+// Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
+//
+template <typename T>
+void CpuMatrix3d<T>::transpose_yzx(CpuMatrix3d<T>& mat) {
+  assert(mat.nx == ny);
+  assert(mat.ny == nz);
+  assert(mat.nz == nx);
+  transpose_yzx(0,0,0, 0,0,0, nx,ny,nz, mat);
+}
+
+//
+// Copies a 3d matrix this->data(x, y, z) -> mat.data(x, y, z)
+//
+template <typename T>
+void CpuMatrix3d<T>::copy(int src_x0, int src_y0, int src_z0,
+			  int dst_x0, int dst_y0, int dst_z0,
+			  int xlen, int ylen, int zlen,
+			  CpuMatrix3d<T>& mat) {
+
+  assert(xlen > 0);
+  assert(ylen > 0);
+  assert(zlen > 0);
+
+  assert(src_x0 >= 0 && src_x0 + xlen <= nx);
+  assert(src_y0 >= 0 && src_y0 + ylen <= ny);
+  assert(src_z0 >= 0 && src_z0 + zlen <= nz);
+
+  assert(dst_x0 >= 0 && dst_x0 + xlen <= mat.nx);
+  assert(dst_y0 >= 0 && dst_y0 + ylen <= mat.ny);
+  assert(dst_z0 >= 0 && dst_z0 + zlen <= mat.nz);
+
+  copy3D_HtoH<T>(this->data, mat.data,
 		 src_x0, src_y0, src_z0,
 		 (size_t)this->xsize, (size_t)this->ysize,
 		 dst_x0, dst_y0, dst_z0,
 		 (size_t)xlen, (size_t)ylen, (size_t)zlen,
-		 (size_t)mat->xsize, (size_t)mat->ysize);
+		 (size_t)mat.xsize, (size_t)mat.ysize);
 
+}
+
+//
+// Transposes a sub block of a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
+// Sub block is: (x0...x1) x (y0...y1) x (z0...z1)
+//
+template <typename T>
+void CpuMatrix3d<T>::transpose_yzx_legacy(const int src_x0, const int src_y0, const int src_z0,
+					  const int dst_x0, const int dst_y0, const int dst_z0,
+					  const int xlen, const int ylen, const int zlen,
+					  CpuMatrix3d<T>& mat) {
+  assert(xlen > 0);
+  assert(ylen > 0);
+  assert(zlen > 0);
+
+  assert(src_x0 >= 0 && src_x0 + xlen <= nx);
+  assert(src_y0 >= 0 && src_y0 + ylen <= ny);
+  assert(src_z0 >= 0 && src_z0 + zlen <= nz);
+
+  assert(dst_x0 >= 0 && dst_x0 + ylen <= mat.nx);
+  assert(dst_y0 >= 0 && dst_y0 + zlen <= mat.ny);
+  assert(dst_z0 >= 0 && dst_z0 + xlen <= mat.nz);
+
+  int xysize = mat.xsize*mat.ysize;
+
+  int z;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) private(z)
+#endif
+  for (z=0;z < zlen;z++) {
+    for (int y=0;y < ylen;y++) {
+      int dst_pos = y+dst_x0 + (z+dst_y0 + (dst_z0)*mat.ysize)*mat.xsize;
+      int src_pos = src_x0 + (y+src_y0 + (z+src_z0)*ysize)*xsize;
+      for (int x=0;x < xlen;x++) {
+	mat.data[dst_pos + x*xysize] = data[src_pos + x];
+      }
+    }
+  }
+
+}
+
+//
+// Transposes a 3d matrix out-of-place: data(x, y, z) -> data(y, z, x)
+//
+template <typename T>
+void CpuMatrix3d<T>::transpose_yzx_legacy(CpuMatrix3d<T>& mat) {
+  assert(mat.nx == ny);
+  assert(mat.ny == nz);
+  assert(mat.nz == nx);
+  transpose_yzx(0,0,0, 0,0,0, nx,ny,nz, mat);
+}
+
+//
+// Transposes a sub block of a 3d matrix out-of-place: data(x, y, z) -> data(z, x, y)
+// Sub block is: (x0...x1) x (y0...y1) x (z0...z1)
+//
+template <typename T>
+void CpuMatrix3d<T>::transpose_zxy_legacy(const int src_x0, const int src_y0, const int src_z0,
+					  const int dst_x0, const int dst_y0, const int dst_z0,
+					  const int xlen, const int ylen, const int zlen,
+					  CpuMatrix3d<T>& mat) {
+  assert(xlen > 0);
+  assert(ylen > 0);
+  assert(zlen > 0);
+
+  assert(src_x0 >= 0 && src_x0 + xlen <= nx);
+  assert(src_y0 >= 0 && src_y0 + ylen <= ny);
+  assert(src_z0 >= 0 && src_z0 + zlen <= nz);
+
+  assert(dst_x0 >= 0 && dst_x0 + zlen <= mat.nx);
+  assert(dst_y0 >= 0 && dst_y0 + xlen <= mat.ny);
+  assert(dst_z0 >= 0 && dst_z0 + ylen <= mat.nz);
+
+  int xysize = xsize*ysize;
+
+  int y;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) private(y)
+#endif
+  for (y=0;y < ylen;y++) {
+    for (int x=0;x < xlen;x++) {
+      int dst_pos = dst_x0 + (x+dst_y0 + (y+dst_z0)*mat.ysize)*mat.xsize;
+      int src_pos = x+src_x0 + (y+src_y0 + (src_z0)*ysize)*xsize;
+      for (int z=0;z < zlen;z++) {
+	mat.data[dst_pos + z] = data[src_pos + z*xysize];
+      }
+    }
+  }
+
+}
+
+//
+// Transposes a 3d matrix out-of-place: data(x, y, z) -> data(z, x, y)
+//
+template <typename T>
+void CpuMatrix3d<T>::transpose_zxy_legacy(CpuMatrix3d<T>& mat) {
+  assert(mat.nx == nz);
+  assert(mat.ny == nx);
+  assert(mat.nz == ny);
+  transpose_zxy_legacy(0,0,0, 0,0,0, nx,ny,nz, mat);
 }
 
 //
 // Copies a 3d matrix data(x, y, z) -> data(x, y, z)
 //
 template <typename T>
-void CpuMatrix3d<T>::copy(CpuMatrix3d<T>* mat) {
-  assert(mat->nx == nx);
-  assert(mat->ny == ny);
-  assert(mat->nz == nz);
+void CpuMatrix3d<T>::copy(CpuMatrix3d<T>& mat) {
+  assert(mat.nx == nx);
+  assert(mat.ny == ny);
+  assert(mat.nz == nz);
   copy(0,0,0, 0,0,0, nx, ny, nz, mat);
 }
 
@@ -600,36 +714,6 @@ void CpuMatrix3d<T>::scale(const T fac) {
     for (int y=0;y < ny;y++)
       for (int x=0;x < nx;x++)
 	data[x + (y + z*ysize)*xsize] *= fac;
-}
-
-template <typename T>
-int CpuMatrix3d<T>::get_nx() {
-  return nx;
-}
-
-template <typename T>
-int CpuMatrix3d<T>::get_ny() {
-  return ny;
-}
-
-template <typename T>
-int CpuMatrix3d<T>::get_nz() {
-  return nz;
-}
-
-template <typename T>
-int CpuMatrix3d<T>::get_xsize() {
-  return xsize;
-}
-
-template <typename T>
-int CpuMatrix3d<T>::get_ysize() {
-  return ysize;
-}
-
-template <typename T>
-int CpuMatrix3d<T>::get_zsize() {
-  return zsize;
 }
 
 //

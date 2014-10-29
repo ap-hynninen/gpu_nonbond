@@ -2,6 +2,7 @@
 #include <iostream>
 #include <math.h>
 #include <time.h>
+#include <cstdlib>
 #include "CpuMultiNodeMatrix3d.h"
 #include "mpi_utils.h"
 #ifdef _OPENMP
@@ -9,7 +10,10 @@
 #endif
 
 template<typename T>
-void test(const int N, const int TILEDIM, const int nthread, const int ny, const int nz);
+bool test_correctness(const int NX, const int NY, const int NZ,
+		      const int tiledim, const int ny, const int nz);
+template<typename T>
+void test_performance(const int N, const int TILEDIM, const int ny, const int nz);
 
 int numnode;
 int mynode;
@@ -31,16 +35,11 @@ int main(int argc, char *argv[]) {
   }
 #endif
 
-  float** buf_th = new float*[nthread];
-  for (int i=0;i < nthread;i++) {
-    buf_th[i] = new float[64*64];
-  }
-
   int N = 64;
 
   CpuMatrix3d<float> q(N, N, N, "test_data/q_real_double.txt");
   CpuMatrix3d<float> q_t(N, N, N);
-  q.transpose_xyz_yzx_ref(&q_t);
+  q.transpose_yzx_ref(q_t);
 
   int ny = (int)ceil(sqrt(numnode*(double)N/(double)N));
   int nz = numnode/ny;
@@ -57,6 +56,7 @@ int main(int argc, char *argv[]) {
     std::cout << "ny = " << ny << " nz = " << nz << std::endl;
   }
 
+  /*
   {
     CpuMultiNodeMatrix3d<float> mat(N, N, N, 1, ny, nz, mynode, "test_data/q_real_double.txt");
     //CpuMultiNodeMatrix3d<float> mat(N, N, N, 1, ny, nz, mynode);
@@ -71,14 +71,14 @@ int main(int argc, char *argv[]) {
     }
     
     // Setup transposes
-    mat.setup_transpose_xyz_yzx(&mat_t);
-    mat_t.setup_transpose_xyz_yzx(&mat);
+    mat.setup_transpose_yzx(&mat_t);
+    mat_t.setup_transpose_yzx(&mat);
     
     const int nrep = 20000;
     MPICheck(MPI_Barrier( MPI_COMM_WORLD));
     double begin = MPI_Wtime();
     for (int i=0;i < nrep;i++) {
-      mat.transpose_xyz_yzx(&mat_t);
+      mat.transpose_yzx(&mat_t);
     }
     MPICheck(MPI_Barrier( MPI_COMM_WORLD));
     double end = MPI_Wtime();
@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
 		<< time_spent*1.0e6/(double)(nrep*2) << std::endl;
     }
     
-    mat.transpose_xyz_yzx(&mat_t);
+    mat.transpose_yzx(&mat_t);
     mat_comp = mat_t.compare(&q_t, 0.0, max_diff);
     if (!mat_comp) {
       std::cout << "mat_t vs. q_t comparison FAILED" << std::endl;
@@ -101,14 +101,15 @@ int main(int argc, char *argv[]) {
     }
 
   }
+  */
 
+  /*
   {
-    CpuMultiNodeMatrix3d<float> mat(N, N, N, 1, ny, nz, mynode, "test_data/q_real_double.txt");
-    //CpuMultiNodeMatrix3d<float> mat(N, N, N, 1, ny, nz, mynode);
+    CpuMultiNodeMatrix3d<float> mat(N, N, N, 1, ny, nz, mynode, 64, "test_data/q_real_double.txt");
     CpuMultiNodeMatrix3d<float> mat_t(N, N, N, 1, ny, nz, mynode);
 
     double max_diff;
-    bool mat_comp = mat.compare(&q, 0.0, max_diff);
+    bool mat_comp = mat.compare(q, 0.0, max_diff);
     if (!mat_comp) {
       std::cout << "mat vs. q comparison FAILED" << std::endl;
     } else {
@@ -116,14 +117,14 @@ int main(int argc, char *argv[]) {
     }
     
     // Setup transposes
-    mat.setup_transpose_xyz_yzx(&mat_t);
-    mat_t.setup_transpose_xyz_yzx(&mat);
+    mat.setup_transpose_yzx(mat_t);
+    mat_t.setup_transpose_yzx(mat);
     
     const int nrep = 20000;
     MPICheck(MPI_Barrier( MPI_COMM_WORLD));
     double begin = MPI_Wtime();
     for (int i=0;i < nrep;i++) {
-      mat.transpose_xyz_yzx_tiled(&mat_t, 64, buf_th);
+      mat.transpose_yzx(mat_t);
     }
     MPICheck(MPI_Barrier( MPI_COMM_WORLD));
     double end = MPI_Wtime();
@@ -137,8 +138,8 @@ int main(int argc, char *argv[]) {
 		<< time_spent*1.0e6/(double)(nrep*2) << std::endl;
     }
     
-    mat.transpose_xyz_yzx_tiled(&mat_t, 64, buf_th);
-    mat_comp = mat_t.compare(&q_t, 0.0, max_diff);
+    mat.transpose_yzx(mat_t);
+    mat_comp = mat_t.compare(q_t, 0.0, max_diff);
     if (!mat_comp) {
       std::cout << "mat_t vs. q_t comparison FAILED" << std::endl;
     } else {
@@ -146,43 +147,121 @@ int main(int argc, char *argv[]) {
     }
 
   }
+  */
 
-  for (int i=0;i < nthread;i++) {
-    delete [] buf_th[i];
+  /*
+  // ------------------------------------------------------------
+  // Test correctness
+  // ------------------------------------------------------------
+  srand(time(NULL));
+  for (int i=0;i < 20;i++) {
+    // Take random matrix size
+    int NX = rand() % 256 + 4;
+    int NY = rand() % 256 + 4;
+    int NZ = rand() % 256 + 4;
+    int tiledim = rand() % 256 + 4;
+    std::cout << "NX = " << NX << " NY = " << NY << " NZ = " << NZ 
+	      << " tiledim = " << tiledim << " ...";
+    if (test_correctness<double>(NX, NY, NZ, tiledim, ny, nz)) {
+      std::cout << "OK" << std::endl;
+    } else {
+      std::cout << "FAILED" << std::endl;
+      return 1;
+    }
   }
-  delete [] buf_th;
+  */
 
-  for (N=64;N <= 512;N*=2) {
+  // ------------------------------------------------------------
+  // Test performance
+  // ------------------------------------------------------------
+  for (N=64;N <= 64;N*=2) {
     for (int tiledim=32;tiledim <= N;tiledim*=2) {
-      test<float>(N, tiledim, nthread, ny, nz);
+      test_performance<float>(N, tiledim, ny, nz);
     }
   }
+  // ------------------------------------------------------------
 
   stop_mpi();
 
   return 0;
 }
 
+//
+// Test correctness
+//
 template<typename T>
-void test(const int N, const int TILEDIM, const int nthread, const int ny, const int nz) {
+bool test_correctness(const int NX, const int NY, const int NZ,
+		      const int tiledim, const int ny, const int nz) {
 
-  CpuMultiNodeMatrix3d<T> mat(N, N, N, 1, ny, nz, mynode);
-  CpuMultiNodeMatrix3d<T> mat_t(N, N, N, 1, ny, nz, mynode);
-
-  T** buf_th = new T*[nthread];
-  for (int i=0;i < nthread;i++) {
-    buf_th[i] = new T[TILEDIM*TILEDIM];
+  CpuMultiNodeMatrix3d<T> mat_xyz(NX, NY, NZ, 1, ny, nz, mynode, tiledim);
+  for (int z=0;z < NZ;z++) {
+    for (int y=0;y < NY;y++) {
+      for (int x=0;x < NX;x++) {
+	mat_xyz.setData(x, y, z, (T)(x + y*NX + z*NX*NY));
+	//mat_xyz.get_data()[x + y*NX + z*NX*NY] = (T)(x + y*NX + z*NX*NY);
+      }
+    }
   }
 
+  CpuMultiNodeMatrix3d<T> mat_yzx(NY, NZ, NX, 1, ny, nz, mynode, tiledim);
+  mat_xyz.setup_transpose_yzx(mat_yzx);
+  mat_xyz.transpose_yzx(mat_yzx);
+  for (int x=0;x < NX;x++) {
+    for (int z=0;z < NZ;z++) {
+      for (int y=0;y < NY;y++) {
+	if (mat_yzx.hasData(y,z,x)) {
+	  if (mat_yzx.getData(y,z,x) != (T)(x + y*NX + z*NX*NY)) {
+	    std::cout << std::endl << "YZX: x = " << x << " y = " << y << " z = " << z << std::endl;
+	    return false;
+	  }
+	}
+	/*
+	if (mat_yzx.get_data()[y + z*NY + x*NY*NZ] != (T)(x + y*NX + z*NX*NY)) {
+	  std::cout << std::endl << "YZX: x = " << x << " y = " << y << " z = " << z << std::endl;
+	  return false;
+	}
+	*/
+      }
+    }
+  }
+
+  /*
+  CpuMultiNodeMatrix3d<T> mat_zxy(NZ, NX, NY, 1, ny, nz, mynode, tiledim);
+  mat_xyz.setup_transpose_zxy(mat_zxy);
+  mat_xyz.transpose_zxy(mat_zxy);
+  for (int y=0;y < NY;y++) {
+    for (int x=0;x < NX;x++) {
+      for (int z=0;z < NZ;z++) {
+	if (mat_zxy.get_data()[z + x*NZ + y*NZ*NX] != (T)(x + y*NX + z*NX*NY)) {
+	  std::cout << std::endl << "ZXY: x = " << x << " y = " << y << " z = " << z << std::endl;
+	  return false;
+	}
+      }
+    }
+  }
+  */
+
+  return true;
+}
+
+//
+// Test performance
+//
+template<typename T>
+void test_performance(const int N, const int TILEDIM, const int ny, const int nz) {
+
+  CpuMultiNodeMatrix3d<T> mat(N, N, N, 1, ny, nz, mynode, TILEDIM);
+  CpuMultiNodeMatrix3d<T> mat_t(N, N, N, 1, ny, nz, mynode, TILEDIM);
+
   // Setup transposes
-  mat.setup_transpose_xyz_yzx(&mat_t);
-  mat_t.setup_transpose_xyz_yzx(&mat);
+  mat.setup_transpose_yzx(mat_t);
+  mat_t.setup_transpose_yzx(mat);
     
   const int nrep = 1000000/((N/64)*(N/64)*(N/64));
   MPICheck(MPI_Barrier( MPI_COMM_WORLD));
   double begin = MPI_Wtime();
   for (int i=0;i < nrep;i++) {
-    mat.transpose_xyz_yzx_tiled(&mat_t, TILEDIM, buf_th);
+    mat.transpose_yzx(mat_t);
   }
   MPICheck(MPI_Barrier( MPI_COMM_WORLD));
   double end = MPI_Wtime();
@@ -196,10 +275,5 @@ void test(const int N, const int TILEDIM, const int nthread, const int ny, const
 	      << " per transpose (micro sec) = "
 	      << time_spent*1.0e6/(double)(nrep*2) << std::endl;
   }
-
-  for (int i=0;i < nthread;i++) {
-    delete [] buf_th[i];
-  }
-  delete [] buf_th;
 
 }
