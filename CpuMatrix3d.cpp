@@ -731,7 +731,6 @@ void CpuMatrix3d<T>::load(const int nx, const int ny, const int nz,
 
 }
 
-/*
 //
 // Scales the matrix by a factor "fac"
 //
@@ -742,7 +741,6 @@ void CpuMatrix3d<T>::scale(const T fac) {
       for (int x=0;x < nx;x++)
 	data[x + (y + z*ysize)*xsize] *= fac;
 }
-*/
 
 //
 // Explicit instances of CpuMatrix3d

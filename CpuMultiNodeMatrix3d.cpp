@@ -245,7 +245,7 @@ bool get_vol_overlap(int x0_a, int x1_a, int y0_a, int y1_a, int z0_a, int z1_a,
   z0_ab = max(z0_a, z0_b);
   z1_ab = min(z1_a, z1_b);
 
-  return ((x0_ab < x1_ab) && (y0_ab < y1_ab) && (z0_ab < z1_ab));
+  return ((x0_ab <= x1_ab) && (y0_ab <= y1_ab) && (z0_ab <= z1_ab));
 }
 
 //
@@ -595,4 +595,6 @@ void CpuMultiNodeMatrix3d<T>::transpose(CpuMultiNodeMatrix3d<T>& mat, const int 
 //
 template class CpuMultiNodeMatrix3d<float>;
 template class CpuMultiNodeMatrix3d<double>;
+template class CpuMultiNodeMatrix3d<float2>;
+template class CpuMultiNodeMatrix3d<double2>;
 template class CpuMultiNodeMatrix3d<long long int>;

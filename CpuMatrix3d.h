@@ -6,12 +6,51 @@ enum {YZX=0, ZXY=1};
 
 struct float2 {
   float x, y;
+
+  float2() {}
+  float2(const float v) : x(v), y(v) {}
+  
+  float2& operator*=(const float2& rhs) {
+    this->x *= rhs.x;
+    this->y *= rhs.y;
+    return *this;
+  }
+
+  bool operator==(const float2& rhs) {
+    return (this->x == rhs.x) && (this->y == rhs.y);
+  }
+
+  bool operator!=(const float2& rhs) {return !(*this == rhs);}
+
 };
 
 struct double2 {
   double x, y;
+  
+  double2() {}
+  double2(const double v) : x(v), y(v) {}
+
+  double2& operator*=(const double2& rhs) {
+    this->x *= rhs.x;
+    this->y *= rhs.y;
+    return *this;
+  }
+
+  bool operator==(const double2& rhs) {
+    return (this->x == rhs.x) && (this->y == rhs.y);
+  }
+
+  bool operator!=(const double2& rhs) {return !(*this == rhs);}
+
 };
 
+/*
+  bool operator==(const double2& lhs, const double2& rhs) {
+    return (lhs.x == rhs.x) && (lhs.y == rhs.y);
+  }
+*/
+
+/*
 inline float2 operator*(float2 lhs, const float2& rhs) {
   lhs.x *= rhs.x;
   lhs.y *= rhs.y;
@@ -23,6 +62,7 @@ inline double2 operator*(double2 lhs, const double2& rhs) {
   lhs.y *= rhs.y;
   return lhs;
 }
+*/
 
 template <typename T>
 class CpuMatrix3d {

@@ -153,21 +153,18 @@ int main(int argc, char *argv[]) {
   // Test correctness
   // ------------------------------------------------------------
   srand(time(NULL));
+  int min_nxyz = std::max(ny,nz);
   for (int i=0;i < 20;i++) {
     // Take random matrix size
-    int NX = rand() % 256 + 4;
-    int NY = rand() % 256 + 4;
-    int NZ = rand() % 256 + 4;
+    int NX = rand() % 256 + min_nxyz;
+    int NY = rand() % 256 + min_nxyz;
+    int NZ = rand() % 256 + min_nxyz;
     int tiledim = rand() % 256 + 4;
-    //NX = 64;
-    //NY = 64;
-    //NZ = 64;
-    //tiledim = 64;
     if (mynode == 0) {
       std::cout << "NX = " << NX << " NY = " << NY << " NZ = " << NZ 
 		<< " tiledim = " << tiledim << " ...";
     }
-    if (test_correctness<double>(NX, NY, NZ, tiledim, ny, nz)) {
+    if (test_correctness<float>(NX, NY, NZ, tiledim, ny, nz)) {
       if (mynode == 0) std::cout << "OK" << std::endl;
     } else {
       if (mynode == 0) std::cout << "FAILED" << std::endl;
@@ -216,7 +213,9 @@ bool test_correctness(const int NX, const int NY, const int NZ,
       for (int y=0;y < NY;y++) {
 	if (mat_yzx.hasData(y,z,x)) {
 	  if (mat_yzx.getData(y,z,x) != (T)(x + y*NX + z*NX*NY)) {
-	    std::cout << std::endl << "YZX: x = " << x << " y = " << y << " z = " << z << std::endl;
+	    std::cout << std::endl << "YZX: x = " << x << " y = " << y << " z = " << z 
+		      << " | " << mat_yzx.getData(y,z,x)  << " vs "
+		      << (T)(x + y*NX + z*NX*NY) << std::endl;
 	    return false;
 	  }
 	}
