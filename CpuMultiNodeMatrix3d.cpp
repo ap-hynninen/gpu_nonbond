@@ -189,7 +189,7 @@ void CpuMultiNodeMatrix3d<T>::setData(const int x, const int y, const int z, con
   if (x >= x0[mynode] && x <= x1[mynode] &&
       y >= y0[mynode] && y <= y1[mynode] &&
       z >= z0[mynode] && z <= z1[mynode]) {
-    this->data[x + (y + z*this->ysize)*this->xsize] = val;
+    this->data[x-x0[mynode] + (y-y0[mynode] + (z-z0[mynode])*this->ysize)*this->xsize] = val;
   }
 }
 
@@ -206,7 +206,7 @@ T CpuMultiNodeMatrix3d<T>::getData(const int x, const int y, const int z) {
   if (x >= x0[mynode] && x <= x1[mynode] &&
       y >= y0[mynode] && y <= y1[mynode] &&
       z >= z0[mynode] && z <= z1[mynode]) {
-    return this->data[x + (y + z*this->ysize)*this->xsize];
+    return this->data[x-x0[mynode] + (y-y0[mynode] + (z-z0[mynode])*this->ysize)*this->xsize];
   }
 
   return this->data[0];
@@ -292,37 +292,28 @@ void CpuMultiNodeMatrix3d<T>::setup_transpose(CpuMultiNodeMatrix3d<T>& mat, cons
     assert(mat.zsizetot == ysizetot);
   }
 
-  // Limits in the transposed matrix. NOTE that these are in reserve order
+  // Limits on the transposed matrix of node "mynode"
   int x0_t, y0_t, z0_t;
   int x1_t, y1_t, z1_t;
   if (order == YZX) {
-    x0_t = z0[mynode];
-    x1_t = z1[mynode];
-    y0_t = x0[mynode];
-    y1_t = x1[mynode];
-    z0_t = y0[mynode];
-    z1_t = y1[mynode];
+    x0_t = mat.z0[mynode];
+    x1_t = mat.z1[mynode];
+    y0_t = mat.x0[mynode];
+    y1_t = mat.x1[mynode];
+    z0_t = mat.y0[mynode];
+    z1_t = mat.y1[mynode];
   } else {
-    x0_t = y0[mynode];
-    x1_t = y1[mynode];
-    y0_t = z0[mynode];
-    y1_t = z1[mynode];
-    z0_t = x0[mynode];
-    z1_t = x1[mynode];
+    x0_t = mat.y0[mynode];
+    x1_t = mat.y1[mynode];
+    y0_t = mat.z0[mynode];
+    y1_t = mat.z1[mynode];
+    z0_t = mat.x0[mynode];
+    z1_t = mat.x1[mynode];
   }
 
   assert(nnodex == mat.nnodex);
   assert(nnodey == mat.nnodey);
   assert(nnodez == mat.nnodez);
-
-  /*
-  assert(x0[mynode] == mat.x0[mynode]);
-  assert(x1[mynode] == mat.x1[mynode]);
-  assert(y0[mynode] == mat.y0[mynode]);
-  assert(y1[mynode] == mat.y1[mynode]);
-  assert(z0[mynode] == mat.z0[mynode]);
-  assert(z1[mynode] == mat.z1[mynode]);
-  */
 
   loc_transpose[order] = false;
 
@@ -333,7 +324,11 @@ void CpuMultiNodeMatrix3d<T>::setup_transpose(CpuMultiNodeMatrix3d<T>& mat, cons
   nsend[order] = 0;
   for (int inode=0;inode < nnode;inode++) {
 
-    // Calculate overlap between this node on the transposed matrix and node "inode"
+    //--------------------------------
+    // Data receiving
+    //--------------------------------
+    // Calculate overlap between:
+    // node "mynode" on the transposed matrix and node "inode" on the original matrix
 
     int x0_ol, x1_ol;
     int y0_ol, y1_ol;
@@ -361,37 +356,40 @@ void CpuMultiNodeMatrix3d<T>::setup_transpose(CpuMultiNodeMatrix3d<T>& mat, cons
       nrecv[order]++;
     }
 
-    // Calculate overlap between this node and node "inode" on the transposed matrix
+    //--------------------------------
+    // Data sending & Local transpose
+    //--------------------------------
+    // Calculate overlap between:
+    // node "mynode" on the original matrix and node "inode" on the transposed matrix
     int x0i_t, y0i_t, z0i_t;
     int x1i_t, y1i_t, z1i_t;
     if (order == YZX) {
-      x0i_t = z0[inode];
-      x1i_t = z1[inode];
-      y0i_t = x0[inode];
-      y1i_t = x1[inode];
-      z0i_t = y0[inode];
-      z1i_t = y1[inode];
+      x0i_t = mat.z0[inode];
+      x1i_t = mat.z1[inode];
+      y0i_t = mat.x0[inode];
+      y1i_t = mat.x1[inode];
+      z0i_t = mat.y0[inode];
+      z1i_t = mat.y1[inode];
     } else {
-      x0i_t = y0[inode];
-      x1i_t = y1[inode];
-      y0i_t = z0[inode];
-      y1i_t = z1[inode];
-      z0i_t = x0[inode];
-      z1i_t = x1[inode];
+      x0i_t = mat.y0[inode];
+      x1i_t = mat.y1[inode];
+      y0i_t = mat.z0[inode];
+      y1i_t = mat.z1[inode];
+      z0i_t = mat.x0[inode];
+      z1i_t = mat.x1[inode];
     }
-
-    x0i_t = x0[inode];
-    x1i_t = x1[inode];
-    y0i_t = y0[inode];
-    y1i_t = y1[inode];
-    z0i_t = z0[inode];
-    z1i_t = z1[inode];
 
     overlap = get_vol_overlap(x0i_t, x1i_t, y0i_t, y1i_t, z0i_t, z1i_t,
 			      x0[mynode], x1[mynode], y0[mynode], y1[mynode], z0[mynode], z1[mynode],
 			      x0_ol, x1_ol, y0_ol, y1_ol, z0_ol, z1_ol);
 
-    //printf("\n%d %d %d %d %d %d\n",x0_ol, x1_ol, y0_ol, y1_ol, z0_ol, z1_ol);
+    /*
+    if (overlap && mynode == 1)
+      fprintf(stderr,"\n%d %d %d %d %d %d\n%d %d %d %d %d %d\n%d %d %d %d %d %d\n",
+	      x0i_t, x1i_t, y0i_t, y1i_t, z0i_t, z1i_t,
+	      x0[mynode], x1[mynode], y0[mynode], y1[mynode], z0[mynode], z1[mynode],
+	      x0_ol, x1_ol, y0_ol, y1_ol, z0_ol, z1_ol);
+    */
 
     if (overlap) {
       send[order][nsend[order]].x0 = x0_ol;
@@ -512,27 +510,34 @@ void CpuMultiNodeMatrix3d<T>::transpose(CpuMultiNodeMatrix3d<T>& mat, const int 
   // (loc_x0...loc_x1) x (loc_y0...loc_y1) x (loc_z0...loc_z1)
 
   if (loc_transpose[order]) {
+    int dstloc_x0, dstloc_y0, dstloc_z0;
+    if (order == YZX) {
+      dstloc_x0 = loc_y0[order];
+      dstloc_y0 = loc_z0[order];
+      dstloc_z0 = loc_x0[order];
+    } else {
+      dstloc_x0 = loc_z0[order];
+      dstloc_y0 = loc_x0[order];
+      dstloc_z0 = loc_y0[order];
+    }
     /*
-    printf("\n src = %d %d %d\n dst = %d %d %d\n len = %d %d %d\n",
-	   loc_x0[order] - this->x0[mynode],
-	   loc_y0[order] - this->y0[mynode],
-	   loc_z0[order] - this->z0[mynode],
-	   loc_y0[order] - mat_t[order]->x0[mynode],
-	   loc_z0[order] - mat_t[order]->y0[mynode],
-	   loc_x0[order] - mat_t[order]->z0[mynode],
-	   loc_x1[order]-loc_x0[order]+1,
-	   loc_y1[order]-loc_y0[order]+1,
-	   loc_z1[order]-loc_z0[order]+1);
+    fprintf(stderr,"\n loc0 = %d %d %d\n loc1 = %d %d %d\n xyz0 = %d %d %d\n xyz0 = %d %d %d\n",
+	    loc_x0[order],loc_y0[order],loc_z0[order],
+	    loc_x1[order],loc_y1[order],loc_z1[order],
+	    this->x0[mynode],this->y0[mynode],this->z0[mynode],
+	    dstloc_x0, dstloc_y0, dstloc_z0);
+    MPICheck(MPI_Barrier(MPI_COMM_WORLD));
+    //exit(1);
     */
-    CpuMatrix3d<T>::transpose(loc_x0[order] - this->x0[mynode],
-			      loc_y0[order] - this->y0[mynode],
-			      loc_z0[order] - this->z0[mynode],
-			      loc_y0[order] - mat_t[order]->x0[mynode],
-			      loc_z0[order] - mat_t[order]->y0[mynode],
-			      loc_x0[order] - mat_t[order]->z0[mynode],
-			      loc_x1[order]-loc_x0[order]+1,
-			      loc_y1[order]-loc_y0[order]+1,
-			      loc_z1[order]-loc_z0[order]+1,
+    CpuMatrix3d<T>::transpose(loc_x0[order] - this->x0[mynode],        // src_x0
+			      loc_y0[order] - this->y0[mynode],        // src_y0
+			      loc_z0[order] - this->z0[mynode],        // src_z0
+			      dstloc_x0 - mat_t[order]->x0[mynode],    // dst_x0
+			      dstloc_y0 - mat_t[order]->y0[mynode],    // dst_y0
+			      dstloc_z0 - mat_t[order]->z0[mynode],    // dst_z0
+			      loc_x1[order]-loc_x0[order]+1,           // xlen
+			      loc_y1[order]-loc_y0[order]+1,           // ylen
+			      loc_z1[order]-loc_z0[order]+1,           // zlen
 			      *mat_t[order], order);
   }
 
@@ -561,11 +566,20 @@ void CpuMultiNodeMatrix3d<T>::transpose(CpuMultiNodeMatrix3d<T>& mat, const int 
 			 recv[order][k].xsize, recv[order][k].ysize,
 			 recv[order][k].z1-recv[order][k].z0+1, 
 			 this->tiledim, recv[order][k].data);
-
+      int srcloc_x0, srcloc_y0, srcloc_z0;
+      if (order == YZX) {
+	srcloc_x0 = recv[order][k].y0;
+	srcloc_y0 = recv[order][k].z0;
+	srcloc_z0 = recv[order][k].x0;
+      } else {
+	srcloc_x0 = recv[order][k].z0;
+	srcloc_y0 = recv[order][k].x0;
+	srcloc_z0 = recv[order][k].y0;
+      }
       loc.transpose(0,0,0,
-		    recv[order][k].y0 - mat_t[order]->x0[mynode],
-		    recv[order][k].z0 - mat_t[order]->y0[mynode],
-		    recv[order][k].x0 - mat_t[order]->z0[mynode],
+		    srcloc_x0 - mat_t[order]->x0[mynode],
+		    srcloc_y0 - mat_t[order]->y0[mynode],
+		    srcloc_z0 - mat_t[order]->z0[mynode],
 		    recv[order][k].x1-recv[order][k].x0+1,
 		    recv[order][k].y1-recv[order][k].y0+1,
 		    recv[order][k].z1-recv[order][k].z0+1,

@@ -37,9 +37,9 @@ int main(int argc, char *argv[]) {
 
   int N = 64;
 
-  CpuMatrix3d<float> q(N, N, N, "test_data/q_real_double.txt");
-  CpuMatrix3d<float> q_t(N, N, N);
-  q.transpose_yzx_ref(q_t);
+  //CpuMatrix3d<float> q(N, N, N, "test_data/q_real_double.txt");
+  //CpuMatrix3d<float> q_t(N, N, N);
+  //q.transpose_yzx_ref(q_t);
 
   int ny = (int)ceil(sqrt(numnode*(double)N/(double)N));
   int nz = numnode/ny;
@@ -149,7 +149,6 @@ int main(int argc, char *argv[]) {
   }
   */
 
-  /*
   // ------------------------------------------------------------
   // Test correctness
   // ------------------------------------------------------------
@@ -160,17 +159,23 @@ int main(int argc, char *argv[]) {
     int NY = rand() % 256 + 4;
     int NZ = rand() % 256 + 4;
     int tiledim = rand() % 256 + 4;
-    std::cout << "NX = " << NX << " NY = " << NY << " NZ = " << NZ 
-	      << " tiledim = " << tiledim << " ...";
+    //NX = 64;
+    //NY = 64;
+    //NZ = 64;
+    //tiledim = 64;
+    if (mynode == 0) {
+      std::cout << "NX = " << NX << " NY = " << NY << " NZ = " << NZ 
+		<< " tiledim = " << tiledim << " ...";
+    }
     if (test_correctness<double>(NX, NY, NZ, tiledim, ny, nz)) {
-      std::cout << "OK" << std::endl;
+      if (mynode == 0) std::cout << "OK" << std::endl;
     } else {
-      std::cout << "FAILED" << std::endl;
+      if (mynode == 0) std::cout << "FAILED" << std::endl;
       return 1;
     }
   }
-  */
 
+  /*
   // ------------------------------------------------------------
   // Test performance
   // ------------------------------------------------------------
@@ -180,6 +185,7 @@ int main(int argc, char *argv[]) {
     }
   }
   // ------------------------------------------------------------
+  */
 
   stop_mpi();
 
@@ -198,7 +204,6 @@ bool test_correctness(const int NX, const int NY, const int NZ,
     for (int y=0;y < NY;y++) {
       for (int x=0;x < NX;x++) {
 	mat_xyz.setData(x, y, z, (T)(x + y*NX + z*NX*NY));
-	//mat_xyz.get_data()[x + y*NX + z*NX*NY] = (T)(x + y*NX + z*NX*NY);
       }
     }
   }
@@ -215,31 +220,25 @@ bool test_correctness(const int NX, const int NY, const int NZ,
 	    return false;
 	  }
 	}
-	/*
-	if (mat_yzx.get_data()[y + z*NY + x*NY*NZ] != (T)(x + y*NX + z*NX*NY)) {
-	  std::cout << std::endl << "YZX: x = " << x << " y = " << y << " z = " << z << std::endl;
-	  return false;
-	}
-	*/
       }
     }
   }
 
-  /*
   CpuMultiNodeMatrix3d<T> mat_zxy(NZ, NX, NY, 1, ny, nz, mynode, tiledim);
   mat_xyz.setup_transpose_zxy(mat_zxy);
   mat_xyz.transpose_zxy(mat_zxy);
   for (int y=0;y < NY;y++) {
     for (int x=0;x < NX;x++) {
       for (int z=0;z < NZ;z++) {
-	if (mat_zxy.get_data()[z + x*NZ + y*NZ*NX] != (T)(x + y*NX + z*NX*NY)) {
-	  std::cout << std::endl << "ZXY: x = " << x << " y = " << y << " z = " << z << std::endl;
-	  return false;
+	if (mat_zxy.hasData(z,x,y)) {
+	  if (mat_zxy.getData(z,x,y) != (T)(x + y*NX + z*NX*NY)) {
+	    std::cout << std::endl << "ZXY: x = " << x << " y = " << y << " z = " << z << std::endl;
+	    return false;
+	  }
 	}
       }
     }
   }
-  */
 
   return true;
 }
