@@ -372,7 +372,7 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
   std::vector<int> direct_nodes;
   std::vector<int> recip_nodes;
   if (use_pure_recip && numnode > 1) {
-    // Separate Recip node
+    // Separate Recip node, last node
     direct_nodes.resize(numnode-1);
     recip_nodes.resize(1);
     nx = 1;
@@ -388,15 +388,16 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
       isDirect = true;
     }
   } else {
+    // Mixed Direct+Recip node, first node
     direct_nodes.resize(numnode);
     recip_nodes.resize(1);
     nx = 1;
     ny = 1;
     nz = numnode;
     isDirect = true;
-    isRecip = (mynode == numnode-1) ? true : false;
+    isRecip = (mynode == 0) ? true : false;
     for (int i=0;i < numnode;i++) direct_nodes.at(i) = i;
-    recip_nodes.at(0) = numnode-1;
+    recip_nodes.at(0) = 0;
   }
 
   if (isDirect && isRecip) {

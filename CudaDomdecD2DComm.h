@@ -70,8 +70,12 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
   CudaDomdecD2DComm(Domdec& domdec, CudaMPI& cudaMPI);
   ~CudaDomdecD2DComm();
 
-  void packXYZ(double* x, double* y, double* z, int* ind, int n, double *outbuf);
-  void unpackXYZ(double* inbuf, int n, double* x, double* y, double* z, int* ind=NULL);
+  void packXYZ(double* x, double* y, double* z, int* ind, int n, double *outbuf,
+	       cudaStream_t stream=0);
+  void unpackXYZ(double* inbuf, int n, double* x, double* y, double* z,
+		 int* ind=NULL, cudaStream_t stream=0);
+  void unpackForce(double* inbuf, int n, double* x, double* y, double* z, int* ind,
+		   cudaStream_t stream=0);
 
   void comm_coord(cudaXYZ<double>& coord, thrust::device_vector<int>& loc2glo,
 		  const bool update);
