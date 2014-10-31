@@ -23,7 +23,13 @@ class CudaTopExcl {
   // Maximum number of exclusions per atom
   int maxNumExcl;
 
-  void setup(const int ncoord, const int *iblo14, const int *inb14);
+  // Number of coordinates (global)
+  const int ncoord;
+
+  // Global -> Local index mapping
+  int* glo2loc;
+
+  void setup(const int *iblo14, const int *inb14);
 
  public:
   CudaTopExcl(const int ncoord, const int *iblo14, const int *inb14);
@@ -41,6 +47,12 @@ class CudaTopExcl {
 
   int getMaxNumExcl() {return maxNumExcl;}
   int getMaxNumExcl() const {return maxNumExcl;}
+  
+  int get_ncoord() {return ncoord;}
+  int get_ncoord() const {return ncoord;}
+
+  int* get_glo2loc() {return glo2loc;}
+  int* get_glo2loc() const {return glo2loc;}
 
 };
 

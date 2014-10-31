@@ -7,12 +7,15 @@
 //
 // Class creator
 //
-CudaTopExcl::CudaTopExcl(const int ncoord, const int *iblo14, const int *inb14) {
+CudaTopExcl::CudaTopExcl(const int ncoord, const int *iblo14, const int *inb14) : ncoord(ncoord) {
   atomExclPosLen = 0;
   atomExclPos = NULL;
   atomExclLen = 0;
   atomExcl = NULL;
-  setup(ncoord, iblo14, inb14);
+  setup(iblo14, inb14);
+
+  allocate<int>(&glo2loc, ncoord);
+  set_gpu_array<int>(glo2loc, ncoord, -1);
 }
 
 //
@@ -21,12 +24,13 @@ CudaTopExcl::CudaTopExcl(const int ncoord, const int *iblo14, const int *inb14) 
 CudaTopExcl::~CudaTopExcl() {
   if (atomExclPos != NULL) deallocate<int>(&atomExclPos);
   if (atomExcl != NULL) deallocate<int>(&atomExcl);
+  deallocate<int>(&glo2loc);
 }
 
 //
 // Setups topological exclusions from data structure used in CHARMM
 //
-void CudaTopExcl::setup(const int ncoord, const int *iblo14, const int *inb14) {
+void CudaTopExcl::setup(const int *iblo14, const int *inb14) {
 
   int *nexcl = new int[ncoord];
 

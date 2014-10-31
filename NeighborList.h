@@ -176,9 +176,6 @@ private:
   int ind_sorted_len;
   int *ind_sorted;
 
-  // Global -> local mapping
-  int *glo2loc;
-
   // Atom indices where each cell start
   int cell_patom_len;
   int *cell_patom;
@@ -340,7 +337,7 @@ public:
   void remove_empty_tiles();
   void analyze();
 
-  int *get_glo2loc() {return glo2loc;}
+  int *get_glo2loc() {return topExcl.get_glo2loc();}
 
   int *get_ind_sorted() {return ind_sorted;}
 

@@ -1743,25 +1743,17 @@ __global__ void add_tile_top_kernel(const int ntile_top,
 template <int tilesize>
 NeighborList<tilesize>::NeighborList(const int ncoord_glo, const CudaTopExcl& topExcl,
 				     const int nx, const int ny, const int nz) : topExcl(topExcl) {
-
   this->ncoord_glo = ncoord_glo;
   this->init(nx, ny, nz);
-
-  allocate<int>(&glo2loc, ncoord_glo);
-  set_gpu_array<int>(glo2loc, ncoord_glo, -1);
 }
 
 template <int tilesize>
 NeighborList<tilesize>::NeighborList(const int ncoord_glo, const CudaTopExcl& topExcl,
 				     const char *filename,
 				     const int nx, const int ny, const int nz) : topExcl(topExcl) {
-
   this->ncoord_glo = ncoord_glo;
   this->init(nx, ny, nz);
-
   load(filename);
-  allocate<int>(&glo2loc, ncoord_glo);
-  set_gpu_array<int>(glo2loc, ncoord_glo, -1);
 }
 
 //
@@ -1780,7 +1772,6 @@ NeighborList<tilesize>::~NeighborList() {
   if (col_natom != NULL) deallocate<int>(&col_natom);
   if (col_patom != NULL) deallocate<int>(&col_patom);
   if (atom_icol != NULL) deallocate<int>(&atom_icol);
-  if (glo2loc != NULL) deallocate<int>(&glo2loc);
   if (ind_sorted != NULL) deallocate<int>(&ind_sorted);
   if (cell_patom != NULL) deallocate<int>(&cell_patom);
   if (atom_pcell != NULL) deallocate<int>(&atom_pcell);
@@ -2519,18 +2510,19 @@ void NeighborList<tilesize>::sort_build_indices(const int ncoord, float4 *xyzq, 
   //
   // Make a copy of loc2glo to glo2loc
   // NOTE: This is temporary, glo2loc will be used for a different purpose later
-  copy_DtoD<int>(loc2glo, glo2loc, ncoord, stream);
+  copy_DtoD<int>(loc2glo, topExcl.get_glo2loc(), ncoord, stream);
   nthread = 512;
   nblock = (ncoord - 1)/nthread + 1;
-  build_loc2glo_kernel<<< nblock, nthread, 0, stream >>>(ncoord, ind_sorted, glo2loc, loc2glo);
+  build_loc2glo_kernel<<< nblock, nthread, 0, stream >>>(ncoord, ind_sorted,
+							 topExcl.get_glo2loc(), loc2glo);
   cudaCheck(cudaGetLastError());
 
   // Build glo2loc
   // NOTE: We mark atoms that do not exist with -1
-  set_gpu_array<int>(glo2loc, ncoord_glo, -1, stream);
+  set_gpu_array<int>(topExcl.get_glo2loc(), topExcl.get_ncoord(), -1, stream);
   nthread = 512;
   nblock = (ncoord - 1)/nthread + 1;
-  build_glo2loc_kernel<<< nblock, nthread, 0, stream >>>(ncoord, loc2glo, glo2loc);
+  build_glo2loc_kernel<<< nblock, nthread, 0, stream >>>(ncoord, loc2glo, topExcl.get_glo2loc());
   cudaCheck(cudaGetLastError());
 
   // Build atom_pcell
@@ -2717,9 +2709,10 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
   //std::cout << "NeighborList::build, shmem_size = " << shmem_size << std::endl;
   build_kernel<tilesize>
     <<< nblock, nthread, shmem_size, stream >>>
-    (topExcl.getMaxNumExcl(), cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom, loc2glo, glo2loc,
-     topExcl.getAtomExclPos(), topExcl.getAtomExcl(), xyzq, boxx, boxy, boxz,
-     rcut, rcut*rcut, bb, excl_atom_heap, tile_indj, tile_excl, ientry);
+    (topExcl.getMaxNumExcl(), cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom,
+     loc2glo, topExcl.get_glo2loc(), topExcl.getAtomExclPos(), topExcl.getAtomExcl(),
+     xyzq, boxx, boxy, boxz, rcut, rcut*rcut, bb, excl_atom_heap,
+     tile_indj, tile_excl, ientry);
   cudaCheck(cudaGetLastError());
 
   /*
