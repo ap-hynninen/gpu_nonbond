@@ -32,10 +32,10 @@ class CudaDomdecRecipComm : public DomdecRecipComm {
   float4 *get_coord_ptr() {assert(coord_ptr != NULL);return coord_ptr;}
   float3 *get_force_ptr() {assert(force_ptr != NULL);return force_ptr;}
 
-  void send_coord(float4* coord);
-  void recv_coord(float4* coord);
-  void send_force(float3* force);
-  void recv_force(float3* force);
+  void send_coord(float4* coord, cudaStream_t stream);
+  void recv_coord(float4* coord, cudaStream_t stream);
+  void send_force(float3* force, cudaStream_t stream);
+  void recv_force(float3* force, cudaStream_t stream);
 
 };
 

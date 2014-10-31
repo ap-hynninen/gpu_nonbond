@@ -65,22 +65,22 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
 			 std::vector<int>& ncommByte, std::vector<int>& pcommByte,
 			 const bool update);
 
+  void packXYZ(double* x, double* y, double* z, int* ind, int n, double *outbuf,
+	       cudaStream_t stream);
+  void unpackXYZ(double* inbuf, int n, double* x, double* y, double* z,
+		 cudaStream_t stream, int* ind=NULL);
+  void unpackForce(double* inbuf, int n, double* x, double* y, double* z, int* ind,
+		   cudaStream_t stream);
+
  public:
 
   CudaDomdecD2DComm(Domdec& domdec, CudaMPI& cudaMPI);
   ~CudaDomdecD2DComm();
 
-  void packXYZ(double* x, double* y, double* z, int* ind, int n, double *outbuf,
-	       cudaStream_t stream=0);
-  void unpackXYZ(double* inbuf, int n, double* x, double* y, double* z,
-		 int* ind=NULL, cudaStream_t stream=0);
-  void unpackForce(double* inbuf, int n, double* x, double* y, double* z, int* ind,
-		   cudaStream_t stream=0);
-
   void comm_coord(cudaXYZ<double>& coord, thrust::device_vector<int>& loc2glo,
-		  const bool update);
-  void comm_update(int* glo2loc, cudaXYZ<double>& coord);
-  void comm_force(Force<long long int>& force);
+		  const bool update, cudaStream_t stream=0);
+  void comm_update(int* glo2loc, cudaXYZ<double>& coord, cudaStream_t stream=0);
+  void comm_force(Force<long long int>& force, cudaStream_t stream=0);
 
   void test_comm_coord(const int* glo2loc, cudaXYZ<double>& coord);
 };

@@ -22,7 +22,7 @@ CudaDomdecRecipComm::~CudaDomdecRecipComm() {
 //
 // Send coordinates to Recip from coord[]
 //
-void CudaDomdecRecipComm::send_coord(float4* coord) {
+void CudaDomdecRecipComm::send_coord(float4* coord, cudaStream_t stream) {
 
   const int TAG = 1;
 
@@ -57,6 +57,8 @@ void CudaDomdecRecipComm::send_coord(float4* coord) {
     if (!cudaMPI.isCudaAware()) {
       reallocate_host<char>(&h_commbuf, &h_commbuf_len, ncomm.at(0)*sizeof(float4), 1.2f);
     }
+    // Sync thread here before communication
+    cudaCheck(cudaStreamSynchronize(stream));
     // Send
     MPICheck(cudaMPI.Send((void *)coord, ncomm.at(0)*sizeof(float4),
 			  recip_nodes.at(0), TAG, h_commbuf));
@@ -67,7 +69,7 @@ void CudaDomdecRecipComm::send_coord(float4* coord) {
 //
 // Recv coordinates from Direct to coord[]
 //
-void CudaDomdecRecipComm::recv_coord(float4* coord) {
+void CudaDomdecRecipComm::recv_coord(float4* coord, cudaStream_t stream) {
 
   const int TAG = 1;
 
@@ -111,14 +113,17 @@ void CudaDomdecRecipComm::recv_coord(float4* coord) {
     for (int i=0;i < direct_nodes.size();i++) {
       if (mynode != direct_nodes.at(i)) {
 	// Receive via MPI
+	// NOTE: It's ok to NOT to synchronize here since were receiving coordinates, not sending
 	MPICheck(cudaMPI.Recv(&coord[pcomm.at(i)], ncomm.at(i)*sizeof(float4),
 			      direct_nodes.at(i), TAG, MPI_STATUS_IGNORE,
 			      &h_coordbuf[h_coordbuf_pos]));
 	h_coordbuf_pos += ncomm.at(i);
       } else {
 	// Copy device buffer
+	// NOTE: We don't have to synchronize stream "stream" since it is the one doing all
+	//       the work here
 	assert(coord_copy_ptr != NULL);
-	copy_DtoD_sync<float4>(coord_copy_ptr, &coord[pcomm.at(i)], ncomm.at(i));
+	copy_DtoD<float4>(coord_copy_ptr, &coord[pcomm.at(i)], ncomm.at(i), stream);
       }
     }
     // Store pointer to where coordinates are found
@@ -130,7 +135,7 @@ void CudaDomdecRecipComm::recv_coord(float4* coord) {
 //
 // Send forces to Direct
 //
-void CudaDomdecRecipComm::send_force(float3* force) {
+void CudaDomdecRecipComm::send_force(float3* force, cudaStream_t stream) {
 
   const int TAG = 1;
 
@@ -149,9 +154,13 @@ void CudaDomdecRecipComm::send_force(float3* force) {
   // Recip node => Send forces to Direct nodes
   //---------------------------------------------------
   float3* h_coordbuf = (float3 *)h_commbuf;
+  bool syncDone = false;
   for (int i=0;i < direct_nodes.size();i++) {
     if (mynode != direct_nodes.at(i)) {
       // Send via MPI
+      // Sync thread here before communication
+      if (!syncDone) cudaCheck(cudaStreamSynchronize(stream));
+      syncDone = true;
       MPICheck(cudaMPI.Send(&force[pcomm.at(i)], ncomm.at(i)*sizeof(float3),
 			    direct_nodes.at(i), TAG, &h_coordbuf[pcomm.at(i)]));
     }
@@ -162,7 +171,7 @@ void CudaDomdecRecipComm::send_force(float3* force) {
 //
 // Receive forces from Direct
 //
-void CudaDomdecRecipComm::recv_force(float3* force) {
+void CudaDomdecRecipComm::recv_force(float3* force, cudaStream_t stream) {
 
   const int TAG = 1;
 
@@ -201,4 +210,6 @@ void CudaDomdecRecipComm::recv_force(float3* force) {
     force_ptr = &force[pcomm.at(imynode)];
   }
 
+  // Sync thread to wait for all communication to finish
+  cudaCheck(cudaStreamSynchronize(stream));
 }

@@ -170,7 +170,7 @@ void CudaDomdec::update_homezone(cudaXYZ<double>& coord, cudaXYZ<double>& coord2
 //
 void CudaDomdec::comm_coord(cudaXYZ<double>& coord, const bool update, cudaStream_t stream) {
 
-  D2Dcomm.comm_coord(coord, homezone.get_loc2glo(), update);
+  D2Dcomm.comm_coord(coord, homezone.get_loc2glo(), update, stream);
 
   // Calculate xyz_shift
   if (update) {
@@ -218,7 +218,7 @@ void CudaDomdec::comm_update(int* glo2loc, cudaXYZ<double>& coord, cudaStream_t 
 // Communicate forces
 //
 void CudaDomdec::comm_force(Force<long long int>& force, cudaStream_t stream) {
-  D2Dcomm.comm_force(force);
+  D2Dcomm.comm_force(force, stream);
 }
 
 //

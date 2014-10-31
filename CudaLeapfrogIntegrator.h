@@ -85,7 +85,7 @@ private:
 
 public:
 
-  CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_t stream=0);
+  CudaLeapfrogIntegrator(HoloConst *holoconst);
   ~CudaLeapfrogIntegrator();
 
   void spec_init(const double *x, const double *y, const double *z,

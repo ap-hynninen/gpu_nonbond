@@ -66,7 +66,7 @@ inline int alignInt(const int pos, const int align) {
 }
 
 // Define this if we use CUDA kernels instead of thrust
-//#define USE_CUDA_KERNELS
+#define USE_CUDA_KERNELS
 
 #ifdef USE_CUDA_KERNELS
 //
@@ -98,6 +98,22 @@ __global__ void unpackXYZ_kernel(const int n, const double* __restrict__ inbuf,
     x[j] = inbuf[i];
     y[j] = inbuf[i+n];
     z[j] = inbuf[i+2*n];
+  }
+}
+
+//
+// Unpack n coordinates from inbuf to (x, y, z) using ind for locations
+// x[ind[i]] = inbuf[i], i=0...n-1
+//
+__global__ void unpackForce_kernel(const int n, const double* __restrict__ inbuf,
+				   const int* __restrict__ ind, double* __restrict__ x,
+				   double* __restrict__ y, double* __restrict__ z) {
+  const int i = threadIdx.x + blockIdx.x*blockDim.x;
+  if (i < n) {
+    int j = ind[i];
+    x[j] += inbuf[i];
+    y[j] += inbuf[i+n];
+    z[j] += inbuf[i+2*n];
   }
 }
 
@@ -133,8 +149,8 @@ void CudaDomdecD2DComm::packXYZ(double* x, double* y, double* z, int* ind, int n
 // Unpack n coordinates from inbuf to (x, y, z) using ind for locations
 // x[ind[i]] = inbuf[i], i=0...n-1
 //
-void CudaDomdecD2DComm::unpackXYZ(double* inbuf, int n, double* x, double* y, double* z, int* ind,
-				  cudaStream_t stream) {
+void CudaDomdecD2DComm::unpackXYZ(double* inbuf, int n, double* x, double* y, double* z,
+				  cudaStream_t stream, int* ind) {
 
 #ifdef USE_CUDA_KERNELS
   int nthread = 512;
@@ -166,6 +182,10 @@ void CudaDomdecD2DComm::unpackXYZ(double* inbuf, int n, double* x, double* y, do
 void CudaDomdecD2DComm::unpackForce(double* inbuf, int n, double* x, double* y, double* z, int* ind,
 				    cudaStream_t stream) {
 #ifdef USE_CUDA_KERNELS
+  int nthread = 512;
+  int nblock = (n-1)/nthread + 1;
+  unpackForce_kernel<<< nblock, nthread, 0, stream >>>(n, inbuf, ind, x, y, z);
+  cudaCheck(cudaGetLastError());
 #else
   thrust::device_ptr<double> x_src_ptr(inbuf);
   thrust::device_ptr<double> x_dst_ptr(x);
@@ -202,7 +222,7 @@ void CudaDomdecD2DComm::unpackForce(double* inbuf, int n, double* x, double* y, 
 // Communicate coordinates
 //
 void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector<int>& loc2glo,
-				   const bool update) {
+				   const bool update, cudaStream_t stream) {
 
   double rnl = domdec.get_rnl();
   double inv_boxx = domdec.get_inv_boxx();
@@ -283,12 +303,12 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	// Pack in coordinates to sendbuf[]
 	packXYZ(coord.x(), coord.y(), coord.z(),
 		thrust::raw_pointer_cast(z_send_loc0.at(i).data()), z_nsend.at(i),
-		(double *)&sendbuf[pos]);
+		(double *)&sendbuf[pos], 0);
       } else {
 	// Pack in coordinates to sendbuf[]
 	packXYZ(coord.x(), coord.y(), coord.z(),
 		thrust::raw_pointer_cast(z_send_loc.data())+z_psend.at(i), z_nsend.at(i),
-		(double *)&sendbuf[z_psend.at(i)*3*sizeof(double)]);
+		(double *)&sendbuf[z_psend.at(i)*3*sizeof(double)], 0);
       }
 
       pos += z_nsend.at(i)*3*sizeof(double);
@@ -333,7 +353,11 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
     }
 
     // Wait until packing is done
+#ifdef USE_CUDA_KERNELS
+    cudaCheck(cudaStreamSynchronize(0));
+#else
     cudaCheck(cudaDeviceSynchronize());
+#endif
 
     // Send & Recv data
     for (int i=0;i < nz_comm;i++) {
@@ -372,13 +396,13 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	unpackXYZ((double *)&recvbuf[src_pos], z_nrecv.at(i),
 		  coord.x()+domdec.get_zone_pcoord(Domdec::FZ)+z_precv.at(i),
 		  coord.y()+domdec.get_zone_pcoord(Domdec::FZ)+z_precv.at(i),
-		  coord.z()+domdec.get_zone_pcoord(Domdec::FZ)+z_precv.at(i));
+		  coord.z()+domdec.get_zone_pcoord(Domdec::FZ)+z_precv.at(i), 0);
 
       } else {
 	// Unpack coordinates
 	// format = X[nrecv.at(i) x double] | Y[nrecv.at(i) x double] | Z[nrecv.at(i) x double]
 	unpackXYZ((double *)&recvbuf[src_pos], z_nrecv.at(i),
-		  coord.x(), coord.y(), coord.z(),
+		  coord.x(), coord.y(), coord.z(), 0,
 		  thrust::raw_pointer_cast(z_recv_loc.data())+z_precv.at(i));
       }
       src_pos += z_nrecv.at(i)*3*sizeof(double);
@@ -393,7 +417,11 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
     }
 
     // Wait until unpacking is done
+#ifdef USE_CUDA_KERNELS
+    cudaCheck(cudaStreamSynchronize(0));
+#else
     cudaCheck(cudaDeviceSynchronize());
+#endif
 
   } // if (nz_comm > 0)
   
@@ -458,7 +486,7 @@ void CudaDomdecD2DComm::test_comm_coord(const int* glo2loc, cudaXYZ<double>& coo
 // Called after neighborlist update has re-sorted coordinates
 // glo2loc = global -> local mapping
 //
-void CudaDomdecD2DComm::comm_update(int* glo2loc, cudaXYZ<double>& coord) {
+void CudaDomdecD2DComm::comm_update(int* glo2loc, cudaXYZ<double>& coord, cudaStream_t stream) {
   thrust::device_ptr<int> glo2loc_ptr(glo2loc);
 
   if (nz_comm > 0) {
@@ -486,7 +514,7 @@ void CudaDomdecD2DComm::comm_update(int* glo2loc, cudaXYZ<double>& coord) {
 //
 // Communicate forces
 //
-void CudaDomdecD2DComm::comm_force(Force<long long int>& force) {
+void CudaDomdecD2DComm::comm_force(Force<long long int>& force, cudaStream_t stream) {
 
   const int DATA_TAG = 2;
 
@@ -501,10 +529,14 @@ void CudaDomdecD2DComm::comm_force(Force<long long int>& force) {
     // Pack forces to recvbuf[]
     packXYZ((double *)force.x(), (double *)force.y(), (double *)force.z(),
 	    thrust::raw_pointer_cast(z_recv_loc.data())+z_precv.at(i), z_nrecv.at(i),
-	    &precvbuf[3*z_precv.at(i)]);
+	    &precvbuf[3*z_precv.at(i)], stream);
   }
   // Wait until packing is done
+#ifdef USE_CUDA_KERNELS
+  cudaCheck(cudaStreamSynchronize(stream));
+#else
   cudaCheck(cudaDeviceSynchronize());
+#endif
 
   // Send & Recv data in z-direction
   for (int i=0;i < nz_comm;i++) {
@@ -528,41 +560,17 @@ void CudaDomdecD2DComm::comm_force(Force<long long int>& force) {
   for (int i=0;i < nz_comm;i++) {
     // format = X[z_nsend.at(i) x double] | Y[z_nsend.at(i) x double] | Z[z_nsend.at(i) x double]
 
-    unpackForce(&psendbuf[3*z_psend.at(i)], z_psend.at(i),
+    unpackForce(&psendbuf[3*z_psend.at(i)], z_nsend.at(i),
 		(double *)force.x(), (double *)force.y(), (double *)force.z(),
-		thrust::raw_pointer_cast(z_send_loc.data()) + z_psend.at(i));
+		thrust::raw_pointer_cast(z_send_loc.data()) + z_psend.at(i), stream);
 
-    /*
-    thrust::device_ptr<double> x_src_ptr(&psendbuf[3*z_psend.at(i)]);
-    thrust::device_ptr<double> x_dst_ptr((double *)force.x());
-
-    thrust::device_ptr<double> y_src_ptr(&psendbuf[3*z_psend.at(i)+z_nsend.at(i)]);
-    thrust::device_ptr<double> y_dst_ptr((double *)force.y());
-
-    thrust::device_ptr<double> z_src_ptr(&psendbuf[3*z_psend.at(i)+2*z_nsend.at(i)]);
-    thrust::device_ptr<double> z_dst_ptr((double *)force.z());
-
-    // x_dst_ptr[z_send_loc[i]] += x_src_ptr[i], i=0,...,z_nsend[i]-1
-    thrust::transform(x_src_ptr, x_src_ptr+z_nsend.at(i),
-		      thrust::make_permutation_iterator(x_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
-		      thrust::make_permutation_iterator(x_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
-		      thrust::plus<double>());
-
-    // y_dst_ptr[z_send_loc[i]] += y_src_ptr[i], i=0,...,z_nsend[i]-1
-    thrust::transform(y_src_ptr, y_src_ptr+z_nsend.at(i),
-		      thrust::make_permutation_iterator(y_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
-		      thrust::make_permutation_iterator(y_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
-		      thrust::plus<double>());
-
-    // x_dst_ptr[z_send_loc[i]] += x_src_ptr[i], i=0,...,z_nsend[i]-1
-    thrust::transform(z_src_ptr, z_src_ptr+z_nsend.at(i),
-		      thrust::make_permutation_iterator(z_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
-		      thrust::make_permutation_iterator(z_dst_ptr, z_send_loc.begin()+z_psend.at(i)),
-		      thrust::plus<double>());
-    */
   }
   // Wait until unpacking is done
+#ifdef USE_CUDA_KERNELS
+  cudaCheck(cudaStreamSynchronize(stream));
+#else
   cudaCheck(cudaDeviceSynchronize());
+#endif
 
 }
 

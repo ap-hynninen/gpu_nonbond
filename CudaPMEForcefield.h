@@ -111,6 +111,8 @@ private:
   cudaEvent_t done_bonded_event;
   cudaEvent_t done_calc_event;
   cudaEvent_t done_force_clear_event;
+  cudaEvent_t xyzq_ready_event[2];
+  cudaEvent_t recip_coord_ready_event;
 
   // ------------------------------------------------------------
   // Flags for energy terms that are included in the calculation
@@ -155,12 +157,14 @@ public:
   ~CudaPMEForcefield();
 
 
-  void pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_step);
-  void calc(const bool calc_energy, const bool calc_virial, Force<long long int>& force);
-  void post_calc(const float *global_mass, float *mass, HoloConst *holoconst);
-  void stop_calc() {recipComm.send_stop();}
-
-  void wait_calc(cudaStream_t stream);
+  void pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_step, cudaStream_t stream);
+  void calc(const bool calc_energy, const bool calc_virial, Force<long long int>& force,
+	    cudaStream_t stream);
+  void post_calc(const float *global_mass, float *mass, HoloConst *holoconst, cudaStream_t stream);
+  void stop_calc(cudaStream_t stream) {
+    cudaCheck(cudaStreamSynchronize(stream));
+    recipComm.send_stop();
+  }
 
   void assignCoordToNodes(hostXYZ<double>& coord, std::vector<int>& h_loc2glo);
 

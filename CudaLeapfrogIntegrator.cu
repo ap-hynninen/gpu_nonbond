@@ -123,9 +123,9 @@ __global__ void calc_kine_kernel(const int ncoord,
 //
 // Class creator
 //
-CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_t stream) {
-  this->holoconst = holoconst;
-  this->stream = stream;
+CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst) : holoconst(holoconst) {
+  // Create stream & events
+  cudaCheck(cudaStreamCreate(&stream));
   cudaCheck(cudaEventCreate(&copy_rms_work_done_event));
   cudaCheck(cudaEventCreate(&copy_temp_ekin_done_event));
   cudaCheck(cudaEventCreate(&done_integrate_event));
@@ -139,6 +139,7 @@ CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst, cudaStream_
 // Class destructor
 //
 CudaLeapfrogIntegrator::~CudaLeapfrogIntegrator() {
+  cudaCheck(cudaStreamDestroy(stream));
   cudaCheck(cudaEventDestroy(copy_rms_work_done_event));
   cudaCheck(cudaEventDestroy(copy_temp_ekin_done_event));
   cudaCheck(cudaEventDestroy(done_integrate_event));
@@ -265,8 +266,8 @@ void CudaLeapfrogIntegrator::pre_calc_force() {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
     //cudaCheck(cudaStreamWaitEvent(stream, done_integrate_event, 0));
-    cudaCheck(cudaStreamSynchronize(stream));
-    p->pre_calc(coord, prev_step);
+    //cudaCheck(cudaStreamSynchronize(stream));
+    p->pre_calc(coord, prev_step, stream);
     // Get (possibly) new ncoord and ncoord_tot
     // NOTE: these change with neighborlist update
     ncoord = prev_step.size();
@@ -282,22 +283,21 @@ void CudaLeapfrogIntegrator::pre_calc_force() {
 void CudaLeapfrogIntegrator::calc_force(const bool calc_energy, const bool calc_virial) {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    p->calc(calc_energy, calc_virial, force);
+    p->calc(calc_energy, calc_virial, force, stream);
   }
 }
 
 void CudaLeapfrogIntegrator::post_calc_force() {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    p->post_calc(global_mass, mass, holoconst);
-    p->wait_calc(stream);
+    p->post_calc(global_mass, mass, holoconst, stream);
   }
 }
 
 void CudaLeapfrogIntegrator::stop_calc_force() {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    p->stop_calc();
+    p->stop_calc(stream);
   }
 }
 

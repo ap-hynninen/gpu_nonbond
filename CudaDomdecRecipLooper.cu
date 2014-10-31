@@ -14,7 +14,7 @@ void CudaDomdecRecipLooper::run() {
     reallocate<float3>(&force, &force_len, recipComm.get_ncoord(), 1.0f);
 
     // Receive coordinates from Direct nodes
-    recipComm.recv_coord(xyzq.xyzq);
+    recipComm.recv_coord(xyzq.xyzq, stream);
 
     //xyzq.save("xyzq_recip.txt");
 
@@ -24,12 +24,13 @@ void CudaDomdecRecipLooper::run() {
     recip.calc(recipComm.get_inv_boxx(), recipComm.get_inv_boxy(), recipComm.get_inv_boxz(),
 	       recipComm.get_coord_ptr(), recipComm.get_ncoord(),
 	       recipComm.get_calc_energy(), recipComm.get_calc_virial(), force);
-    cudaCheck(cudaStreamSynchronize(stream));
+    //NOTE: this synchronization is done in recipComm.send_force()
+    //cudaCheck(cudaStreamSynchronize(stream));
 
     //save_float3(recipComm.get_ncoord(), force, "force_recip.txt");
 
     // Send forces to Direct nodes
-    recipComm.send_force(force);
+    recipComm.send_force(force, stream);
 
   }
 
