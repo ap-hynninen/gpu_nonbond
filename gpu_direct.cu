@@ -104,7 +104,9 @@ void test() {
   load_ind<int>(1, "test_data/iblo14.txt", niblo14, iblo14);
   load_ind<int>(1, "test_data/inb14.txt", ninb14, inb14);
 
-  NeighborList<32> nlist_ref(ncoord, "test_data/nlist.txt", 1, 1, 1);
+  CudaTopExcl topExcl(ncoord, iblo14, inb14);
+
+  NeighborList<32> nlist_ref(ncoord, topExcl, "test_data/nlist.txt", 1, 1, 1);
   //nlist.remove_empty_tiles();
   //nlist.split_dense_sparse(512);
   std::cout << "============== nlist_ref ==============" << std::endl;
@@ -129,7 +131,7 @@ void test() {
   copy_HtoD_sync<int>(h_loc2glo, loc2glo, ncoord);
   delete [] h_loc2glo;
 
-  NeighborList<32> nlist(ncoord, iblo14, inb14, 1, 1, 1);
+  NeighborList<32> nlist(ncoord, topExcl, 1, 1, 1);
   nlist.set_test(true);
   //nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
   nlist.sort(zone_patom, xyzq_unsorted.xyzq, xyzq_sorted.xyzq, loc2glo);

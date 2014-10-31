@@ -1171,7 +1171,7 @@ __device__ void flush_jlist(const int wid, const int istart, const int iend,
 //template < int tilesize, bool IvsI >
 template < int tilesize >
 __global__
-void build_kernel(const int max_nexcl,
+void build_kernel(const int maxNumExcl,
 		  const int4* __restrict__ cell_xyz_zone,
 		  const int* __restrict__ col_ncellz,
 		  const int* __restrict__ col_cell,
@@ -1268,8 +1268,8 @@ void build_kernel(const int max_nexcl,
   //
 
   // Allocate space for exclusions in global memory
-  // Each warp (icell) has tilesize*max_nexcl amount of space
-  int* __restrict__ excl_atom = &excl_atom_heap[icell*tilesize*max_nexcl];
+  // Each warp (icell) has tilesize*maxNumExcl amount of space
+  int* __restrict__ excl_atom = &excl_atom_heap[icell*tilesize*maxNumExcl];
 
   int istart = cell_patom[icell];
   int iend   = cell_patom[icell+1] - 1;
@@ -1741,21 +1741,20 @@ __global__ void add_tile_top_kernel(const int ntile_top,
 // Class creator
 //
 template <int tilesize>
-NeighborList<tilesize>::NeighborList(const int ncoord_glo, const int *iblo14, const int *inb14,
-				     const int nx, const int ny, const int nz) {
+NeighborList<tilesize>::NeighborList(const int ncoord_glo, const CudaTopExcl& topExcl,
+				     const int nx, const int ny, const int nz) : topExcl(topExcl) {
 
   this->ncoord_glo = ncoord_glo;
   this->init(nx, ny, nz);
-
-  setup_top_excl(ncoord_glo, iblo14, inb14);
 
   allocate<int>(&glo2loc, ncoord_glo);
   set_gpu_array<int>(glo2loc, ncoord_glo, -1);
 }
 
 template <int tilesize>
-NeighborList<tilesize>::NeighborList(const int ncoord_glo, const char *filename,
-				     const int nx, const int ny, const int nz) {
+NeighborList<tilesize>::NeighborList(const int ncoord_glo, const CudaTopExcl& topExcl,
+				     const char *filename,
+				     const int nx, const int ny, const int nz) : topExcl(topExcl) {
 
   this->ncoord_glo = ncoord_glo;
   this->init(nx, ny, nz);
@@ -1790,8 +1789,6 @@ NeighborList<tilesize>::~NeighborList() {
   if (col_cell != NULL) deallocate<int>(&col_cell);
   if (cell_xyz_zone != NULL) deallocate<int4>(&cell_xyz_zone);
   if (cell_bz != NULL) deallocate<float>(&cell_bz);
-  if (atom_excl_pos != NULL) deallocate<int>(&atom_excl_pos);
-  if (atom_excl != NULL) deallocate<int>(&atom_excl);
   if (excl_atom_heap != NULL) deallocate<int>(&excl_atom_heap);
   if (cell_excl_pos != NULL) deallocate<int>(&cell_excl_pos);
   if (cell_excl != NULL) deallocate<int>(&cell_excl);
@@ -1859,12 +1856,6 @@ void NeighborList<tilesize>::init(const int nx, const int ny, const int nz) {
 
   cell_bz_len = 0;
   cell_bz = NULL;
-
-  atom_excl_pos_len = 0;
-  atom_excl_pos = NULL;
-
-  atom_excl_len = 0;
-  atom_excl = NULL;
 
   excl_atom_heap_len = 0;
   excl_atom_heap = NULL;
@@ -2699,9 +2690,9 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
   reallocate<int>(&tile_indj, &tile_indj_len, n_tile_est, 1.0f);
 
 #ifdef STRICT_MEMORY_REALLOC
-  reallocate<int>(&excl_atom_heap, &excl_atom_heap_len, ncell_max*tilesize*max_nexcl, 1.0f);
+  reallocate<int>(&excl_atom_heap, &excl_atom_heap_len, ncell_max*tilesize*topExcl.getMaxNumExcl(), 1.0f);
 #else
-  reallocate<int>(&excl_atom_heap, &excl_atom_heap_len, ncell_max*tilesize*max_nexcl, 1.2f);
+  reallocate<int>(&excl_atom_heap, &excl_atom_heap_len, ncell_max*tilesize*topExcl.getMaxNumExcl(), 1.2f);
 #endif
 
   //clear_gpu_array< tile_excl_t<tilesize> >(tile_excl, tile_excl_len, stream);
@@ -2726,9 +2717,9 @@ void NeighborList<tilesize>::build(const float boxx, const float boxy, const flo
   //std::cout << "NeighborList::build, shmem_size = " << shmem_size << std::endl;
   build_kernel<tilesize>
     <<< nblock, nthread, shmem_size, stream >>>
-    (max_nexcl, cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom, loc2glo, glo2loc,
-     atom_excl_pos, atom_excl, xyzq, boxx, boxy, boxz, rcut, rcut*rcut, bb, excl_atom_heap,
-     tile_indj, tile_excl, ientry);
+    (topExcl.getMaxNumExcl(), cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom, loc2glo, glo2loc,
+     topExcl.getAtomExclPos(), topExcl.getAtomExcl(), xyzq, boxx, boxy, boxz,
+     rcut, rcut*rcut, bb, excl_atom_heap, tile_indj, tile_excl, ientry);
   cudaCheck(cudaGetLastError());
 
   /*
@@ -2830,10 +2821,10 @@ void NeighborList<tilesize>::test_build(const double boxx, const double boxy, co
   int n_tile = h_nlist_param->n_tile;
   int ncell = h_nlist_param->ncell;
 
-  int *h_atom_excl_pos = new int[atom_excl_pos_len];
-  int *h_atom_excl = new int[atom_excl_len];
-  copy_DtoH_sync<int>(atom_excl_pos, h_atom_excl_pos, atom_excl_pos_len);
-  copy_DtoH_sync<int>(atom_excl, h_atom_excl, atom_excl_len);
+  int *h_atom_excl_pos = new int[topExcl.getAtomExclPosLen()];
+  int *h_atom_excl = new int[topExcl.getAtomExclLen()];
+  copy_DtoH_sync<int>(topExcl.getAtomExclPos(), h_atom_excl_pos, topExcl.getAtomExclPosLen());
+  copy_DtoH_sync<int>(topExcl.getAtomExcl(), h_atom_excl, topExcl.getAtomExclLen());
 
   int ncoord = h_nlist_param->zone_patom[8];
 
@@ -3307,104 +3298,6 @@ int NeighborList<tilesize>::calc_cpu_pairlist(const int* zone_patom, const float
 
   return npair;
 }
-
-//
-// Setups topological exclusions from data structure used in CHARMM
-//
-template <int tilesize>
-void NeighborList<tilesize>::setup_top_excl(const int ncoord_glo, const int *iblo14, const int *inb14) {
-
-  int *nexcl = new int[ncoord_glo];
-
-  for (int i=0;i < ncoord_glo;i++) nexcl[i] = 0;
-
-  // Count the number of exclusions to nexcl[0 ... ncoord_glo-1]
-  for (int i=0;i < ncoord_glo;i++) {
-    int excl_start;
-    if (i > 0) {
-      excl_start = iblo14[i-1];
-    } else {
-      excl_start = 0;
-    }
-    int excl_end = iblo14[i] - 1;
-    // add i-j exclusions to atom i
-    nexcl[i] += excl_end - excl_start + 1;
-    for (int excl_i=excl_start; excl_i <= excl_end;excl_i++) {
-      int j = abs(inb14[excl_i]) - 1;
-      // add i-j exclusion to atom j
-      nexcl[j]++;
-    }
-  }
-
-  // Find out maximum number of atom-atom exclusions
-  max_nexcl = 0;
-  for (int i=0;i < ncoord_glo;i++) max_nexcl = max(max_nexcl, nexcl[i]);  
-
-  int *h_atom_excl_pos = new int[ncoord_glo+1];
-
-  // Use exclusive cumulative sum to calculate positions
-  int nexcl_tot = 0;
-  for (int i=0;i < ncoord_glo;i++) {
-    h_atom_excl_pos[i] = nexcl_tot;
-    nexcl_tot += nexcl[i];
-  }
-  h_atom_excl_pos[ncoord_glo] = nexcl_tot;
-
-  int *h_atom_excl = new int[nexcl_tot];
-
-  for (int i=0;i < ncoord_glo;i++) nexcl[i] = 0;
-
-  for (int i=0;i < ncoord_glo;i++) {
-    int excl_start;
-    if (i > 0) {
-      excl_start = iblo14[i-1];
-    } else {
-      excl_start = 0;
-    }
-    int excl_end = iblo14[i] - 1;
-
-    int pos_starti = h_atom_excl_pos[i];
-    int ni = nexcl[i];
-    for (int excl_i=excl_start;excl_i <= excl_end;excl_i++) {
-      int j = abs(inb14[excl_i]) - 1;
-      // Add i-j exclusion to atom j
-      int pos_startj = h_atom_excl_pos[j];
-      int nj = nexcl[j];
-      if (pos_startj + nj >= h_atom_excl_pos[j+1]) {
-	std::cerr << "NeighborList<tilesize>::setup_top_excl, overflow in j" << std::endl;
-	exit(1);
-      }
-      h_atom_excl[pos_startj + nj] = i;
-      nj++;
-      nexcl[j] = nj;
-      // Add i-j exclusion to atom i
-      if (pos_starti + ni >= h_atom_excl_pos[i+1]) {
-	std::cerr << "NeighborList<tilesize>::setup_top_excl, overflow in i" << std::endl;
-	exit(1);
-      }
-      h_atom_excl[pos_starti + ni] = j;
-      ni++;
-    }
-
-    nexcl[i] = ni;
-  }
-
-  // Allocate GPU memory and copy results to GPU
-#ifdef STRICT_MEMORY_REALLOC
-  reallocate<int>(&atom_excl_pos, &atom_excl_pos_len, ncoord_glo+1, 1.0f);
-  reallocate<int>(&atom_excl, &atom_excl_len, nexcl_tot, 1.0f);
-#else
-  reallocate<int>(&atom_excl_pos, &atom_excl_pos_len, ncoord_glo+1, 1.1f);
-  reallocate<int>(&atom_excl, &atom_excl_len, nexcl_tot, 1.1f);
-#endif
-  copy_HtoD_sync<int>(h_atom_excl_pos, atom_excl_pos, ncoord_glo+1);
-  copy_HtoD_sync<int>(h_atom_excl, atom_excl, nexcl_tot);
-  
-  delete [] h_atom_excl;
-  delete [] h_atom_excl_pos;
-  delete [] nexcl;
-}
-
 
 /*
 void test_excl_dist_index(const int n_ijlist, const int3 *d_ijlist,

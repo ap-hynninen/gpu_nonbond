@@ -187,6 +187,9 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     // Update homezone coordinates (coord) and step vector (prev_step)
     // NOTE: Builds domdec.loc2glo
     domdec.update_homezone(coord, prev_step, stream);
+
+    // ... (here we can sort & build neighborlist for local coordinates) ...
+
     ref_coord.realloc(domdec.get_ncoord());
 
     // Communicate coordinates

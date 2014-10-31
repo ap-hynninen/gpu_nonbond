@@ -561,8 +561,11 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
     }
     //-------------------------------------------------------------------------------------
 
+    // Topological exclusions
+    CudaTopExcl topExcl(ncoord, h_iblo14, h_inb14);
+
     // Neighborlist
-    NeighborList<32> nlist(ncoord, h_iblo14, h_inb14, nx, ny, nz);
+    NeighborList<32> nlist(ncoord, topExcl, nx, ny, nz);
 
     // Setup domain decomposition
 

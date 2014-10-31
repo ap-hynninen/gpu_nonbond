@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <cuda.h>
+#include "CudaTopExcl.h"
 
 // Constants
 const int n_jlist_max = 64;
@@ -34,7 +35,7 @@ struct pairs_t {
 
 //
 // Neighborlist parameter structure
-// NOTE: This is used to avoid GPU-CPU-GPU communication
+// NOTE: This is used to avoid multiple GPU-CPU-GPU communications
 //
 struct NeighborListParam_t {
 
@@ -214,20 +215,12 @@ private:
   int cell_excl_len;
   int *cell_excl;
 
-  // Atom-atom exclusions:
-  // For global atom index i, excluded atoms are in
-  // atom_excl[ atom_excl_pos[i] ... atom_excl_pos[i+1]-1 ]
-  int atom_excl_pos_len;
-  int *atom_excl_pos;
+  // Topological exclusions
+  const CudaTopExcl& topExcl;
 
-  int atom_excl_len;
-  int *atom_excl;
-
+  // Atom-Atom exclusion heap
   int excl_atom_heap_len;
   int* excl_atom_heap;
-
-  // Maximum number of atom-atom exclusions
-  int max_nexcl;
 
   // Flag for testing neighborlist build
   bool test;
@@ -304,9 +297,9 @@ private:
   void load(const char *filename);
 
 public:
-  NeighborList(const int ncoord_glo, const int *iblo14, const int *inb14,
+  NeighborList(const int ncoord_glo, const CudaTopExcl& topExcl,
 	       const int nx, const int ny, const int nz);
-  NeighborList(const int ncoord_glo, const char *filename,
+  NeighborList(const int ncoord_glo, const CudaTopExcl& topExcl, const char *filename,
 	       const int nx, const int ny, const int nz);
   ~NeighborList();
 
