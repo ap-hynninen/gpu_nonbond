@@ -564,15 +564,11 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
     // Topological exclusions
     CudaTopExcl topExcl(ncoord, h_iblo14, h_inb14);
 
-    // Neighborlist
-    NeighborList<32> nlist(ncoord, topExcl, nx, ny, nz);
-
     // Setup domain decomposition
-
     CudaMPI cudaMPI(cudaAware, comm_direct);
-
     CudaDomdec domdec(ncoord, boxx, boxy, boxz, rnl, nx, ny, nz, mynode, cudaMPI);
 
+    // Setup "bonded" groups
     CudaDomdecGroups domdecGroups(domdec);
 
     CudaAtomGroup<bond_t> bondGroup(nbond, h_bond, "BOND");
@@ -613,8 +609,8 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
     // Setup PME force field
     CudaPMEForcefield forcefield(// Domain decomposition
 				 domdec, domdecGroups,
-				 // Neighborlist
-				 nlist,
+				 // Non-bonded topological exclusions
+				 topExcl,
 				 // Bonded
 				 nbondcoef, h_bondcoef, nureybcoef, h_ureybcoef, nanglecoef, h_anglecoef,
 				 ndihecoef, h_dihecoef, nimdihecoef, h_imdihecoef, 0, NULL,

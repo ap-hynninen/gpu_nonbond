@@ -5,7 +5,6 @@
 #include <math.h>
 #include "gpu_utils.h"
 #include "cuda_utils.h"
-#include "NeighborList.h"
 #include "CudaPMEDirectForce.h"
 
 // Settings for direct computation in device memory
@@ -793,7 +792,7 @@ void CudaPMEDirectForce<AT, CT>::calc_14_force(const float4 *xyzq,
 //
 template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
-					    const NeighborList<32>& nlist,
+					    const CudaNeighborListBuild<32>& nlist,
 					    const bool calc_energy,
 					    const bool calc_virial,
 					    const int stride, AT *force, cudaStream_t stream) {
@@ -814,7 +813,7 @@ void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
 #endif
   }
 
-  if (nlist.n_ientry == 0) return;
+  if (nlist.get_n_ientry() == 0) return;
   int vdw_model_loc = calc_vdw ? vdw_model : NONE;
   int elec_model_loc = calc_elec ? elec_model : NONE;
   if (elec_model_loc == NONE && vdw_model_loc == NONE) return;
@@ -826,7 +825,7 @@ void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
     nwarp = 4;
   }
   int nthread = warpsize*nwarp;
-  int nblock_tot = (nlist.n_ientry-1)/(nthread/warpsize)+1;
+  int nblock_tot = (nlist.get_n_ientry()-1)/(nthread/warpsize)+1;
 
   int shmem_size = 0;
   // (sh_xi, sh_yi, sh_zi, sh_qi, sh_vdwtypei)
@@ -851,13 +850,13 @@ void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
 
 #ifdef USE_TEXTURE_OBJECTS
     CREATE_KERNELS(CREATE_KERNEL, calc_force_kernel, vdwparam_tex,
-		   base, nlist.n_ientry, nlist.ientry, nlist.tile_indj,
-		   nlist.tile_excl, stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
+		   base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
+		   nlist.get_tile_excl(), stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
 		   force);
 #else
     CREATE_KERNELS(CREATE_KERNEL, calc_force_kernel,
-		   base, nlist.n_ientry, nlist.ientry, nlist.tile_indj,
-		   nlist.tile_excl, stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
+		   base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
+		   nlist.get_tile_excl(), stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
 		   force);
 #endif
 

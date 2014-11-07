@@ -1,10 +1,11 @@
 #include <iostream>
 #include <fstream>
+#include <vector>
 #include <cuda.h>
 #include "cuda_utils.h"
 #include "XYZQ.h"
 #include "Force.h"
-#include "NeighborList.h"
+#include "CudaNeighborList.h"
 #include "CudaPMEDirectForce.h"
 #include "CudaPMEDirectForceBlock.h"
 #include "VirialPressure.h"
@@ -106,7 +107,14 @@ void test() {
 
   CudaTopExcl topExcl(ncoord, iblo14, inb14);
 
-  NeighborList<32> nlist_ref(ncoord, topExcl, "test_data/nlist.txt", 1, 1, 1);
+  // Create I vs. I interaction
+  std::vector<int> numIntZone(8, 0);
+  std::vector< std::vector<int> > intZones(8, std::vector<int>() );
+  numIntZone.at(0) = 1;
+  intZones.at(0).push_back(0);
+
+  CudaNeighborList<32> nlist_ref(topExcl, 1, 1, 1);
+  nlist_ref.registerList(numIntZone, intZones, "test_data/nlist.txt");
   //nlist.remove_empty_tiles();
   //nlist.split_dense_sparse(512);
   std::cout << "============== nlist_ref ==============" << std::endl;
@@ -131,11 +139,12 @@ void test() {
   copy_HtoD_sync<int>(h_loc2glo, loc2glo, ncoord);
   delete [] h_loc2glo;
 
-  NeighborList<32> nlist(ncoord, topExcl, 1, 1, 1);
+  CudaNeighborList<32> nlist(topExcl, 1, 1, 1);
+  nlist.registerList(numIntZone, intZones);
   nlist.set_test(true);
   //nlist.sort(zone_patom, max_xyz, min_xyz, xyzq_unsorted.xyzq, xyzq_sorted.xyzq);
-  nlist.sort(zone_patom, xyzq_unsorted.xyzq, xyzq_sorted.xyzq, loc2glo);
-  nlist.build(boxx, boxy, boxz, rcut, xyzq_sorted.xyzq, loc2glo);
+  nlist.sort(0, zone_patom, xyzq_unsorted.xyzq, xyzq_sorted.xyzq, loc2glo);
+  nlist.build(0, zone_patom, boxx, boxy, boxz, rcut, xyzq_sorted.xyzq, loc2glo);
   cudaCheck(cudaDeviceSynchronize());
 
   std::cout << "================ nlist ================" << std::endl;
@@ -150,7 +159,7 @@ void test() {
   dir.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, VDW_VSH, EWALD);
   dir.set_vdwparam(1260, "test_data/vdwparam.txt");
   dir.set_vdwtype(ncoord, "test_data/vdwtype.txt");
-  dir.calc_force(xyzq.xyzq, nlist_ref, false, false, force_fp.stride(), force_fp.xyz());
+  dir.calc_force(xyzq.xyzq, nlist_ref.getBuilder(0), false, false, force_fp.stride(), force_fp.xyz());
   force_fp.convert(force);
   cudaCheck(cudaDeviceSynchronize());
   tol = 7.71e-4;
@@ -177,7 +186,7 @@ void test() {
   // Check energy and virial
   force_fp.clear();
   dir.clear_energy_virial();
-  dir.calc_force(xyzq.xyzq, nlist_ref, true, true, force_fp.stride(), force_fp.xyz());
+  dir.calc_force(xyzq.xyzq, nlist_ref.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
   dir.calc_virial(ncoord, xyzq.xyzq, force_fp.stride(), force_fp.xyz());
 
   double energy_vdw;
@@ -210,7 +219,7 @@ void test() {
   //--------------- Non-bonded using GPU build neighborlist -----------
   force_fp.clear();
   dir.clear_energy_virial();
-  dir.calc_force(xyzq_sorted.xyzq, nlist, true, true, force_fp.stride(), force_fp.xyz());
+  dir.calc_force(xyzq_sorted.xyzq, nlist.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
   dir.calc_virial(ncoord, xyzq_sorted.xyzq, force_fp.stride(), force_fp.xyz());
 
   dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);

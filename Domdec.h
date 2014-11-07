@@ -97,6 +97,8 @@ protected:
   Domdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl,
 	 int nx, int ny, int nz, int mynode, MPI_Comm comm);
 
+  void getImportIntZones(std::vector<int>& numIntZone, std::vector< std::vector<int> >& intZones);
+
   // Returns fractional boundaries for nodes relative to this node
   double get_lo_bx(int x=0) {return bx.at((homeix+x+nx)%nx);}
   double get_hi_bx(int x=0) {return bx.at((homeix+x+nx)%nx+1);}

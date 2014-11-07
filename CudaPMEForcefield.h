@@ -4,7 +4,6 @@
 #include "cudaXYZ.h"
 #include "hostXYZ.h"
 #include "XYZQ.h"
-#include "NeighborList.h"
 #include "CudaPMEDirectForce.h"
 #include "BondedForce.h"
 #include "Grid.h"
@@ -12,6 +11,7 @@
 #include "CudaDomdecGroups.h"
 #include "CudaDomdecRecip.h"
 #include "CudaDomdecRecipComm.h"
+#include "CudaNeighborlist.h"
 
 class CudaPMEForcefield : public CudaForcefield {
 
@@ -39,10 +39,10 @@ private:
   // Coordinates in XYZQ format (size ncoord_tot)
   XYZQ xyzq_copy;
 
-  // --------------
-  // Neighbor list
-  // --------------
-  NeighborList<32>& nlist;
+  // -----------------
+  // Neighbor list(s)
+  // -----------------
+  CudaNeighborList<32> nlist;
 
   // ------------------------
   // Direct non-bonded force
@@ -105,7 +105,7 @@ private:
   // -----------------------------
   // Events for force calculation
   // -----------------------------
-  cudaEvent_t done_direct_event;
+  cudaEvent_t done_direct_event[2];
   cudaEvent_t done_recip_event;
   cudaEvent_t done_in14_event;
   cudaEvent_t done_bonded_event;
@@ -140,7 +140,7 @@ private:
 public:
 
   CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecGroups& domdecGroups,
-		    NeighborList<32>& nlist,
+		    const CudaTopExcl& topExcl,
 		    const int nbondcoef, const float2 *h_bondcoef,
 		    const int nureybcoef, const float2 *h_ureybcoef,
 		    const int nanglecoef, const float2 *h_anglecoef,

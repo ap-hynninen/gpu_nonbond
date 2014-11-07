@@ -60,7 +60,7 @@ __global__ void heuristic_check_kernel(const int ncoord,
 // Class creator
 //
 CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecGroups& domdecGroups,
-				     NeighborList<32>& nlist,
+				     const CudaTopExcl& topExcl,
 				     const int nbondcoef, const float2 *h_bondcoef,
 				     const int nureybcoef, const float2 *h_ureybcoef,
 				     const int nanglecoef, const float2 *h_anglecoef,
@@ -74,8 +74,9 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecGroups& domde
 				     const float *h_vdwparam14,
 				     const int *h_glo_vdwtype, const float *h_glo_q,
 				     CudaDomdecRecip* recip, CudaDomdecRecipComm& recipComm) : 
-  domdec(domdec), recip(recip), domdecGroups(domdecGroups), nlist(nlist), recipComm(recipComm),
-  kappa(kappa), recip_force_len(0), recip_force(NULL) {
+  domdec(domdec), recip(recip), domdecGroups(domdecGroups), 
+  nlist(topExcl, domdec.get_nx(), domdec.get_ny(), domdec.get_nz()),
+  recipComm(recipComm), kappa(kappa), recip_force_len(0), recip_force(NULL) {
 
   // Create streams
   cudaCheck(cudaStreamCreate(&direct_stream[0]));
@@ -85,7 +86,8 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecGroups& domde
   cudaCheck(cudaStreamCreate(&bonded_stream));
 
   // Create events
-  cudaCheck(cudaEventCreate(&done_direct_event));
+  cudaCheck(cudaEventCreate(&done_direct_event[0]));
+  cudaCheck(cudaEventCreate(&done_direct_event[1]));
   cudaCheck(cudaEventCreate(&done_recip_event));
   cudaCheck(cudaEventCreate(&done_in14_event));
   cudaCheck(cudaEventCreate(&done_bonded_event));
@@ -101,6 +103,19 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecGroups& domde
   calc_dihe = true;
   calc_imdihe = true;
   calc_cmap = true;
+
+  // Neighborlists
+  std::vector<int> numIntZone(8, 0);
+  std::vector< std::vector<int> > intZones(8, std::vector<int>() );
+  // Create I vs. I interaction
+  numIntZone.at(0) = 1;
+  intZones.at(0).push_back(Domdec::I);
+  nlist.registerList(numIntZone, intZones);
+  if (domdec.get_numnode() > 1) {
+    // NOTE: getImportIntZones will clear contents of numIntZone & intZones
+    domdec.getImportIntZones(numIntZone, intZones);
+    nlist.registerList(numIntZone, intZones);
+  }
 
   // Bonded coefficients
   bonded.setup_coef(nbondcoef, h_bondcoef, nureybcoef, h_ureybcoef,
@@ -139,7 +154,8 @@ CudaPMEForcefield::~CudaPMEForcefield() {
   cudaCheck(cudaStreamDestroy(in14_stream));
   cudaCheck(cudaStreamDestroy(bonded_stream));
   // Destroy events
-  cudaCheck(cudaEventDestroy(done_direct_event));
+  cudaCheck(cudaEventDestroy(done_direct_event[0]));
+  cudaCheck(cudaEventDestroy(done_direct_event[1]));
   cudaCheck(cudaEventDestroy(done_recip_event));
   cudaCheck(cudaEventDestroy(done_in14_event));
   cudaCheck(cudaEventDestroy(done_bonded_event));
@@ -209,14 +225,20 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     xyzq_copy.set_xyzq(coord, glo_q, domdec.get_loc2glo_ptr(), domdec.get_xyz_shift(),
 		       domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), stream);
 
-    //nlist.set_test(true);
+    nlist.set_test(true);
     // Sort coordinates
     // NOTE: Builds domdec.loc2glo and nlist->glo2loc
-    nlist.sort(domdec.get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec.get_loc2glo_ptr(), stream);
+    nlist.sort(0, domdec.get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec.get_loc2glo_ptr(), stream);
 
     // Build neighborlist
-    nlist.build(domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), domdec.get_rnl(),
-		xyzq.xyzq, domdec.get_loc2glo_ptr(), stream);
+    nlist.build(0, domdec.get_zone_pcoord(), domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
+		domdec.get_rnl(), xyzq.xyzq, domdec.get_loc2glo_ptr(), stream);
+
+    if (nlist.getNumList() > 1) {
+      nlist.sort(1, domdec.get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec.get_loc2glo_ptr(), stream);
+      nlist.build(1, domdec.get_zone_pcoord(), domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
+		  domdec.get_rnl(), xyzq.xyzq, domdec.get_loc2glo_ptr(), stream);
+    }
 
     // Build bonded tables
     domdecGroups.buildGroupTables(stream);
@@ -260,7 +282,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
 
     // Update and re-order communication buffers
     domdec.comm_update(nlist.get_glo2loc(), coord, stream);
-    //domdec.test_comm_coord(nlist.get_glo2loc(), coord);
+    //domdec.test_comm_coord(nlist.>get_glo2loc(), coord);
 
   } else {
     neighborlist_updated = false;
@@ -347,9 +369,15 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   cudaCheck(cudaStreamWaitEvent(direct_stream[0], xyzq_ready_event[1], 0));
 
   // Direct non-bonded force
-  dir.calc_force(xyzq.xyzq, nlist, calc_energy, calc_virial, force.stride(), force.xyz(),
+  dir.calc_force(xyzq.xyzq, nlist.getBuilder(0), calc_energy, calc_virial, force.stride(), force.xyz(),
   		 direct_stream[0]);
-  cudaCheck(cudaEventRecord(done_direct_event, direct_stream[0]));
+  cudaCheck(cudaEventRecord(done_direct_event[0], direct_stream[0]));
+
+  if (nlist.getNumList() > 1) {
+    dir.calc_force(xyzq.xyzq, nlist.getBuilder(1), calc_energy, calc_virial, force.stride(), force.xyz(),
+		   direct_stream[1]);
+    cudaCheck(cudaEventRecord(done_direct_event[1], direct_stream[1]));
+  }
 
   // 1-4 interactions
   // NOTE: we make GPU wait until force.cleap() is done
@@ -404,7 +432,8 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   cudaCheck(cudaStreamWaitEvent(stream, done_in14_event, 0));
   cudaCheck(cudaStreamWaitEvent(stream, done_bonded_event, 0));
   cudaCheck(cudaStreamWaitEvent(stream, done_recip_event, 0));
-  cudaCheck(cudaStreamWaitEvent(stream, done_direct_event, 0));
+  cudaCheck(cudaStreamWaitEvent(stream, done_direct_event[0], 0));
+  cudaCheck(cudaStreamWaitEvent(stream, done_direct_event[1], 0));
 
   // Convert forces from FP to DP
   force.convert<double>(stream);

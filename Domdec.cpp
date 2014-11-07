@@ -49,8 +49,56 @@ Domdec::Domdec(int ncoord_glo, double boxx, double boxy, double boxz, double rnl
   
 }
 
+//
+// Returns list of interacting Import zone pairs
+// numIntZone[0...7] = For each zone, number of interacting zones
+// intZones[0...7]   = For each zone, list of zones IDs that interact with this zone
+//
+void Domdec::getImportIntZones(std::vector<int>& numIntZone, std::vector< std::vector<int> >& intZones) {
+  // Create a list of active zones
+  bool activeZones[8];
+  for (int izone=0;izone < 8;izone++) activeZones[izone] = false;
+  activeZones[I] = true;
+  if (nx > 1) activeZones[FX] = true;
+  if (ny > 1) activeZones[FY] = true;
+  if (nz > 1) activeZones[FZ] = true;
+  if (ny > 1 && nz > 1) activeZones[EX] = true;
+  if (nx > 1 && nz > 1) activeZones[EY] = true;
+  if (nx > 1 && ny > 1) activeZones[EZ] = true;
+  if (nx > 1 && ny > 1 && nz > 1) activeZones[C] = true;
+  //
+  const int zones[8][5] = { {I, -1, -1, -1, -1},  // I-I
+			    {I, -1, -1, -1, -1},  // FZ-I
+			    {I, FZ, -1, -1, -1},  // FY-I, FY-FZ
+			    {I, -1, -1, -1, -1},  // EX-I
+			    {I, FZ, FY, EX, -1},  // FX-I, FX-FZ, FX-FY, FX-EX
+			    {I, FZ, -1, -1, -1},  // EZ-I, EZ-FZ
+			    {I, FY, -1, -1, -1},  // EY-I, EY-FY
+			    {I, -1, -1, -1, -1}}; // C-I
+  // NOTE: we are skipping I vs. I interaction
+  numIntZone.at(0) = 0;
+  intZones.at(0).clear();
+  for (int izone=1;izone < 8;izone++) {
+    numIntZone.at(izone) = 0;
+    intZones.at(izone).clear();
+    if (activeZones[izone]) {
+      int j = 0;
+      while (zones[izone][j] > -1) {
+	int jzone = zones[izone][j];
+	if (activeZones[jzone]) {
+	  intZones.at(izone).push_back(jzone);
+	  numIntZone.at(izone)++;
+	}
+	j++;
+      }
+    }
+  }
+}
+
+//
 // Returns the node index for box (ix, iy, iz)
 // NOTE: deals correctly with periodic boundary conditions
+//
 int Domdec::get_nodeind_pbc(const int ix, const int iy, const int iz) {
   // ixt = 0...nx-1
   //int ixt = (ix + (abs(ix)/nx)*nx) % nx;

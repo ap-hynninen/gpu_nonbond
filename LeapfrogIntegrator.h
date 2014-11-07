@@ -4,6 +4,11 @@
 #include <stdio.h>
 #include "Forcefield.h"
 
+//     TIMFAC is the conversion factor from AKMA time to picoseconds.
+//            (TIMFAC = SQRT ( ( 1A )**2 * 1amu * Na  / 1Kcal )
+//            this factor is used only intrinsically, all I/O is in ps.
+static const double TIMFAC = 4.88882129E-02;
+
 //
 // Leap frog Verlet integrator base class
 //
@@ -33,11 +38,6 @@ private:
 				double *fx, double *fy, double *fz)=0;
 
 protected:
-
-  //     TIMFAC is the conversion factor from AKMA time to picoseconds.
-  //            (TIMFAC = SQRT ( ( 1A )**2 * 1amu * Na  / 1Kcal )
-  //            this factor is used only intrinsically, all I/O is in ps.
-  static const double TIMFAC = 4.88882129E-02;
 
   // Total number of coordinates in the system
   int ncoord_glo;

@@ -67,7 +67,8 @@ endif  # MPI_FOUND
 OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o Force.o reduce.o cuda_utils.o gpu_recip.o
 
 OBJS_DIRECT = XYZQ.o Force.o reduce.o cuda_utils.o CudaPMEDirectForce.o \
-	NeighborList.o CudaTopExcl.o BondedForce.o gpu_direct.o
+	CudaNeighborList.o CudaNeighborListSort.o CudaNeighborListBuild.o \
+	CudaTopExcl.o BondedForce.o gpu_direct.o
 
 #	CudaPMEDirectForceBlock.o \
 
@@ -76,7 +77,8 @@ OBJS_BONDED = XYZQ.o Force.o reduce.o cuda_utils.o BondedForce.o gpu_bonded.o
 OBJS_CONST = cuda_utils.o gpu_const.o HoloConst.o
 
 OBJS_DYNA = cuda_utils.o gpu_dyna.o Force.o reduce.o CudaLeapfrogIntegrator.o CudaPMEForcefield.o \
-	NeighborList.o CudaTopExcl.o CudaPMEDirectForce.o BondedForce.o Grid.o Matrix3d.o XYZQ.o CudaDomdec.o \
+	CudaNeighborList.o CudaNeighborListSort.o CudaNeighborListBuild.o CudaTopExcl.o \
+	CudaPMEDirectForce.o BondedForce.o Grid.o Matrix3d.o XYZQ.o CudaDomdec.o \
 	CudaDomdecGroups.o HoloConst.o CudaDomdecHomezone.o CudaMPI.o mpi_utils.o CudaDomdecD2DComm.o \
 	DomdecD2DComm.o DomdecRecipComm.o CudaDomdecRecipComm.o CudaDomdecRecipLooper.o Domdec.o
 
@@ -84,7 +86,7 @@ OBJS_TRANSPOSE = cpu_transpose.o mpi_utils.o CpuMultiNodeMatrix3d.o CpuMatrix3d.
 
 ifeq ($(CUDA_COMPILER), $(YES))
 OBJS = $(OBJS_RECIP)
-OBJS += $(OBJS_DIRECT)
+#OBJS += $(OBJS_DIRECT)
 OBJS += $(OBJS_BONDED)
 OBJS += $(OBJS_CONST)
 OBJS += $(OBJS_DYNA)
@@ -136,7 +138,7 @@ endif
 CUDA_LFLAGS += -lcudart -lcufft -lnvToolsExt
 
 ifeq ($(CUDA_COMPILER), $(YES))
-BINARIES = gpu_direct gpu_bonded gpu_recip gpu_const gpu_dyna
+BINARIES = gpu_bonded gpu_recip gpu_const gpu_dyna gpu_direct
 endif
 ifeq ($(MPI_FOUND), $(YES))
 BINARIES += cpu_transpose

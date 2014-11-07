@@ -2,6 +2,7 @@
 #define CUDAPMEDIRECTFORCE_H
 #include <cuda.h>
 #include "Bonded_struct.h"
+#include "CudaNeighborListBuild.h"
 
 // If this variable is set, we'll use texture objects.
 // Unset for now because of the problem with texture objects on GTX 750
@@ -58,10 +59,6 @@ struct DirectSettings_t {
   float *ewald_force;
 
 };
-
-#ifndef NEIGHBORLIST_H
-template <int tilesize> class NeighborList;
-#endif
 
 // Enum for VdW and electrostatic models
 enum {NONE=0, 
@@ -179,7 +176,7 @@ public:
 		     const int stride, AT *force, cudaStream_t stream=0);
 
   void calc_force(const float4 *xyzq,
-		  const NeighborList<32>& nlist,
+		  const CudaNeighborListBuild<32>& nlist,
 		  const bool calc_energy,
 		  const bool calc_virial,
 		  const int stride, AT *force, cudaStream_t stream=0);

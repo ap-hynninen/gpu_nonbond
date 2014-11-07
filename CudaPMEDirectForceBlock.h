@@ -44,7 +44,7 @@ template <typename AT, typename CT>
 		     const int stride, AT *force, cudaStream_t stream=0);
 
   void calc_force(const float4 *xyzq,
-		  const NeighborList<32> *nlist,
+		  const CudaNeighborListBuild<32> *nlist,
 		  const bool calc_energy,
 		  const bool calc_virial,
 		  const int stride, AT *force, cudaStream_t stream=0);
