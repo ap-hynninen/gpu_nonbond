@@ -208,7 +208,6 @@ void CudaLeapfrogIntegrator::swap_step() {
   cudaCheck(cudaStreamSynchronize(stream));
 
   step.swap(prev_step);
-
 }
 
 //
@@ -221,7 +220,6 @@ void CudaLeapfrogIntegrator::swap_coord() {
   cudaCheck(cudaStreamSynchronize(stream));
 
   coord.swap(prev_coord);
-
 }
 
 //

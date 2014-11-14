@@ -198,6 +198,8 @@ void load_constr_mass(const int nconstr, const int nmass, const char *filename, 
 void write_xyz(const int n, const double *x, const double *y, const double *z, const char *filename) {
   std::ofstream file(filename);
   if (file.is_open()) {
+    file.precision(16);
+    file.setf(std::ios::fixed, std::ios::floatfield);
     for (int i=0;i < n;i++) {
       file << x[i] << " " << y[i] << " " << z[i] << std::endl;
     }
@@ -527,7 +529,7 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
     const int ntrip_type = 3;
     const int nquad_type = 2;
 
-    const bool holoconst_on = false;
+    const bool holoconst_on = true;
 
     double *h_pair_constr = new double[npair_type];
     double *h_pair_mass = new double[npair_type*2];
@@ -652,7 +654,11 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
     leapfrog.set_coord_buffers(x, y, z);
     leapfrog.set_step_buffers(dx, dy, dz);
     leapfrog.set_force_buffers(fx, fy, fz);
-    leapfrog.set_timestep(2.0);
+    if (holoconst_on) {
+      leapfrog.set_timestep(2.0);
+    } else {
+      leapfrog.set_timestep(1.0);
+    }
     leapfrog.run(nstep);
 
     cudaCheck(cudaDeviceSynchronize());

@@ -238,7 +238,7 @@ void CudaNeighborList<tilesize>::sort(const int indList, const int *zone_patom,
 
   // Test sort
   if (test) {
-    sorter.at(indList)->test_sort(zone_patom, h_ZoneParam, xyzq, xyzq_sorted,
+    sorter.at(indList)->test_sort(zone_patom, cellStart, h_ZoneParam, xyzq, xyzq_sorted,
 				  ind_sorted, cell_patom);
   }
 }
@@ -312,7 +312,12 @@ void CudaNeighborList<tilesize>::build(const int indList, const int* zone_patom,
 				       cudaStream_t stream) {
   assert(indList >= 0 && indList < numList);
 
-  builder.at(indList)->build(sorter.at(indList)->get_ncell(), topExcl.getMaxNumExcl(),
+  int cellStart = 0;
+  for (int i=0;i < indList;i++) {
+    cellStart += sorter.at(i)->get_ncell();
+  }
+
+  builder.at(indList)->build(sorter.at(indList)->get_ncell(), cellStart, topExcl.getMaxNumExcl(),
 			     h_ZoneParam, d_ZoneParam,
 			     boxx, boxy, boxz, rcut, xyzq, loc2glo, topExcl.get_glo2loc(),
 			     topExcl.getAtomExclPos(), topExcl.getAtomExcl(),
@@ -341,11 +346,16 @@ void CudaNeighborList<tilesize>::build(const int indList, const int* zone_patom,
 
   if (test) {
     int ncol_tot = 0;
-    for (int i=0;i <= indList;i++) ncol_tot += sorter.at(i)->get_ncol_tot();
-    builder.at(indList)->test_build(zone_patom, ncol_tot, sorter.at(indList)->get_ncell(), h_ZoneParam,
+    int ncell_tot = 0;
+    for (int i=0;i <= indList;i++) {
+      ncol_tot += sorter.at(i)->get_ncol_tot();
+      ncell_tot += sorter.at(i)->get_ncell();
+    }
+    builder.at(indList)->test_build(zone_patom, ncol_tot, ncell_tot, h_ZoneParam,
 				    topExcl.getAtomExclPosLen(), topExcl.getAtomExclPos(),
 				    topExcl.getAtomExclLen(), topExcl.getAtomExcl(), 
-				    boxx, boxy, boxz, rcut, xyzq, loc2glo,
+				    boxx, boxy, boxz, rcut, xyzq, loc2glo, topExcl.get_glo2loc(),
+				    topExcl.get_ncoord(),
 				    cell_patom, col_cell, cell_bz, bb);
     builder.at(indList)->analyze();
   }

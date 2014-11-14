@@ -95,12 +95,12 @@ public:
 
   void sort_build_indices(const int* zone_patom, const int cellStart,
 			  int* cell_patom,
-			  float4* xyzq, int* loc2glo,
+			  const float4* xyzq, int* loc2glo,
 			  int* glo2loc, int* ind_sorted,
 			  bb_t* bb, float* cell_bz,
 			  cudaStream_t stream);
 
-  bool test_sort(const int* zone_patom, const ZoneParam_t* h_ZoneParam,
+  bool test_sort(const int* zone_patom, const int cellStart, const ZoneParam_t* h_ZoneParam,
 		 const float4* xyzq, const float4* xyzq_sorted,
 		 const int* ind_sorted, const int* cell_patom);
 

@@ -122,7 +122,7 @@ public:
 			const char *filename);
   ~CudaNeighborListBuild();
 
-  void build(const int ncell, const int maxNumExcl,
+  void build(const int ncell, const int cellStart, const int maxNumExcl,
 	     const ZoneParam_t* h_ZoneParam, const ZoneParam_t* d_ZoneParam,
 	     const float boxx, const float boxy, const float boxz,
 	     const float rcut,
@@ -135,11 +135,13 @@ public:
 	     cudaStream_t stream);
 
   void test_build(const int* zone_patom, const int ncol_tot,
-		  const int ncell, const ZoneParam_t *h_ZoneParam,
+		  const int ncell_tot, const ZoneParam_t *h_ZoneParam,
 		  const int atomExclPosLen, const int* atomExclPos,
 		  const int atomExclLen, const int* atomExcl,
 		  const double boxx, const double boxy, const double boxz,
-		  const double rcut, const float4 *xyzq, const int* loc2glo,
+		  const double rcut, const float4 *xyzq,
+		  const int* loc2glo, const int* glo2loc,
+		  const int ncoord_glo,
 		  const int* cell_patom, const int* col_cell,
 		  const float* cell_bz, const bb_t* bb);
   //void reset();

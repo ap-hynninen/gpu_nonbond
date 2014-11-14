@@ -399,6 +399,7 @@ void save_float3(const int n, const float3* buf, const char* filename);
 #ifdef __CUDACC__
 int3 get_max_nblock();
 int get_max_nthread();
+int get_max_shmem_size();
 int get_major();
 #endif
 

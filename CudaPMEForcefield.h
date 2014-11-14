@@ -11,7 +11,7 @@
 #include "CudaDomdecGroups.h"
 #include "CudaDomdecRecip.h"
 #include "CudaDomdecRecipComm.h"
-#include "CudaNeighborlist.h"
+#include "CudaNeighborList.h"
 
 class CudaPMEForcefield : public CudaForcefield {
 
@@ -113,6 +113,10 @@ private:
   cudaEvent_t done_force_clear_event;
   cudaEvent_t xyzq_ready_event[2];
   cudaEvent_t recip_coord_ready_event;
+
+  cudaEvent_t setup_bond_done_event;
+  cudaEvent_t setup_nonbond_done_event;
+  cudaEvent_t setup_14_done_event;
 
   // ------------------------------------------------------------
   // Flags for energy terms that are included in the calculation

@@ -513,6 +513,10 @@ int get_max_nthread() {
   return gpu_prop.maxThreadsPerBlock;
 }
 
+int get_max_shmem_size() {
+  return gpu_prop.sharedMemPerBlock;
+}
+
 int get_major() {
   return gpu_prop.major;
 }

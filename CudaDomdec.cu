@@ -45,6 +45,7 @@ __global__ void calc_xyz_shift(const int ncoord,
     coordLoc[iglo] = (char)loca;
   }
   if (error) {
+    printf("%d %lf %lf %lf\n",i,x[i],y[i],z[i]);
     *error_flag = 1;
   }
 }

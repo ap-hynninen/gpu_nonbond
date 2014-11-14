@@ -337,16 +337,17 @@ __global__ void reorder_atoms_z_column_kernel(const int ncoord,
 }
 
 //
-// Reorders loc2glo
+// Reorders loc2glo using ind_sorted and shifts ind_sorted by atomStart
 //
-__global__ void build_loc2glo_kernel(const int ncoord,
-				     const int* __restrict__ ind_sorted,
-				     const int* __restrict__ loc2glo_in,
-				     int* __restrict__ loc2glo_out) {
+__global__ void reorder_loc2glo_kernel(const int ncoord, const int atomStart,
+				       int* __restrict__ ind_sorted,
+				       const int* __restrict__ loc2glo_in,
+				       int* __restrict__ loc2glo_out) {
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
   
   if (i < ncoord) {
     int j = ind_sorted[i];
+    ind_sorted[i] = j + atomStart;
     loc2glo_out[i] = loc2glo_in[j];
   }
 }
@@ -402,41 +403,47 @@ __global__ void sort_z_column_kernel(const int* __restrict__ col_patom,
 				     int* __restrict__ ind_sorted) {
 
   // Shared memory
-  // Requires: blockDim.x*sizeof(keyval_t)
+  // Requires: max(n)*sizeof(keyval_t)
   extern __shared__ keyval_t sh_keyval[];
 
   int col_patom0 = col_patom[blockIdx.x];
   int n = col_patom[blockIdx.x+1] - col_patom0;
 
   // Read keys and values into shared memory
-  keyval_t keyval;
-  keyval.key = (threadIdx.x < n) ? xyzq[threadIdx.x + col_patom0].z : 1.0e38;
-  keyval.val = (threadIdx.x < n) ? (threadIdx.x + col_patom0) : (n-1);
-  sh_keyval[threadIdx.x] = keyval;
+  for (int i=threadIdx.x;i < n;i+=blockDim.x) {
+    keyval_t keyval;
+    keyval.key = xyzq[i + col_patom0].z;
+    keyval.val = i + col_patom0;
+    sh_keyval[i] = keyval;
+  }
   __syncthreads();
 
-  for (int k = 2;k <= blockDim.x;k *= 2) {
+  for (int k = 2;k < 2*n;k *= 2) {
     for (int j = k/2; j > 0;j /= 2) {
-      int ixj = threadIdx.x ^ j;
-      if (ixj > threadIdx.x && ixj < blockDim.x) {
-	// asc = true for ascending order
-	bool asc = ((threadIdx.x & k) == 0);
+      for (int i=threadIdx.x;i < n;i+=blockDim.x) {
+	int ixj = i ^ j;
+	if (ixj > i && ixj < n) {
+	  // asc = true for ascending order
+	  bool asc = ((i & k) == 0);
+	  for (int kk = k*2;kk < 2*n;kk *= 2)
+	    asc = ((i & kk) == 0 ? !asc : asc);
+
+	  // Read data
+	  keyval_t keyval1 = sh_keyval[i];
+	  keyval_t keyval2 = sh_keyval[ixj];
+
+	  float lo_key = asc ? keyval1.key : keyval2.key;
+	  float hi_key = asc ? keyval2.key : keyval1.key;
 	
-	// Read data
-	keyval_t keyval1 = sh_keyval[threadIdx.x];
-	keyval_t keyval2 = sh_keyval[ixj];
-	
-	float lo_key = asc ? keyval1.key : keyval2.key;
-	float hi_key = asc ? keyval2.key : keyval1.key;
-	
-	if (lo_key > hi_key) {
-	  // keys are in wrong order => exchange
-	  sh_keyval[threadIdx.x] = keyval2;
-	  sh_keyval[ixj]         = keyval1;
+	  if (lo_key > hi_key) {
+	    // keys are in wrong order => exchange
+	    sh_keyval[i]   = keyval2;
+	    sh_keyval[ixj] = keyval1;
+	  }
+
+	  //if ((i&k)==0 && get(i)>get(ixj)) exchange(i,ixj);
+	  //if ((i&k)!=0 && get(i)<get(ixj)) exchange(i,ixj);
 	}
-	
-	//if ((i&k)==0 && get(i)>get(ixj)) exchange(i,ixj);
-	//if ((i&k)!=0 && get(i)<get(ixj)) exchange(i,ixj);
       }
       __syncthreads();
     }
@@ -448,20 +455,22 @@ __global__ void sort_z_column_kernel(const int* __restrict__ col_patom,
   // loc2glo_new[threadIdx.x + col_patom0] = loc2glo[sh_keyval[threadIdx.x].val]
   //
 
-  float4 xyzq_val;
-  int ind_val;
-  if (threadIdx.x < n) {
-    int i = sh_keyval[threadIdx.x].val;    
-    ind_val = ind_sorted[i];
-    xyzq_val = xyzq[i];
+  for (int ibase=0;ibase < n;ibase+=blockDim.x) {
+    int i = ibase + threadIdx.x;
+    float4 xyzq_val;
+    int ind_val;
+    if (i < n) {
+      int pos = sh_keyval[i].val;
+      ind_val = ind_sorted[pos];
+      xyzq_val = xyzq[pos];
+    }
+    __syncthreads();
+    if (i < n) {
+      int newpos = i + col_patom0;
+      ind_sorted[newpos] = ind_val;
+      xyzq[newpos] = xyzq_val;
+    }
   }
-  __syncthreads();
-  if (threadIdx.x < n) {
-    int newpos = threadIdx.x + col_patom0;
-    ind_sorted[newpos] = ind_val;
-    xyzq[newpos] = xyzq_val;
-  }
-
 }
 
 //
@@ -668,6 +677,13 @@ void CudaNeighborListSort::sort_setup(const int *zone_patom,
       // Approximation for ncellz = 2 x "uniform distribution of atoms"
       h_ZoneParam[izone].ncellz_max = max(1, 2*h_ZoneParam[izone].ncoord/
 					  (h_ZoneParam[izone].ncellx*h_ZoneParam[izone].ncelly*tilesize));
+      /*
+      fprintf(stderr,"%d %d %d | %f %f %f | %f %f %f | %f %f %f\n",
+	      h_ZoneParam[izone].ncellx, h_ZoneParam[izone].ncelly, h_ZoneParam[izone].ncellz_max,
+	      h_ZoneParam[izone].min_xyz.x, h_ZoneParam[izone].min_xyz.y, h_ZoneParam[izone].min_xyz.z,
+	      h_ZoneParam[izone].max_xyz.x, h_ZoneParam[izone].max_xyz.y, h_ZoneParam[izone].max_xyz.z,
+	      xsize, ysize, zsize);
+      */
       h_ZoneParam[izone].celldx = xsize/(float)(h_ZoneParam[izone].ncellx);
       h_ZoneParam[izone].celldy = ysize/(float)(h_ZoneParam[izone].ncelly);
       h_ZoneParam[izone].celldz_min = zsize/(float)(h_ZoneParam[izone].ncellz_max);
@@ -779,18 +795,21 @@ void CudaNeighborListSort::sort_core(const int* zone_patom, const int cellStart,
   // Test z columns
   if (test) {
     cudaCheck(cudaDeviceSynchronize());
-    test_z_columns(zone_patom, h_ZoneParam, xyzq, xyzq_sorted, col_patom, ind_sorted);
+    test_z_columns(zone_patom, h_ZoneParam, xyzq+atomStart, xyzq_sorted+atomStart,
+		   col_patom, ind_sorted+atomStart);
   }
 
   // Now sort according to z coordinate
   nthread = 0;
   nblock = 0;
+  int max_n = 0;
   for (int izone=izoneStart;izone <= izoneEnd;izone++) {
     nblock += h_ZoneParam[izone].ncellx*h_ZoneParam[izone].ncelly;
-    nthread = max(nthread, h_ZoneParam[izone].ncellz_max*tilesize);
+    max_n = max(max_n, h_ZoneParam[izone].ncellz_max*tilesize);
   }
-  if (nthread < get_max_nthread()) {
-    shmem_size = nthread*sizeof(keyval_t);
+  nthread = min(max_n, get_max_nthread());
+  shmem_size = max_n*sizeof(keyval_t);
+  if (shmem_size < get_max_shmem_size()) {
     sort_z_column_kernel<<< nblock, nthread, shmem_size, stream >>>
       (col_patom, xyzq_sorted+atomStart, ind_sorted+atomStart);
     cudaCheck(cudaGetLastError());
@@ -807,7 +826,7 @@ void CudaNeighborListSort::sort_core(const int* zone_patom, const int cellStart,
 //
 void CudaNeighborListSort::sort_build_indices(const int* zone_patom, const int cellStart,
 					      int* cell_patom,
-					      float4* xyzq, int* loc2glo,
+					      const float4* xyzq, int* loc2glo,
 					      int* glo2loc, int* ind_sorted,
 					      bb_t* bb, float* cell_bz,
 					      cudaStream_t stream) {
@@ -822,8 +841,8 @@ void CudaNeighborListSort::sort_build_indices(const int* zone_patom, const int c
   copy_DtoD<int>(loc2glo+atomStart, loc2gloTmp, ncoord_tot, stream);
   nthread = 512;
   nblock = (ncoord_tot - 1)/nthread + 1;
-  build_loc2glo_kernel<<< nblock, nthread, 0, stream >>>
-    (ncoord_tot, ind_sorted+atomStart, loc2gloTmp, loc2glo+atomStart);
+  reorder_loc2glo_kernel<<< nblock, nthread, 0, stream >>>
+    (ncoord_tot, atomStart, ind_sorted+atomStart, loc2gloTmp, loc2glo+atomStart);
   cudaCheck(cudaGetLastError());
 
   // Build glo2loc
@@ -875,37 +894,42 @@ bool CudaNeighborListSort::test_z_columns(const int* zone_patom, const ZoneParam
   int atomStart = zone_patom[izoneStart];
 
   float4 *h_xyzq = new float4[ncoord_tot];
-  copy_DtoH_sync<float4>(xyzq+atomStart, h_xyzq, ncoord_tot);
+  copy_DtoH_sync<float4>(xyzq, h_xyzq, ncoord_tot);
 
   float4 *h_xyzq_sorted = new float4[ncoord_tot];
-  copy_DtoH_sync<float4>(xyzq_sorted+atomStart, h_xyzq_sorted, ncoord_tot);
+  copy_DtoH_sync<float4>(xyzq_sorted, h_xyzq_sorted, ncoord_tot);
 
   int *h_col_patom = new int[ncol_tot+1];
   copy_DtoH_sync<int>(col_patom, h_col_patom, ncol_tot+1);
 
   int *h_ind_sorted = new int[ncoord_tot];
-  copy_DtoH_sync<int>(ind_sorted+atomStart, h_ind_sorted, ncoord_tot);
+  copy_DtoH_sync<int>(ind_sorted, h_ind_sorted, ncoord_tot);
 
   bool ok = true;
 
-  int izone, i, j;
-  float x, y, xj, yj;
-  int ix, iy, ind, lo_ind, hi_ind;
   int ind0 = 0;
-  for (izone=0;izone < maxNumZone;izone++) {
+  int prev_ind = 0;
+  for (int izone=izoneStart;izone <= izoneEnd;izone++) {
     int istart = zone_patom[izone] - atomStart;
     int iend   = zone_patom[izone+1] - 1 - atomStart;
     if (iend >= istart) {
       float x0 = h_ZoneParam[izone].min_xyz.x;
       float y0 = h_ZoneParam[izone].min_xyz.y;
-      for (i=istart;i <= iend;i++) {
-	x = h_xyzq_sorted[i].x;
-	y = h_xyzq_sorted[i].y;
-	ix = (int)((x - x0)*h_ZoneParam[izone].inv_celldx);
-	iy = (int)((y - y0)*h_ZoneParam[izone].inv_celldy);
-	ind = ind0 + ix + iy*h_ZoneParam[izone].ncellx;
-	lo_ind = h_col_patom[ind];
-	hi_ind = h_col_patom[ind+1] - 1;
+      for (int i=istart;i <= iend;i++) {
+	float x = h_xyzq_sorted[i].x;
+	float y = h_xyzq_sorted[i].y;
+	int ix = (int)((x - x0)*h_ZoneParam[izone].inv_celldx);
+	int iy = (int)((y - y0)*h_ZoneParam[izone].inv_celldy);
+	int ind = ind0 + ix + iy*h_ZoneParam[izone].ncellx;
+	// Check that the column indices are in increasing order
+	if (ind < prev_ind) {
+	  std::cout << "test_z_columns FAILED at i=" << i+atomStart 
+		    << " prev_ind=" << prev_ind << " ind=" << ind << std::endl;
+	  exit(1);
+	}
+	prev_ind = ind;
+	int lo_ind = h_col_patom[ind];
+	int hi_ind = h_col_patom[ind+1] - 1;
 	if (i < lo_ind || i > hi_ind) {
 	  std::cout << "test_z_columns FAILED at i=" << i+atomStart << " izone = " << izone << std::endl;
 	  std::cout << "ind, lo_ind, hi_ind = " << ind << " " << lo_ind << " " << hi_ind << std::endl;
@@ -918,12 +942,12 @@ bool CudaNeighborListSort::test_z_columns(const int* zone_patom, const ZoneParam
 	  exit(1);
 	}
       }
-      for (i=istart;i <= iend;i++) {
-	j = h_ind_sorted[i];
-	x = h_xyzq_sorted[i].x;
-	y = h_xyzq_sorted[i].y;
-	xj = h_xyzq[j].x;
-	yj = h_xyzq[j].y;
+      for (int i=istart;i <= iend;i++) {
+	int j = h_ind_sorted[i];
+	float x = h_xyzq_sorted[i].x;
+	float y = h_xyzq_sorted[i].y;
+	float xj = h_xyzq[j].x;
+	float yj = h_xyzq[j].y;
 	if (x != xj || y != yj) {
 	  std::cout << "test_z_columns FAILED at i=" << i+atomStart << std::endl;
 	  std::cout << "x,y   =" << x << " " << y << std::endl;
@@ -948,7 +972,8 @@ bool CudaNeighborListSort::test_z_columns(const int* zone_patom, const ZoneParam
 //
 // Tests sort
 //
-bool CudaNeighborListSort::test_sort(const int* zone_patom, const ZoneParam_t* h_ZoneParam,
+bool CudaNeighborListSort::test_sort(const int* zone_patom, const int cellStart,
+				     const ZoneParam_t* h_ZoneParam,
 				     const float4* xyzq, const float4* xyzq_sorted,
 				     const int* ind_sorted, const int* cell_patom) {
 
@@ -969,7 +994,7 @@ bool CudaNeighborListSort::test_sort(const int* zone_patom, const ZoneParam_t* h
   copy_DtoH_sync<int>(ind_sorted+atomStart, h_ind_sorted, ncoord_tot);
 
   int *h_cell_patom = new int[ncell];
-  copy_DtoH_sync<int>(cell_patom, h_cell_patom, ncell);
+  copy_DtoH_sync<int>(cell_patom+cellStart, h_cell_patom, ncell);
 
   bool ok = true;
   
@@ -979,11 +1004,16 @@ bool CudaNeighborListSort::test_sort(const int* zone_patom, const ZoneParam_t* h
   int ix, iy, ind, lo_ind, hi_ind;
 
   k = 0;
+  // Loop through columns
   for (i=1;i < ncol_tot+1;i++) {
+    // Loop through cells
     for (j=h_col_patom[i-1];j < h_col_patom[i];j+=tilesize) {
-      if (j != h_cell_patom[k]) {
-	std::cout << "test_sort FAILED at i=" << i << std::endl;
-	std::cout << "j,k=" << j << " " << k << "cell_patom[k]=" << h_cell_patom[k] << std::endl;
+      if (j+atomStart != h_cell_patom[k]) {
+	std::cout << "test_sort FAILED at i=" << i << " k=" << k 
+		  << " atomStart=" << atomStart << " cellStart=" << cellStart 
+		  << " ncell=" << ncell << std::endl;
+	std::cout << "j+atomStart=" << j+atomStart
+		  << " cell_patom[k]=" << h_cell_patom[k] << std::endl;
 	exit(1);
       }
       k++;
@@ -1014,8 +1044,14 @@ bool CudaNeighborListSort::test_sort(const int* zone_patom, const ZoneParam_t* h
 	lo_ind = h_col_patom[ind];
 	hi_ind = h_col_patom[ind+1] - 1;
 	if (i < lo_ind || i > hi_ind) {
-	  std::cout << "test_sort FAILED at i=" << i << std::endl;
-	  std::cout << "ind, lo_ind, hi_ind = " << ind << " " << lo_ind << " " << hi_ind << std::endl;
+	  std::cout << "test_sort FAILED at i=" << i << " ind=" << ind 
+		    << " istart=" << istart << " iend=" << iend 
+		    << " lo_ind= " << lo_ind << " hi_ind=" << hi_ind << std::endl;
+	  std::cout << "x=" << x << " x0=" << x0 << " y=" << x << " y0=" << y0 
+		    << " z=" << z << " ix=" << ix << " iy=" << iy << std::endl;
+	  std::cout << "celldx=" << h_ZoneParam[izone].celldx 
+		    << " celldy=" << h_ZoneParam[izone].celldy 
+		    << " atomStart=" << atomStart << " ncoord_tot=" << ncoord_tot << std::endl;
 	  exit(1);
 	}
 	if (z < prev_z) {
@@ -1028,7 +1064,7 @@ bool CudaNeighborListSort::test_sort(const int* zone_patom, const ZoneParam_t* h
       }
       
       for (i=istart;i <= iend;i++) {
-	j = h_ind_sorted[i];
+	j = h_ind_sorted[i] - atomStart;
 	x = h_xyzq_sorted[i].x;
 	y = h_xyzq_sorted[i].y;
 	z = h_xyzq_sorted[i].z;

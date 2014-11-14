@@ -95,6 +95,9 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecGroups& domde
   cudaCheck(cudaEventCreate(&xyzq_ready_event[0]));
   cudaCheck(cudaEventCreate(&xyzq_ready_event[1]));
   cudaCheck(cudaEventCreate(&recip_coord_ready_event));
+  cudaCheck(cudaEventCreate(&setup_bond_done_event));
+  cudaCheck(cudaEventCreate(&setup_nonbond_done_event));
+  cudaCheck(cudaEventCreate(&setup_14_done_event));
 
   // Set energy term flags
   calc_bond = true;
@@ -163,6 +166,9 @@ CudaPMEForcefield::~CudaPMEForcefield() {
   cudaCheck(cudaEventDestroy(xyzq_ready_event[0]));
   cudaCheck(cudaEventDestroy(xyzq_ready_event[1]));
   cudaCheck(cudaEventDestroy(recip_coord_ready_event));
+  cudaCheck(cudaEventDestroy(setup_bond_done_event));
+  cudaCheck(cudaEventDestroy(setup_nonbond_done_event));
+  cudaCheck(cudaEventDestroy(setup_14_done_event));
 }
 
 //
@@ -187,6 +193,7 @@ void CudaPMEForcefield::setup_direct_nonbonded(const double roff, const double r
   copy_HtoD<int>(h_glo_vdwtype, glo_vdwtype, domdec.get_ncoord_glo());
 }
 
+int nstep=0;
 
 //
 // Pre-process force calculation
@@ -198,7 +205,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
   if (heuristic_check(coord, stream)) {
     neighborlist_updated = true;
 
-    fprintf(stderr,"Building neighborlist\n");
+    fprintf(stderr,"Building neighborlist %d\n",nstep);
 
     // Update homezone coordinates (coord) and step vector (prev_step)
     // NOTE: Builds domdec.loc2glo
@@ -225,10 +232,11 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     xyzq_copy.set_xyzq(coord, glo_q, domdec.get_loc2glo_ptr(), domdec.get_xyz_shift(),
 		       domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(), stream);
 
-    nlist.set_test(true);
+    //nlist.set_test(true);
     // Sort coordinates
     // NOTE: Builds domdec.loc2glo and nlist->glo2loc
     nlist.sort(0, domdec.get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec.get_loc2glo_ptr(), stream);
+    cudaCheck(cudaEventRecord(xyzq_ready_event[0], stream));
 
     // Build neighborlist
     nlist.build(0, domdec.get_zone_pcoord(), domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
@@ -236,6 +244,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
 
     if (nlist.getNumList() > 1) {
       nlist.sort(1, domdec.get_zone_pcoord(), xyzq_copy.xyzq, xyzq.xyzq, domdec.get_loc2glo_ptr(), stream);
+      cudaCheck(cudaEventRecord(xyzq_ready_event[1], stream));
       nlist.build(1, domdec.get_zone_pcoord(), domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
 		  domdec.get_rnl(), xyzq.xyzq, domdec.get_loc2glo_ptr(), stream);
     }
@@ -262,9 +271,11 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
 		      domdecGroups.getGroupList<dihe_t>(IMDIHE),
 		      domdecGroups.getNumGroupTable(CMAP), domdecGroups.getGroupTable(CMAP),
 		      domdecGroups.getGroupList<cmap_t>(CMAP), stream);
+    cudaCheck(cudaEventRecord(setup_bond_done_event, stream));
 
     // Set vdwtype for Direct non-bonded interactions
     dir.set_vdwtype(domdec.get_ncoord_tot(), glo_vdwtype, domdec.get_loc2glo_ptr(), stream);
+    cudaCheck(cudaEventRecord(setup_nonbond_done_event, stream));
 
     // Setup 1-4 interaction lists
     dir.set_14_list(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
@@ -273,6 +284,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
 		    domdecGroups.getGroupList<xx14_t>(IN14),
 		    domdecGroups.getNumGroupTable(EX14), domdecGroups.getGroupTable(EX14),
 		    domdecGroups.getGroupList<xx14_t>(EX14), stream);
+    cudaCheck(cudaEventRecord(setup_14_done_event, stream));
 
     // Re-order prev_step vector, using ref_coord as temporary storage
     domdec.reorder_homezone_coord(prev_step, ref_coord, nlist.get_ind_sorted(), stream);
@@ -282,7 +294,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
 
     // Update and re-order communication buffers
     domdec.comm_update(nlist.get_glo2loc(), coord, stream);
-    //domdec.test_comm_coord(nlist.>get_glo2loc(), coord);
+    //domdec.test_comm_coord(nlist.get_glo2loc(), coord);
 
   } else {
     neighborlist_updated = false;
@@ -302,7 +314,10 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     cudaCheck(cudaEventRecord(xyzq_ready_event[1], stream));
   }
 
+  nstep++;
 }
+
+//int ncall=0;
 
 //
 // Calculate forces
@@ -344,6 +359,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
     }
     reallocate<float3>(&recip_force, &recip_force_len, recipComm.get_ncoord(), 1.0f);
     // Send coordinates
+    cudaCheck(cudaStreamWaitEvent(stream, xyzq_ready_event[0], 0));
     recipComm.send_coord(xyzq.xyzq, stream);
     // Receive coordinates
     if (recipComm.get_isRecip()) recipComm.recv_coord(recip_xyzq.xyzq, stream);
@@ -351,7 +367,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
     cudaCheck(cudaEventRecord(recip_coord_ready_event, stream));
   }
 
-  // --------------- Use of stream stops here --------------
+  // --------------- Use of stream "stream" stops here --------------
 
   force.clear(direct_stream[0]);
   cudaCheck(cudaEventRecord(done_force_clear_event, direct_stream[0]));
@@ -365,24 +381,37 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
 
   // Wait for xyzq coordinates to be ready
   cudaCheck(cudaStreamWaitEvent(direct_stream[0], xyzq_ready_event[0], 0));
+  cudaCheck(cudaStreamWaitEvent(direct_stream[0], setup_nonbond_done_event, 0));
   // .... (here we'll calculate the local forces) ...
-  cudaCheck(cudaStreamWaitEvent(direct_stream[0], xyzq_ready_event[1], 0));
+  cudaCheck(cudaStreamWaitEvent(direct_stream[1], xyzq_ready_event[1], 0));
+  cudaCheck(cudaStreamWaitEvent(direct_stream[1], setup_nonbond_done_event, 0));
+
+  //cudaCheck(cudaDeviceSynchronize());
+  //char filename[256];
+  //sprintf(filename,"xyzq_n%d_%d_dyn%d.txt",domdec.get_numnode(),domdec.get_mynode(),ncall);
+  //xyzq.save("xyzq.txt");
+  //ncall++;
 
   // Direct non-bonded force
   dir.calc_force(xyzq.xyzq, nlist.getBuilder(0), calc_energy, calc_virial, force.stride(), force.xyz(),
   		 direct_stream[0]);
   cudaCheck(cudaEventRecord(done_direct_event[0], direct_stream[0]));
 
+  //cudaCheck(cudaDeviceSynchronize());
+
   if (nlist.getNumList() > 1) {
     dir.calc_force(xyzq.xyzq, nlist.getBuilder(1), calc_energy, calc_virial, force.stride(), force.xyz(),
-		   direct_stream[1]);
+    		   direct_stream[1]);
     cudaCheck(cudaEventRecord(done_direct_event[1], direct_stream[1]));
   }
+
+  //cudaCheck(cudaDeviceSynchronize());
 
   // 1-4 interactions
   // NOTE: we make GPU wait until force.cleap() is done
   cudaCheck(cudaStreamWaitEvent(in14_stream, xyzq_ready_event[1], 0));
   cudaCheck(cudaStreamWaitEvent(in14_stream, done_force_clear_event, 0));
+  cudaCheck(cudaStreamWaitEvent(in14_stream, setup_14_done_event, 0));
   dir.calc_14_force(xyzq.xyzq, calc_energy, calc_virial, force.stride(), force.xyz(),
   		    in14_stream);
   cudaCheck(cudaEventRecord(done_in14_event, in14_stream));
@@ -390,6 +419,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   // Bonded forces
   cudaCheck(cudaStreamWaitEvent(bonded_stream, xyzq_ready_event[1], 0));
   cudaCheck(cudaStreamWaitEvent(bonded_stream, done_force_clear_event, 0));
+  cudaCheck(cudaStreamWaitEvent(bonded_stream, setup_bond_done_event, 0));
   bonded.calc_force(xyzq.xyzq, domdec.get_boxx(), domdec.get_boxy(), domdec.get_boxz(),
     		    calc_energy, calc_virial, force.stride(), force.xyz(),
   		    calc_bond, calc_ureyb, calc_angle, calc_dihe, calc_imdihe, calc_cmap,
@@ -425,7 +455,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial, For
   }
   cudaCheck(cudaEventRecord(done_recip_event, recip_stream));
 
-  // --------------- stream picks up here --------------
+  // --------------- stream "stream" picks up here --------------
 
   // Make integrator stream "stream" wait until all computation is done
   // i.e. we are pinning all computation to this stream
