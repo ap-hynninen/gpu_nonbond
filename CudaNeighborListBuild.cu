@@ -3,13 +3,14 @@
 #include <cassert>
 #include <fstream>
 #include <vector>
-//#include <algorithm>
+#include <thrust/sort.h>
+#include <thrust/device_vector.h>
 #include "gpu_utils.h"
 #include "cuda_utils.h"
 #include "CudaNeighborListBuild.h"
 
 // IF defined, uses strict (Factor = 1.0f) memory reallocation. Used for debuggin memory problems.
-#define STRICT_MEMORY_REALLOC
+//#define STRICT_MEMORY_REALLOC
 
 //static const int numNlistParam=2;
 //static __device__ NeighborListParam_t d_NlistParam[numNlistParam];
@@ -710,8 +711,8 @@ __device__ void flush_jlist(const int wid, const int istart, const int iend,
 //
 // NOTE: One warp takes care of one cell
 //
-//template < int tilesize, bool IvsI >
-template < int tilesize >
+template < int tilesize, bool IvsI >
+//template < int tilesize >
 __global__
 void build_kernel(const int maxNumExcl, const int cellStart,
 		  const int4* __restrict__ cell_xyz_zone,
@@ -746,12 +747,10 @@ void build_kernel(const int maxNumExcl, const int cellStart,
 
   // Get (icellx, icelly, icellz, izone):
   int4 icell_xyz_zone = cell_xyz_zone[icell];
-  //int icellx = icell_xyz_zone.x;
-  //int icelly = icell_xyz_zone.y;
   int icellz = icell_xyz_zone.z;
-  //int izone  = IvsI ? 0 : icell_xyz_zone.w;
-  int izone  = icell_xyz_zone.w;
-  bool IvsI = (izone == 0) ? true : false;
+  int izone  = IvsI ? 0 : icell_xyz_zone.w;
+  //int izone  = icell_xyz_zone.w;
+  //bool IvsI = (izone == 0) ? true : false;
 
   int n_jzone = IvsI ? 1 : d_ZoneParam[izone].n_int_zone;
   
@@ -788,11 +787,11 @@ void build_kernel(const int maxNumExcl, const int cellStart,
 
   // jcellx and jcelly minimum values
   volatile int2 *sh_jcellxy_min;
-  //if (!IvsI) {
+  if (!IvsI) {
     sh_jcellxy_min = (int2 *)&shbuf[shbuf_pos + 
 				    (threadIdx.x/warpsize)*n_jzone*sizeof(int2)];
     shbuf_pos += (blockDim.x/warpsize)*n_jzone*sizeof(int2);
-    //}
+  }
 
   // Temporary j-cell list. Each warp has its own jlist
   volatile int *sh_jlist = (int *)&shbuf[shbuf_pos +
@@ -1277,6 +1276,97 @@ __global__ void add_tile_top_kernel(const int ntile_top,
 
 }
 
+/*
+//
+// Calculates the sorting key for ientry -list
+//
+__global__ void setup_ientry_sort_kernel(const int n_ientry, const ientry_t* __restrict__ ientry,
+					 int* __restrict__ ientry_sortkey,
+					 int* __restrict__ ientry_sortval) {
+  const int tid = threadIdx.x + blockIdx.x*blockDim.x;
+  if (tid < n_ientry) {
+    // Note the minus sign here because we want to order these largest first
+    ientry_sortkey[tid] = -(ientry[tid].endj - ientry[tid].startj + 1);
+    ientry_sortval[tid] = tid;
+  }
+}
+*/
+
+//
+// Sort ientry using bitonic sort. Keeping it simple.
+// Real sorting algorithm should be coded soon.. since this won't work when we blow the 
+// shared memory limit
+//
+__global__ void sort_ientry_kernel(const int n_ientry,
+				   const ientry_t* __restrict__ ientry_in,
+				   ientry_t* __restrict__ ientry_out) {
+  // Shared memory
+  // Requires: n_ientry*sizeof(int2)
+  extern __shared__ int2 sh_keyval[];
+
+  // Read keys and values into shared memory
+  for (int i=threadIdx.x;i < n_ientry;i+=blockDim.x) {
+    int2 keyval;
+    // Note the minus sign here because we want to order these largest first
+    keyval.x = -(ientry_in[i].endj - ientry_in[i].startj + 1);
+    keyval.y = i;
+    sh_keyval[i] = keyval;
+  }
+  __syncthreads();
+
+  for (int k = 2;k < 2*n_ientry;k *= 2) {
+    for (int j = k/2; j > 0;j /= 2) {
+      for (int i=threadIdx.x;i < n_ientry;i+=blockDim.x) {
+	int ixj = i ^ j;
+	if (ixj > i && ixj < n_ientry) {
+	  // asc = true for ascending order
+	  bool asc = ((i & k) == 0);
+	  for (int kk = k*2;kk < 2*n_ientry;kk *= 2)
+	    asc = ((i & kk) == 0 ? !asc : asc);
+
+	  // Read data
+	  int2 keyval1 = sh_keyval[i];
+	  int2 keyval2 = sh_keyval[ixj];
+
+	  int lo_key = asc ? keyval1.x : keyval2.x;
+	  int hi_key = asc ? keyval2.x : keyval1.x;
+	
+	  if (lo_key > hi_key) {
+	    // keys are in wrong order => exchange
+	    sh_keyval[i]   = keyval2;
+	    sh_keyval[ixj] = keyval1;
+	  }
+
+	  //if ((i&k)==0 && get(i)>get(ixj)) exchange(i,ixj);
+	  //if ((i&k)!=0 && get(i)<get(ixj)) exchange(i,ixj);
+	}
+      }
+      __syncthreads();
+    }
+  }
+
+  for (int i=threadIdx.x;i < n_ientry;i+=blockDim.x) {
+    int pos = sh_keyval[i].y;
+    ientry_out[i] = ientry_in[pos];
+  }
+}
+
+/*
+//
+// Re-order ientry
+//
+__global__ void reorder_ientry_kernel(const int n_ientry,
+				      const ientry_t* __restrict__ ientry_raw,
+				      const int* __restrict__ ientry_sortval,
+				      ientry_t* __restrict__ ientry) {
+  const int tid = threadIdx.x + blockIdx.x*blockDim.x;
+  if (tid < n_ientry) {
+    int val = ientry_sortval[tid];
+    ientry[tid] = ientry_raw[val];
+  }  
+}
+*/
+
 //########################################################################################
 //########################################################################################
 //########################################################################################
@@ -1306,6 +1396,7 @@ CudaNeighborListBuild<tilesize>::CudaNeighborListBuild(const int n_int_zone_max,
 template <int tilesize>
 CudaNeighborListBuild<tilesize>::~CudaNeighborListBuild() {
   if (tile_excl != NULL) deallocate< tile_excl_t<tilesize> > (&tile_excl);
+  if (ientry_raw != NULL) deallocate<ientry_t>(&ientry_raw);
   if (ientry != NULL) deallocate<ientry_t>(&ientry);
   if (tile_indj != NULL) deallocate<int>(&tile_indj);
   if (excl_atom_heap != NULL) deallocate<int>(&excl_atom_heap);
@@ -1324,6 +1415,9 @@ void CudaNeighborListBuild<tilesize>::init() {
 
   tile_excl = NULL;
   tile_excl_len = 0;
+
+  ientry_raw = NULL;
+  ientry_raw_len = 0;
 
   ientry = NULL;
   ientry_len = 0;
@@ -1519,14 +1613,20 @@ void CudaNeighborListBuild<tilesize>::build(const int ncell, const int cellStart
     }
   }
 
-  reallocate<ientry_t>(&ientry, &ientry_len, n_ientry_est, 1.0f);
+#ifdef STRICT_MEMORY_REALLOC
+  reallocate<ientry_t>(&ientry_raw, &ientry_raw_len, n_ientry_est, 1.0f);
   reallocate<tile_excl_t<tilesize> >(&tile_excl, &tile_excl_len, n_tile_est, 1.0f);
   reallocate<int>(&tile_indj, &tile_indj_len, n_tile_est, 1.0f);
+#else
+  reallocate<ientry_t>(&ientry_raw, &ientry_raw_len, n_ientry_est, 1.4f);
+  reallocate<tile_excl_t<tilesize> >(&tile_excl, &tile_excl_len, n_tile_est, 1.4f);
+  reallocate<int>(&tile_indj, &tile_indj_len, n_tile_est, 1.4f);
+#endif
 
 #ifdef STRICT_MEMORY_REALLOC
   reallocate<int>(&excl_atom_heap, &excl_atom_heap_len, ncell*tilesize*maxNumExcl, 1.0f);
 #else
-  reallocate<int>(&excl_atom_heap, &excl_atom_heap_len, ncell*tilesize*maxNumExcl, 1.2f);
+  reallocate<int>(&excl_atom_heap, &excl_atom_heap_len, ncell*tilesize*maxNumExcl, 1.4f);
 #endif
 
   //clear_gpu_array< tile_excl_t<tilesize> >(tile_excl, tile_excl_len, stream);
@@ -1535,7 +1635,9 @@ void CudaNeighborListBuild<tilesize>::build(const int ncell, const int cellStart
   // (blockDim.x/warpsize)*( (!IvsI)*n_jzone*sizeof(int2) + n_jlist_max*sizeof(int) 
   //                         + tilesize*sizeof(float3))
 
-  // I vs. I
+
+  bool IvsI = (izoneStart == 0 && izoneEnd == 0);
+
   nthread = 512;
   //nblock = (ncell_max-1)/(nthread/warpsize) + 1;
   nblock = (ncell-1)/(nthread/warpsize) + 1;
@@ -1546,51 +1648,25 @@ void CudaNeighborListBuild<tilesize>::build(const int ncell, const int cellStart
     shmem_size += (nthread/warpsize)*tilesize*sizeof(float3);  // sh_xyzj[]
   }
   // For !IvsI, shmem_size += (nthread/warpsize)*n_int_zone_max*sizeof(int2)
-  shmem_size += (nthread/warpsize)*n_int_zone_max*sizeof(int2);// sh_jcellxy_min[]
+  if (!IvsI) shmem_size += (nthread/warpsize)*n_int_zone_max*sizeof(int2);// sh_jcellxy_min[]
 
   //std::cout << "CudaNeighborList::build, shmem_size = " << shmem_size << std::endl;
-  build_kernel<tilesize>
-    <<< nblock, nthread, shmem_size, stream >>>
-    (maxNumExcl, cellStart, cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom,
-     loc2glo, glo2loc, atomExclPos, atomExcl,
-     xyzq, boxx, boxy, boxz, rcut, rcut*rcut, bb, excl_atom_heap,
-     tile_indj, tile_excl, ientry, d_ZoneParam, d_NlistParam);
-  cudaCheck(cudaGetLastError());
-
-  /*
-  // Rest
-  nthread = 512;
-  nblock = (ncell_max-1)/(nthread/warpsize) + 1;
-  shmem_size = (nthread/warpsize)*( n_jlist_max*sizeof(int) + tilesize*sizeof(float3)) + 
-    nthread*sizeof(int);
-  if (get_cuda_arch() < 300) shmem_size += nthread*sizeof(int);
-  shmem_size += (nthread/warpsize)*n_int_zone_max*sizeof(int2)
-  //std::cout << "CudaNeighborList::build, shmem_size = " << shmem_size << std::endl;
-  build_kernel<tilesize, false>
-    <<< nblock, nthread, shmem_size, stream >>>
-    (max_nexcl, cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom, loc2glo, glo2loc,
-     atom_excl_pos, atom_excl, xyzq, boxx, boxy, boxz, rcut, rcut*rcut, bb, excl_atom_heap,
-     tile_indj, tile_excl, ientry);
-  cudaCheck(cudaGetLastError());
-  */
-
-  /*
-  cudaCheck(cudaDeviceSynchronize());
-  get_NlistParam();
-
-  n_ientry = h_NlistParam->n_ientry;
-  n_tile = h_NlistParam->n_tile;
-
-  if (n_tile > n_tile_est) {
-    std::cout << "CudaNeighborListBuild::build, Limit blown: n_tile > n_tile_est"<< std::endl;
-    exit(1);
+  if (IvsI) {
+    build_kernel<tilesize, true>
+      <<< nblock, nthread, shmem_size, stream >>>
+      (maxNumExcl, cellStart, cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom,
+       loc2glo, glo2loc, atomExclPos, atomExcl,
+       xyzq, boxx, boxy, boxz, rcut, rcut*rcut, bb, excl_atom_heap,
+       tile_indj, tile_excl, ientry_raw, d_ZoneParam, d_NlistParam);
+  } else {
+    build_kernel<tilesize, false>
+      <<< nblock, nthread, shmem_size, stream >>>
+      (maxNumExcl, cellStart, cell_xyz_zone, col_ncellz, col_cell, cell_bz, cell_patom,
+       loc2glo, glo2loc, atomExclPos, atomExcl,
+       xyzq, boxx, boxy, boxz, rcut, rcut*rcut, bb, excl_atom_heap,
+       tile_indj, tile_excl, ientry_raw, d_ZoneParam, d_NlistParam);
   }
-
-  if (n_ientry > n_ientry_est) {
-    std::cout << "CudaNeighborListBuild::build, Limit blown: n_ientry > n_ientry_est"<< std::endl;
-    exit(1);
-  }
-  */
+  cudaCheck(cudaGetLastError());
 
   // Get variables (n_ientry & n_tile) and check for blown arrays
   copy_DtoH<NlistParam_t>(d_NlistParam, h_NlistParam, 1, stream);
@@ -1609,7 +1685,42 @@ void CudaNeighborListBuild<tilesize>::build(const int ncell, const int cellStart
     exit(1);
   }
 
-  //if (test) test_build(boxx, boxy, boxz, rcut, xyzq, loc2glo);
+#ifdef STRICT_MEMORY_REALLOC
+  reallocate<ientry_t>(&ientry, &ientry_len, n_ientry, 1.0f);
+#else
+  reallocate<ientry_t>(&ientry, &ientry_len, n_ientry, 1.4f);
+#endif
+
+  // Sort ientry according to the number of j-entries
+  nthread = min(((n_ientry-1)/warpsize + 1)*warpsize, get_max_nthread());
+  nblock = 1;
+  shmem_size = n_ientry*sizeof(int2);
+  if (shmem_size < get_max_shmem_size()) {
+    sort_ientry_kernel<<< nblock, nthread, shmem_size, stream >>>(n_ientry, ientry_raw, ientry);
+  } else {
+    std::cerr << "CudaNeighborListBuild::build, proper sorting class needed!"
+	      << std::endl;
+    exit(1);
+  }
+  cudaCheck(cudaGetLastError());
+
+  //copy_DtoD<ientry_t>(ientry_raw, ientry, n_ientry, stream);
+
+  /*
+  nthread = 512;
+  nblock = (n_ientry-1)/nthread + 1;
+  setup_ientry_sort_kernel<<< nblock, nthread, 0, stream >>>(n_ientry, ientry_raw,
+							     ientry_sortkey, ientry_sortval);
+  cudaCheck(cudaGetLastError());
+
+  thrust::device_ptr<int> key_ptr(ientry_sortkey);
+  thrust::device_ptr<int> val_ptr(ientry_sortval);
+  thrust::sort_by_key(key_ptr, key_ptr + n_ientry, val_ptr);
+  //thrust::sort_by_key(ientry_sortkey, ientry_sortkey + n_ientry, ientry_sortval);
+
+  reorder_ientry_kernel<<< nblock, nthread, 0, stream >>>(n_ientry, ientry_raw, ientry_sortval, ientry);
+  cudaCheck(cudaGetLastError());
+  */
 }
 
 struct tileinfo_t {

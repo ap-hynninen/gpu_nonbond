@@ -394,6 +394,9 @@ __global__ void build_atom_pcell_kernel(const int* __restrict__ cell_patom,
 // Each thread block sorts a single z column.
 // Each z-column can only have up to blockDim.x number of atoms
 //
+// NOTE: Current version only works when n <= blockDim.x (the loops are useless)
+//       By having xyzq_in/xyzq_out arrays we can easily extend to the general case
+//
 struct keyval_t {
   float key;
   int val;
@@ -807,9 +810,9 @@ void CudaNeighborListSort::sort_core(const int* zone_patom, const int cellStart,
     nblock += h_ZoneParam[izone].ncellx*h_ZoneParam[izone].ncelly;
     max_n = max(max_n, h_ZoneParam[izone].ncellz_max*tilesize);
   }
-  nthread = min(max_n, get_max_nthread());
+  nthread = max_n;
   shmem_size = max_n*sizeof(keyval_t);
-  if (shmem_size < get_max_shmem_size()) {
+  if (shmem_size < get_max_shmem_size() && nthread < get_max_nthread()) {
     sort_z_column_kernel<<< nblock, nthread, shmem_size, stream >>>
       (col_patom, xyzq_sorted+atomStart, ind_sorted+atomStart);
     cudaCheck(cudaGetLastError());

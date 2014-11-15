@@ -59,6 +59,11 @@ private:
   int tile_excl_len;
   tile_excl_t<tilesize> *tile_excl;
 
+  // Raw un-sorted ientry
+  int ientry_raw_len;
+  ientry_t *ientry_raw;
+
+  // Final sorted ientry
   int ientry_len;
   ientry_t *ientry;
 

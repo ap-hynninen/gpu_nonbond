@@ -353,8 +353,10 @@ __global__ void read_CUDA_ARCH_kernel(int *cuda_arch) {
     *cuda_arch = 300;
 #elif __CUDA_ARCH__ == 350
     *cuda_arch = 350;
+#elif __CUDA_ARCH__ == 500
+    *cuda_arch = 500;
 #else
-    *cuda_arch = 350;
+    *cuda_arch = 500;
 #endif
 
   }
@@ -376,8 +378,9 @@ int read_CUDA_ARCH() {
     std::cout << "Possible cause: Device compute capability is less than the compute capability the code was compiled for." << std::endl;
     exit(1);	
   }
+  cudaCheck(cudaDeviceSynchronize());
 
-  copy_DtoH<int>(d_cuda_arch, &h_cuda_arch, 1);
+  copy_DtoH_sync<int>(d_cuda_arch, &h_cuda_arch, 1);
 
   deallocate<int>(&d_cuda_arch);
 
