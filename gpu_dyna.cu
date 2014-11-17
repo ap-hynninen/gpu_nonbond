@@ -14,11 +14,12 @@
 
 int numnode=1, mynode=0;
 
-void test(const int nstep, const bool cudaAware, const bool use_pure_recip);
+void test(const int nstep, const bool use_holoconst, const bool cudaAware, const bool use_pure_recip);
 
 int main(int argc, char *argv[]) {
 
   int nstep = 1;
+  bool use_holoconst = false;
   bool cudaAware = false;
   bool use_pure_recip = false;
   std::vector<int> devices;
@@ -33,6 +34,21 @@ int main(int argc, char *argv[]) {
 	break;
       }
       sscanf(argv[iarg],"%d",&nstep);
+      iarg++;
+    } else if (strcmp(argv[iarg],"-holoconst")==0) {
+      iarg++;
+      if (iarg == argc) {
+	arg_ok = false;
+	break;
+      }
+      if (strcmp(argv[iarg],"yes")==0) {
+	use_holoconst = true;
+      } else if (strcmp(argv[iarg],"no")==0) {
+	use_holoconst = false;
+      } else {
+	arg_ok = false;
+	break;
+      }
       iarg++;
     } else if (strcmp(argv[iarg],"-cuda-aware")==0) {
       iarg++;
@@ -118,11 +134,12 @@ int main(int argc, char *argv[]) {
   int ret_val = 0;
 
   if (arg_ok) {
-    test(nstep, cudaAware, use_pure_recip);
+    test(nstep, use_holoconst, cudaAware, use_pure_recip);
   } else {
     std::cout << "Usage: mpirun -n X gpu_dyna OPTIONS" << std::endl;
     std::cout << "OPTIONS:" << std::endl;
     std::cout << "-nstep N" << std::endl;
+    std::cout << "-holoconst <yes|no> " << std::endl;
     std::cout << "-cuda-aware <yes|no> " << std::endl;
     std::cout << "-use-pure-recip <yes|no>" << std::endl;
     std::cout << "-devices 0 1 2 3" << std::endl;
@@ -348,7 +365,7 @@ void check_holoconst(const double* x, const double* y, const double* z,
 //
 // Test the code using data in test_data/ -directory
 //
-void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
+void test(const int nstep, const bool use_holoconst, const bool cudaAware, const bool use_pure_recip) {
 
   // Settings for the data:
   const double boxx = 62.23;
@@ -529,8 +546,6 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
     const int ntrip_type = 3;
     const int nquad_type = 2;
 
-    const bool holoconst_on = true;
-
     double *h_pair_constr = new double[npair_type];
     double *h_pair_mass = new double[npair_type*2];
     load_constr_mass(1, 2, "test_data/pair_types.txt", npair_type, h_pair_constr, h_pair_mass);
@@ -554,7 +569,7 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
     load_vec<int>(3, "test_data/solvent_ind.txt", nsolvent, (int *)h_solvent_ind);
 
     HoloConst* holoconst = NULL;
-    if (holoconst_on) {
+    if (use_holoconst) {
       holoconst = new HoloConst;;
       holoconst->setup_solvent_parameters(mO, mH, rOHsq, rHHsq);
       holoconst->setup_types(npair_type, h_pair_constr, h_pair_mass,
@@ -594,7 +609,7 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
     domdecGroups.insertGroup(IMDIHE, imdiheGroup, h_imdihe);
     domdecGroups.insertGroup(IN14, in14Group, h_in14);
     domdecGroups.insertGroup(EX14, ex14Group, h_ex14);
-    if (holoconst_on) {
+    if (use_holoconst) {
       domdecGroups.insertGroup(PAIR,    pairGroup, h_pair_indtype);
       domdecGroups.insertGroup(TRIP,    tripGroup, h_trip_indtype);
       domdecGroups.insertGroup(QUAD,    quadGroup, h_quad_indtype);
@@ -654,7 +669,7 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
     leapfrog.set_coord_buffers(x, y, z);
     leapfrog.set_step_buffers(dx, dy, dz);
     leapfrog.set_force_buffers(fx, fy, fz);
-    if (holoconst_on) {
+    if (use_holoconst) {
       leapfrog.set_timestep(2.0);
     } else {
       leapfrog.set_timestep(1.0);
@@ -665,12 +680,12 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
 
     if (mynode == 0) {
       if (nstep == 100 || nstep == 20 || nstep == 10 || nstep == 2 
-	  || (nstep == 1 && !holoconst_on)) {
+	  || (nstep == 1 && !use_holoconst)) {
 	double* fxref = new double[ncoord];
 	double* fyref = new double[ncoord];
 	double* fzref = new double[ncoord];
 	char filename[256];
-	if (nstep == 100 && holoconst_on) {
+	if (nstep == 100 && use_holoconst) {
 	  sprintf(filename,"test_data/force_dyn%d_holoconst.txt",nstep);
 	} else {
 	  sprintf(filename,"test_data/force_dyn%d.txt",nstep);
@@ -705,7 +720,7 @@ void test(const int nstep, const bool cudaAware, const bool use_pure_recip) {
       write_xyz(ncoord, dx, dy, dz, "step.txt");
       write_xyz(ncoord, fx, fy, fz, "force.txt");
 
-      if (nstep != 1 && holoconst_on) {
+      if (nstep != 1 && use_holoconst) {
 	check_holoconst(x, y, z,
 			npair, h_pair_indtype, h_pair_constr, 
 			ntrip, h_trip_indtype, h_trip_constr,

@@ -274,7 +274,6 @@ void CudaLeapfrogIntegrator::pre_calc_force() {
     prev_coord.realloc(ncoord_tot);
     step.realloc(ncoord);
     reallocate<float>(&mass, &mass_len, ncoord);
-    force.realloc(ncoord_tot);
   }
 }
 
