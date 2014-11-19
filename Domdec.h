@@ -216,6 +216,7 @@ protected:
   // Returns the node index for box (ix, iy, iz)
   // NOTE: deals correctly with periodic boundary conditions
   int get_nodeind_pbc(const int ix, const int iy, const int iz);
+  int get_nodeind_pbc(const int ix, const int iy, const int iz) const;
 
   //
   // Builds global loc2glo mapping:

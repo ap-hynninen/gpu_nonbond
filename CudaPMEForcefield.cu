@@ -205,7 +205,7 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
   if (heuristic_check(coord, stream)) {
     neighborlist_updated = true;
 
-    fprintf(stderr,"Building neighborlist %d\n",nstep);
+    if (domdec.get_mynode() == 0) fprintf(stderr,"Building neighborlist %d\n",nstep);
 
     // Update homezone coordinates (coord) and step vector (prev_step)
     // NOTE: Builds domdec.loc2glo
@@ -213,14 +213,14 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
 
     // ... (here we can sort & build neighborlist for local coordinates) ...
 
-    ref_coord.realloc(domdec.get_ncoord());
-
     // Communicate coordinates
     // NOTE: Builds rest of domdec.loc2glo and domdec.xyz_shift
     domdec.comm_coord(coord, true, stream);
 
     fprintf(stderr,"%d: domdec.get_ncoord()=%d domdec.get_ncoord_tot()=%d\n",
 	    domdec.get_mynode(),domdec.get_ncoord(),domdec.get_ncoord_tot());
+
+    ref_coord.realloc(domdec.get_ncoord_tot());
 
     // Re-allocate (xyzq, xyzq_copy)
     xyzq.realloc(domdec.get_ncoord_tot());
@@ -287,13 +287,19 @@ void CudaPMEForcefield::pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_s
     cudaCheck(cudaEventRecord(setup_14_done_event, stream));
 
     // Re-order prev_step vector, using ref_coord as temporary storage
-    domdec.reorder_homezone_coord(prev_step, ref_coord, nlist.get_ind_sorted(), stream);
+    // NOTE: We only re-order up to homezone
+    domdec.reorder_coord(domdec.get_ncoord(), prev_step, ref_coord, nlist.get_ind_sorted(), stream);
 
     // Re-order coordinates (coord), using ref_coord as temporary storage
-    domdec.reorder_homezone_coord(coord, ref_coord, nlist.get_ind_sorted(), stream);
+    // NOTE: We re-order all coordinates, homezone+import. This is done so that coord is
+    //       correctly set up e.g. for constraint communication
+    domdec.reorder_coord(domdec.get_ncoord_tot(), coord, ref_coord, nlist.get_ind_sorted(), stream);
+
+    // NOTE: Now ref_coord contains the correct current coordinates that are then used in
+    //       the heuristic check in the next step
 
     // Update and re-order communication buffers
-    domdec.comm_update(nlist.get_glo2loc(), coord, stream);
+    domdec.comm_update(nlist.get_glo2loc(), stream);
     //domdec.test_comm_coord(nlist.get_glo2loc(), coord);
 
   } else {
@@ -524,9 +530,18 @@ void CudaPMEForcefield::post_calc(const float *global_mass, float *mass, HoloCon
 			    domdecGroups.getGroupList<dihe_t>(QUAD),
 			    domdecGroups.getNumGroupTable(SOLVENT), domdecGroups.getGroupTable(SOLVENT),
 			    domdecGroups.getGroupList<solvent_t>(SOLVENT), stream);
+      domdec.constCommSetup(domdecGroups.getNeighPos(), domdecGroups.getCoordInd(),
+			    nlist.get_glo2loc(), stream);
     }
   }
 
+}
+
+//
+// Communicate constraint coordinates in direction "dir" =-1 or +1
+//
+void CudaPMEForcefield::constComm(const int dir, cudaXYZ<double>& coord, cudaStream_t stream) {
+  domdec.constCommDo(dir, coord, stream);
 }
 
 //
@@ -551,8 +566,8 @@ void CudaPMEForcefield::assignCoordToNodes(hostXYZ<double>& coord, std::vector<i
 // Returns true if update is needed
 //
 bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double>& coord, cudaStream_t stream) {
-  assert(ref_coord.size() == domdec.get_ncoord());
-  assert(coord.size() == domdec.get_ncoord_tot());
+  assert(domdec.get_ncoord() <= ref_coord.size());
+  assert(domdec.get_ncoord() <= coord.size());
   assert(warpsize <= 32);
 
   double rsq_limit_dbl = fabs(domdec.get_rnl() - roff)/2.0;

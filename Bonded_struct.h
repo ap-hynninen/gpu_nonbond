@@ -6,6 +6,7 @@
 #include <vector>
 
 enum {BOND, UREYB, ANGLE, DIHE, IMDIHE, CMAP, IN14, EX14, PAIR, TRIP, QUAD, SOLVENT};
+const int CONST_START = PAIR;
 
 struct bond_t {
   int i, j, itype;

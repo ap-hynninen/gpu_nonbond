@@ -20,6 +20,8 @@ public:
 			 cudaStream_t stream)=0;
   virtual void stop_calc(cudaStream_t stream)=0;
 
+  virtual void constComm(const int dir, cudaXYZ<double>& coord, cudaStream_t stream)=0;
+
   virtual void assignCoordToNodes(hostXYZ<double>& coord, std::vector<int>& h_loc2glo)=0;
 
   virtual void get_restart_data(cudaXYZ<double>& coord, cudaXYZ<double>& step,

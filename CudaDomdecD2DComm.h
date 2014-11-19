@@ -79,7 +79,7 @@ class CudaDomdecD2DComm : public DomdecD2DComm {
 
   void comm_coord(cudaXYZ<double>& coord, thrust::device_vector<int>& loc2glo,
 		  const bool update, cudaStream_t stream=0);
-  void comm_update(int* glo2loc, cudaXYZ<double>& coord, cudaStream_t stream=0);
+  void comm_update(int* glo2loc, cudaStream_t stream=0);
   void comm_force(Force<long long int>& force, cudaStream_t stream=0);
 
   void test_comm_coord(const int* glo2loc, cudaXYZ<double>& coord);

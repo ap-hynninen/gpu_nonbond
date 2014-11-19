@@ -34,7 +34,32 @@ class CudaDomdecGroups {
 
   // Storage vector used for registering groups
   std::vector< std::vector<int> > regGroups;
-  
+
+  // True for Group structures that also contain constraint groups
+  bool hasConstGroups;
+
+  // Start of constraint groups
+  int typeConstStart;
+
+  int* constTable;
+  int* constTablePos;
+  int* h_constTablePos;
+
+  //int** nodeTable;
+  //int* nodeTablePos;
+
+  // NOTE: this contains the device pointers. Only kept for deallocation
+  //int** h_nodeTable;
+
+  int coordTmpLen;
+  int* coordTmp;
+
+  int coordIndLen;
+  int* coordInd;
+
+  int* neighPos;
+  int* h_neighPos;
+
  public:
 
   CudaDomdecGroups(const CudaDomdec& domdec);
@@ -107,6 +132,9 @@ class CudaDomdecGroups {
     if (it == atomGroups.end()) return 0;
     return it->second->get_numTable();
   }
+
+  const int* getNeighPos() {return h_neighPos;}
+  int* getCoordInd() {return coordInd;}
 
 };
 

@@ -170,6 +170,8 @@ public:
     recipComm.send_stop();
   }
 
+  void constComm(const int dir, cudaXYZ<double>& coord, cudaStream_t stream);
+
   void assignCoordToNodes(hostXYZ<double>& coord, std::vector<int>& h_loc2glo);
 
   void get_restart_data(cudaXYZ<double>& coord, cudaXYZ<double>& step,

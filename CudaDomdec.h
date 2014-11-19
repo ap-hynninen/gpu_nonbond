@@ -7,6 +7,7 @@
 #include "CudaDomdecHomezone.h"
 #include "CudaMPI.h"
 #include "CudaDomdecD2DComm.h"
+#include "CudaDomdecConstComm.h"
 
 //class CudaDomdecBonded;
 
@@ -32,11 +33,17 @@ class CudaDomdec : public Domdec {
   int mass_tmp_len;
   float *mass_tmp;
 
+  // Reference to Cuda MPI object
+  CudaMPI& cudaMPI;
+
   // Domain decomposition home zone
   CudaDomdecHomezone homezone;
 
   // Domain decomposition direct-direct communication
   CudaDomdecD2DComm D2Dcomm;
+
+  // Domain decomposition constraint communicator
+  CudaDomdecConstComm *constComm;
 
   // Error flag for calc_xyz_shift. Used for detecting atoms that are out of bounds
   int* error_flag;
@@ -67,17 +74,21 @@ class CudaDomdec : public Domdec {
   float3* get_xyz_shift() {return xyz_shift0;}
   const float3* get_xyz_shift() const {return xyz_shift0;}
 
+  void constCommSetup(const int* neighPos, int* coordInd, const int* glo2loc,
+		      cudaStream_t stream);
+  void constCommDo(const int dir, cudaXYZ<double>& coord, cudaStream_t stream);
+
   void build_homezone(hostXYZ<double>& coord);
   void update_homezone(cudaXYZ<double>& coord, cudaXYZ<double>& coord2, cudaStream_t stream=0);
 
   void comm_coord(cudaXYZ<double>& coord, const bool update, cudaStream_t stream=0);
-  void comm_update(int* glo2loc, cudaXYZ<double>& coord, cudaStream_t stream=0);
+  void comm_update(int* glo2loc, cudaStream_t stream=0);
   void comm_force(Force<long long int>& force, cudaStream_t stream=0);
 
   void test_comm_coord(const int* glo2loc, cudaXYZ<double>& coord);
 
-  void reorder_homezone_coord(cudaXYZ<double>& coord_src, cudaXYZ<double>& coord_dst,
-			      const int* ind_sorted, cudaStream_t stream=0);
+  void reorder_coord(const int n, cudaXYZ<double>& coord_src, cudaXYZ<double>& coord_dst,
+		     const int* ind_sorted, cudaStream_t stream=0);
 
   void reorder_xyz_shift(const int* ind_sorted, cudaStream_t stream=0);
 

@@ -332,13 +332,50 @@ void CudaLeapfrogIntegrator::calc_temperature() {
 //
 // Do holonomic constraints
 //
+// Compute x' = x + dx
+// Send x' to left
+// Compute holoconst(x,x'), this gives us x'->x''.
+// Define x'' = x + dx'
+// Send x'' to right
+// Compute dx' = x'' - x
+//
 void CudaLeapfrogIntegrator::do_holoconst() {
   if (holoconst != NULL) {
+
     // prev_coord = coord + step
+    // NOTE: add_coord and sub_coord only operate on the homebox coordinates (i < ncoord)
     add_coord(coord, step, prev_coord);
+
+    // Send prev_coord to left
+    if (forcefield != NULL) {
+      CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
+      p->constComm(-1, prev_coord, stream);
+    }
+
     // holonomic constraint, result in prev_coord
     holoconst->apply(coord, prev_coord, stream);
-    // step = prev_coord - coord
+
+    // Send prev_coord to right
+    if (forcefield != NULL) {
+      CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
+      p->constComm(+1, prev_coord, stream);
+    }
+
+    /*
+    cudaCheck(cudaDeviceSynchronize());
+    if (ncoord == 11844) {
+      coord.save("coord0.txt");
+      prev_coord.save("prev_coord0.txt");
+    } else if (ncoord == 11714) {
+      coord.save("coord1.txt");
+      prev_coord.save("prev_coord1.txt");
+    } else {
+      coord.save("coordX.txt");
+      prev_coord.save("prev_coordX.txt");
+    }
+    */
+
+    // step = -coord + prev_coord
     sub_coord(prev_coord, coord, step);
   }
 }

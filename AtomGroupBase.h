@@ -51,6 +51,8 @@ private:
 
   int get_type() {return type;}
 
+  int get_size() {return size;}
+
   int* get_table() {return table;}
   int get_numTable() {return numTable;}
   int get_numGroupList() {return numGroupList;}

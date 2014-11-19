@@ -486,7 +486,7 @@ void CudaDomdecD2DComm::test_comm_coord(const int* glo2loc, cudaXYZ<double>& coo
 // Called after neighborlist update has re-sorted coordinates
 // glo2loc = global -> local mapping
 //
-void CudaDomdecD2DComm::comm_update(int* glo2loc, cudaXYZ<double>& coord, cudaStream_t stream) {
+void CudaDomdecD2DComm::comm_update(int* glo2loc, cudaStream_t stream) {
   thrust::device_ptr<int> glo2loc_ptr(glo2loc);
 
   if (nz_comm > 0) {
