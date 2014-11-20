@@ -139,7 +139,11 @@ MPI_CFLAGS = -I${MPIROOT}/include
 ifeq ($(OS),linux)
 CUDA_LFLAGS = -L$(CUDAROOT)/lib64
 else
+ifeq ($(OS),titan)
+CUDA_LFLAGS = -L$(CUDAROOT)/lib64
+else
 CUDA_LFLAGS = -L$(CUDAROOT)/lib
+endif
 endif
 CUDA_LFLAGS += -lcudart -lcufft -lnvToolsExt
 
