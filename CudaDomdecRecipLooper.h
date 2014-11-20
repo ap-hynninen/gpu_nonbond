@@ -23,7 +23,7 @@ class CudaDomdecRecipLooper {
  public:
  CudaDomdecRecipLooper(CudaDomdecRecip& recip, CudaDomdecRecipComm& recipComm) : 
   recip(recip), recipComm(recipComm), force_len(0), force(NULL) {
-   cudaCheck(cudaStreamCreate(&stream));
+   cudaCheck(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
    recip.set_stream(stream);
  }
 

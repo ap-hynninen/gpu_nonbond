@@ -391,9 +391,20 @@ int read_CUDA_ARCH() {
 static int gpu_ind = -1;
 static cudaDeviceProp gpu_prop;
 static int cuda_arch;
+static int high_priority;
+static int low_priority;
 
 bool gpuDevCompare (std::pair<int, cudaDeviceProp> dev1, std::pair<int, cudaDeviceProp> dev2) {
-  return (dev1.second.major*100+dev1.second.minor) >= (dev2.second.major*100+dev2.second.minor);
+  int dev1cc = dev1.second.major*100+dev1.second.minor;
+  int dev2cc = dev2.second.major*100+dev2.second.minor;
+  if (dev1cc == dev2cc) {
+    // Same compute capacity, choose by the number of SMs
+    int dev1sm = dev1.second.multiProcessorCount;
+    int dev2sm = dev2.second.multiProcessorCount;
+    return (dev1sm >= dev2sm);
+  } else {
+    return (dev1cc >= dev2cc);
+  }
 }
 
 //
@@ -464,6 +475,10 @@ void start_gpu(int numnode, int mynode, std::vector<int>& devices) {
   
   cudaCheck(cudaGetDeviceProperties(&gpu_prop, gpu_ind));
 
+  if (has_stream_priorities()) {
+    cudaCheck(cudaDeviceGetStreamPriorityRange(&low_priority, &high_priority));
+  }
+
   if (gpu_prop.major < 2) {
     std::cout << "CUDA device(s) must have compute capability 2.0 or higher" << std::endl;
     exit(1);
@@ -510,6 +525,18 @@ int3 get_max_nblock() {
     max_nblock.z = min(65535, max_nblock.z);
   }
   return max_nblock;
+}
+
+bool has_stream_priorities() {
+  return (bool)gpu_prop.streamPrioritiesSupported;
+}
+
+int low_stream_priority() {
+  return low_priority;
+}
+
+int high_stream_priority() {
+  return high_priority;
 }
 
 int get_max_nthread() {

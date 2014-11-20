@@ -69,7 +69,6 @@ private:
   void swap_coord();
   void take_step();
   void calc_step();
-  void pre_calc_force();
   void calc_force(const bool calc_energy, const bool calc_virial);
   void post_calc_force();
   void stop_calc_force();

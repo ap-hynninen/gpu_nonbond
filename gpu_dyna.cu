@@ -669,12 +669,17 @@ void test(const int nstep, const bool use_holoconst, const bool cudaAware, const
     leapfrog.set_coord_buffers(x, y, z);
     leapfrog.set_step_buffers(dx, dy, dz);
     leapfrog.set_force_buffers(fx, fy, fz);
-    if (use_holoconst) {
-      leapfrog.set_timestep(2.0);
-    } else {
-      leapfrog.set_timestep(1.0);
-    }
+    double timestep = use_holoconst ? 2.0 : 1.0;
+    leapfrog.set_timestep(timestep);
+    MPICheck(MPI_Barrier( MPI_COMM_WORLD));
+    double begin = MPI_Wtime();
     leapfrog.run(nstep);
+    double end = MPI_Wtime();
+    double time_spent = end - begin;
+    if (mynode == 0) {
+      std::cout << "time_spent (sec) = " << time_spent << " ns/day = "
+		<< (double)nstep*timestep*0.000001/(time_spent/(double)(60*60*24)) << std::endl;
+    }
 
     cudaCheck(cudaDeviceSynchronize());
 

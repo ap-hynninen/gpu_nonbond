@@ -1696,7 +1696,8 @@ void CudaNeighborListBuild<tilesize>::build(const int ncell, const int cellStart
   nblock = 1;
   shmem_size = n_ientry*sizeof(int2);
   if (shmem_size < get_max_shmem_size()) {
-    sort_ientry_kernel<<< nblock, nthread, shmem_size, stream >>>(n_ientry, ientry_raw, ientry);
+    sort_ientry_kernel<<< nblock, nthread, shmem_size, stream >>>
+      (n_ientry, ientry_raw, ientry);
   } else {
     std::cerr << "CudaNeighborListBuild::build, proper sorting class needed!"
 	      << std::endl;

@@ -303,12 +303,12 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	// Pack in coordinates to sendbuf[]
 	packXYZ(coord.x(), coord.y(), coord.z(),
 		thrust::raw_pointer_cast(z_send_loc0.at(i).data()), z_nsend.at(i),
-		(double *)&sendbuf[pos], 0);
+		(double *)&sendbuf[pos], stream);
       } else {
 	// Pack in coordinates to sendbuf[]
 	packXYZ(coord.x(), coord.y(), coord.z(),
 		thrust::raw_pointer_cast(z_send_loc.data())+z_psend.at(i), z_nsend.at(i),
-		(double *)&sendbuf[z_psend.at(i)*3*sizeof(double)], 0);
+		(double *)&sendbuf[z_psend.at(i)*3*sizeof(double)], stream);
       }
 
       pos += z_nsend.at(i)*3*sizeof(double);
@@ -354,7 +354,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 
     // Wait until packing is done
 #ifdef USE_CUDA_KERNELS
-    cudaCheck(cudaStreamSynchronize(0));
+    cudaCheck(cudaStreamSynchronize(stream));
 #else
     cudaCheck(cudaDeviceSynchronize());
 #endif
@@ -375,7 +375,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 			      z_recv_node.at(i), DATA_TAG, MPI_STATUS_IGNORE,
 			      &h_recvbuf[precvByte.at(i)]));
       }
-    }    
+    }
 
     //----------------------------------------------------
     // Unpack data from +z-direction into correct arrays
@@ -396,13 +396,13 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 	unpackXYZ((double *)&recvbuf[src_pos], z_nrecv.at(i),
 		  coord.x()+domdec.get_zone_pcoord(Domdec::FZ)+z_precv.at(i),
 		  coord.y()+domdec.get_zone_pcoord(Domdec::FZ)+z_precv.at(i),
-		  coord.z()+domdec.get_zone_pcoord(Domdec::FZ)+z_precv.at(i), 0);
+		  coord.z()+domdec.get_zone_pcoord(Domdec::FZ)+z_precv.at(i), stream);
 
       } else {
 	// Unpack coordinates
 	// format = X[nrecv.at(i) x double] | Y[nrecv.at(i) x double] | Z[nrecv.at(i) x double]
 	unpackXYZ((double *)&recvbuf[src_pos], z_nrecv.at(i),
-		  coord.x(), coord.y(), coord.z(), 0,
+		  coord.x(), coord.y(), coord.z(), stream,
 		  thrust::raw_pointer_cast(z_recv_loc.data())+z_precv.at(i));
       }
       src_pos += z_nrecv.at(i)*3*sizeof(double);
@@ -418,7 +418,7 @@ void CudaDomdecD2DComm::comm_coord(cudaXYZ<double>& coord, thrust::device_vector
 
     // Wait until unpacking is done
 #ifdef USE_CUDA_KERNELS
-    cudaCheck(cudaStreamSynchronize(0));
+    cudaCheck(cudaStreamSynchronize(stream));
 #else
     cudaCheck(cudaDeviceSynchronize());
 #endif

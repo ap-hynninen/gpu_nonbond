@@ -161,8 +161,8 @@ public:
   ~CudaPMEForcefield();
 
 
-  void pre_calc(cudaXYZ<double>& coord, cudaXYZ<double>& prev_step, cudaStream_t stream);
-  void calc(const bool calc_energy, const bool calc_virial, Force<long long int>& force,
+  void calc(const bool calc_energy, const bool calc_virial,
+	    cudaXYZ<double>& coord, cudaXYZ<double>& prev_step, Force<long long int>& force,
 	    cudaStream_t stream);
   void post_calc(const float *global_mass, float *mass, HoloConst *holoconst, cudaStream_t stream);
   void stop_calc(cudaStream_t stream) {

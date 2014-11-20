@@ -125,7 +125,7 @@ __global__ void calc_kine_kernel(const int ncoord,
 //
 CudaLeapfrogIntegrator::CudaLeapfrogIntegrator(HoloConst *holoconst) : holoconst(holoconst) {
   // Create stream & events
-  cudaCheck(cudaStreamCreate(&stream));
+  cudaCheck(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
   cudaCheck(cudaEventCreate(&copy_rms_work_done_event));
   cudaCheck(cudaEventCreate(&copy_temp_ekin_done_event));
   cudaCheck(cudaEventCreate(&done_integrate_event));
@@ -230,7 +230,6 @@ void CudaLeapfrogIntegrator::swap_coord() {
 void CudaLeapfrogIntegrator::take_step() {
 
   add_coord(prev_coord, prev_step, coord);
-
   cudaCheck(cudaEventRecord(done_integrate_event, stream));
 }
 
@@ -253,19 +252,16 @@ void CudaLeapfrogIntegrator::calc_step() {
     (ncoord, force.stride(), dtsq, (double *)force.xyz(), 
      prev_step.x(), prev_step.y(), prev_step.z(), mass,
      step.x(), step.y(), step.z());
-  
   cudaCheck(cudaGetLastError());
 }
 
 //
 // Calculate forces
 //
-void CudaLeapfrogIntegrator::pre_calc_force() {
+void CudaLeapfrogIntegrator::calc_force(const bool calc_energy, const bool calc_virial) {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    //cudaCheck(cudaStreamWaitEvent(stream, done_integrate_event, 0));
-    //cudaCheck(cudaStreamSynchronize(stream));
-    p->pre_calc(coord, prev_step, stream);
+    p->calc(calc_energy, calc_virial, coord, prev_step, force, stream);
     // Get (possibly) new ncoord and ncoord_tot
     // NOTE: these change with neighborlist update
     ncoord = prev_step.size();
@@ -274,13 +270,6 @@ void CudaLeapfrogIntegrator::pre_calc_force() {
     prev_coord.realloc(ncoord_tot);
     step.realloc(ncoord);
     reallocate<float>(&mass, &mass_len, ncoord);
-  }
-}
-
-void CudaLeapfrogIntegrator::calc_force(const bool calc_energy, const bool calc_virial) {
-  if (forcefield != NULL) {
-    CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    p->calc(calc_energy, calc_virial, force, stream);
   }
 }
 
@@ -341,7 +330,6 @@ void CudaLeapfrogIntegrator::calc_temperature() {
 //
 void CudaLeapfrogIntegrator::do_holoconst() {
   if (holoconst != NULL) {
-
     // prev_coord = coord + step
     // NOTE: add_coord and sub_coord only operate on the homebox coordinates (i < ncoord)
     add_coord(coord, step, prev_coord);
@@ -351,7 +339,7 @@ void CudaLeapfrogIntegrator::do_holoconst() {
       CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
       p->constComm(-1, prev_coord, stream);
     }
-
+    
     // holonomic constraint, result in prev_coord
     holoconst->apply(coord, prev_coord, stream);
 
@@ -360,20 +348,6 @@ void CudaLeapfrogIntegrator::do_holoconst() {
       CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
       p->constComm(+1, prev_coord, stream);
     }
-
-    /*
-    cudaCheck(cudaDeviceSynchronize());
-    if (ncoord == 11844) {
-      coord.save("coord0.txt");
-      prev_coord.save("prev_coord0.txt");
-    } else if (ncoord == 11714) {
-      coord.save("coord1.txt");
-      prev_coord.save("prev_coord1.txt");
-    } else {
-      coord.save("coordX.txt");
-      prev_coord.save("prev_coordX.txt");
-    }
-    */
 
     // step = -coord + prev_coord
     sub_coord(prev_coord, coord, step);
