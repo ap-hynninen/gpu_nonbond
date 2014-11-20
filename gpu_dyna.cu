@@ -110,7 +110,7 @@ int main(int argc, char *argv[]) {
     }
 
     std::cout << "local_rank=" << local_rank << " local_size=" << local_size << std::endl;
-    if (local_rank >= 0 && local_size > 1) {
+    if (local_rank >= 0 && local_size > 0) {
       start_gpu(local_size, local_rank, devices);
       start_mpi(argc, argv, numnode, mynode);
     } else {
