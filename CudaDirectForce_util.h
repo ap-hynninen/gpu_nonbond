@@ -145,6 +145,42 @@ float pair_vdw_force(const float r2, const float r, const float rinv, const floa
       pot_vdw = (double)(one_twelve*c12*(A12*rinv6_B12_sq + C12) -
 			 one_six*c6*(A6*rinv3_B6_sq + C6));
     }
+  } else if (vdw_model == VDW_VGSH) {
+    float rinv3 = rinv*rinv2;
+    float rinv6 = rinv3*rinv3;
+    float rinv12 = rinv6*rinv6;
+    float rinv7 = rinv*rinv6;
+    float rinv13 = rinv*rinv6;
+    float r_ron = (r2 > d_setup.ron2) ? (r-d_setup.ron) : 0.0f;
+    float r_ron2 = r_ron*r_ron;
+
+    fij_vdw = c6*(6.0f*rinv7 + (d_setup.ga6 + d_setup.gb6*r_ron)*r_ron2 ) -
+      c12*(12.0f*rinv13 + (d_setup.ga12 + d_setup.gb12*r_ron)*r_ron2 );
+
+    if (calc_energy) {
+      const float one_third = (float)(1.0/3.0);
+      float r_ron3 = r_ron*r_ron2;
+      pot_vdw = (double)(c6*(-rinv6 + (one_third*d_setup.ga6 + 0.25f*d_setup.gb6*r_ron)*r_ron3 
+			     + d_setup.gc6) +
+			 c12*(rinv12 - (one_third*d_setup.ga12 + 0.25f*d_setup.gb12*r_ron)*r_ron3 
+			      - d_setup.gc12));
+    }
+    /*
+    if (r > ctonnb) then
+             d = 6.0f/r**7 + GA6*(r-ctonnb)**2 + GB6*(r-ctonnb)**3
+             d = -(12.0f/r**13 + GA12*(r-ctonnb)**2 + GB12*(r-ctonnb)**3)
+
+             e = -r**(-6) + (GA6*(r-ctonnb)**3)/3.0 + (GB6*(r-ctonnb)**4)/4.0 + GC6
+             e = r**(-12) - (GA12*(r-ctonnb)**3)/3.0 - (GB12*(r-ctonnb)**4)/4.0 - GC12
+
+          else
+             d = 6.0f/r**7
+             d = -12.0f/r**13
+
+             e = - r**(-6) + GC6
+             e = r**(-12) - GC12
+          endif
+    */
   } else if (vdw_model == NONE) {
     fij_vdw = 0.0f;
     if (calc_energy) {
@@ -194,6 +230,19 @@ float pair_elec_force(const float r2, const float r, const float rinv,
     }
     const float two_sqrtpi = 1.12837916709551f;    // 2/sqrt(pi)
     fij_elec = qq*(two_sqrtpi*d_setup.kappa*exp_val + erfc_val*rinv);
+  } else if (elec_model == GSHFT) {
+    // GROMACS style shift 1/r^2 force
+    // MGL special casing ctonnb=0 might speed this up
+    // NOTE THAT THIS EXPLICITLY ASSUMES ctonnb = 0
+    //ctofnb4 = ctofnb2*ctofnb2
+    //ctofnb5 = ctofnb4*ctofnb
+    float rinv2 = rinv*rinv;
+    fij_elec = qq*(rinv2 - (5.0f*d_setup.roffinv4 - 4.0f*d_setup.roffinv5*r)*r2 );
+    //d = -qscale*(one/r2 - 5.0*r2/ctofnb4 +4*r2*r/ctofnb5)
+    if (calc_energy) {
+      pot_elec = (double)(qq*(rinv - d_setup.GAconst + (d_setup.GBcoef*r - d_setup.roffinv5*r2)*r2));
+      //e = qscale*(one/r - GAconst + r*r2*GBcoef - r2*r2/ctofnb5)
+    }
   } else if (elec_model == NONE) {
     fij_elec = 0.0f;
     if (calc_energy) {

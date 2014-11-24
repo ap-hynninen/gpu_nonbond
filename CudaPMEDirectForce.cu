@@ -343,19 +343,20 @@ void CudaPMEDirectForce<AT, CT>::update_setup() {
 // Sets parameters for the nonbonded computation
 //
 template <typename AT, typename CT>
-void CudaPMEDirectForce<AT, CT>::setup(CT boxx, CT boxy, CT boxz, 
-				CT kappa,
-				CT roff, CT ron,
-				CT e14fac,
-				int vdw_model, int elec_model) {
+void CudaPMEDirectForce<AT, CT>::setup(double boxx, double boxy, double boxz, double kappa,
+				       double roff, double ron, double e14fac,
+				       int vdw_model, int elec_model) {
 
-  CT ron2 = ron*ron;
-  CT ron3 = ron*ron*ron;
-  CT ron6 = ron3*ron3;
+  double ron2 = ron*ron;
+  double ron3 = ron*ron*ron;
+  double ron6 = ron3*ron3;
 
-  CT roff2 = roff*roff;
-  CT roff3 = roff*roff*roff;
-  CT roff6 = roff3*roff3;
+  double roff2 = roff*roff;
+  double roff3 = roff*roff*roff;
+  double roff6 = roff3*roff3;
+  double roff8 = roff6*roff2;
+  double roff12 = roff6*roff6;
+  double roff14 = roff12*roff2;
 
   h_setup->boxx = boxx;
   h_setup->boxy = boxy;
@@ -364,13 +365,17 @@ void CudaPMEDirectForce<AT, CT>::setup(CT boxx, CT boxy, CT boxz,
   h_setup->kappa2 = kappa*kappa;
   h_setup->roff2 = roff2;
   h_setup->ron2 = ron2;
+  h_setup->ron = ron;
 
+  h_setup->roffinv3 =  ((CT)1.0)/roff3;
+  h_setup->roffinv4 = ((CT)1.0)/(roff2*roff2);
+  h_setup->roffinv5 = ((CT)1.0)/(roff*roff2*roff2);
   h_setup->roffinv6 = ((CT)1.0)/(roff2*roff2*roff2);
   h_setup->roffinv12 = h_setup->roffinv6*h_setup->roffinv6;
   h_setup->roffinv18 = h_setup->roffinv12*h_setup->roffinv6;
 
-  CT roff2_min_ron2 = roff2 - ron2;
-  h_setup->inv_roff2_ron2 = ((CT)1.0)/(roff2_min_ron2*roff2_min_ron2*roff2_min_ron2);
+  double roff2_min_ron2 = roff2 - ron2;
+  h_setup->inv_roff2_ron2 = (CT)(1.0/(roff2_min_ron2*roff2_min_ron2*roff2_min_ron2));
 
   // Constants for VFSW
   if (ron < roff) {
@@ -384,7 +389,25 @@ void CudaPMEDirectForce<AT, CT>::setup(CT boxx, CT boxy, CT boxz,
     h_setup->dv6 = -((CT)1.0)/(roff6);
     h_setup->dv12 = -((CT)1.0)/(roff6*roff6);
   }
-  h_setup->roffinv3 =  ((CT)1.0)/roff3;
+
+  // Constants for Gromacs-style potentials
+  // Copy-pasted from Michael G. Lerner code
+  h_setup->GAconst = (CT)(5.0/(3.0*roff));
+  h_setup->GBcoef = (CT)(5.0/(3.0*roff2*roff2));
+  double roff_ron = roff - ron;
+  double roff_ron2 = roff_ron*roff_ron;
+  double roff_ron3 = roff_ron*roff_ron2;
+  double roff_ron4 = roff_ron2*roff_ron2;
+  double ga6 = -6.0*(10.0*roff - 7.0*ron)/(roff8*roff_ron2);
+  double gb6 =  6.0*( 9.0*roff - 7.0*ron)/(roff8*roff_ron3);
+  h_setup->ga6  = ga6;
+  h_setup->gb6  = gb6;
+  h_setup->gc6  = 1.0/roff6 - (ga6*roff_ron3)/3.0 - (gb6*roff_ron4)/4.0;
+  double ga12 = -12.0*(16.0*roff - 13.0*ron)/(roff14*roff_ron2);
+  double gb12 =  12.0*(15.0*roff - 13.0*ron)/(roff14*roff_ron3);
+  h_setup->ga12 = ga12;
+  h_setup->gb12 = gb12;
+  h_setup->gc12 = 1.0/roff12 - (ga12*roff_ron3)/3.0 - (gb12*roff_ron4)/4.0;
 
   h_setup->e14fac = e14fac;
 

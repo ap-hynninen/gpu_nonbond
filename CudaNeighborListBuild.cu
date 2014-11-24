@@ -1568,7 +1568,8 @@ void CudaNeighborListBuild<tilesize>::calc_tile_ientry_est(const ZoneParam_t* h_
 // Sets ientry from host memory array
 //
 template <int tilesize>
-void CudaNeighborListBuild<tilesize>::set_ientry(int n_ientry, ientry_t *h_ientry) {
+void CudaNeighborListBuild<tilesize>::set_ientry(int n_ientry, ientry_t *h_ientry,
+						 cudaStream_t stream) {
 
   this->n_ientry = n_ientry;
 
@@ -1580,7 +1581,7 @@ void CudaNeighborListBuild<tilesize>::set_ientry(int n_ientry, ientry_t *h_ientr
 #endif
 
   // Copy to device
-  copy_HtoD_sync<ientry_t>(h_ientry, ientry, n_ientry);
+  copy_HtoD<ientry_t>(h_ientry, ientry, n_ientry, stream);
 }
 
 //

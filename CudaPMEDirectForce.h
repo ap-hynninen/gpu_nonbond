@@ -43,7 +43,11 @@ struct DirectSettings_t {
 
   float roff2;
   float ron2;
+  float ron;
 
+  float roffinv3;
+  float roffinv4;
+  float roffinv5;
   float roffinv6;
   float roffinv12;
   float roffinv18;
@@ -51,7 +55,10 @@ struct DirectSettings_t {
   float inv_roff2_ron2;
 
   float k6, k12, dv6, dv12;
-  float roffinv3;
+
+  float ga6, gb6, gc6;
+  float ga12, gb12, gc12;
+  float GAconst, GBcoef;
 
   float e14fac;
 
@@ -67,7 +74,8 @@ enum {NONE=0,
       CSHIFT=5, CFSWIT=6, CSHFT=7, CSWIT=8, RSWIT=9,
       RSHFT=10, RSHIFT=11, RFSWIT=12,
       VDW_CUT=13,
-      EWALD_LOOKUP=14};
+      EWALD_LOOKUP=14,
+      VDW_VGSH=15, GSHFT=16};
 
 // Enum for vdwparam
 enum {VDW_MAIN, VDW_IN14};
@@ -139,10 +147,8 @@ public:
   CudaPMEDirectForce();
   ~CudaPMEDirectForce();
 
-  void setup(CT boxx, CT boxy, CT boxz, 
-	     CT kappa,
-	     CT roff, CT ron,
-	     CT e14fac,
+  void setup(double boxx, double boxy, double boxz, double kappa,
+	     double roff, double ron, double e14fac,
 	     int vdw_model, int elec_model);
 
   void get_box_size(CT &boxx, CT &boxy, CT &boxz);

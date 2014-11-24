@@ -6,7 +6,6 @@
 #include <nvToolsExtCuda.h>
 #include "gpu_utils.h"
 #include "cuda_utils.h"
-#include "mpi_utils.h"
 
 //----------------------------------------------------------------------------------------
 //
@@ -407,42 +406,6 @@ bool gpuDevCompare (std::pair<int, cudaDeviceProp> dev1, std::pair<int, cudaDevi
   }
 }
 
-//
-// Test if MPI is truly cuda aware by sending and receiving device buffer
-//
-bool test_cudaAware(const int mynode, const int numnode) {
-  const int ncomm = 10;
-  int *sendbuf, *recvbuf;
-  allocate<int>(&sendbuf, ncomm);
-  allocate<int>(&recvbuf, ncomm);
-  int *h_sendbuf = new int[ncomm];
-  int *h_recvbuf = new int[ncomm];
-  for (int i=0;i < ncomm;i++) {
-    h_sendbuf[i] = i;
-    h_recvbuf[i] = 0;
-  }
-  copy_HtoD_sync<int>(h_sendbuf, sendbuf, ncomm);
-  copy_HtoD_sync<int>(h_recvbuf, recvbuf, ncomm);
-
-  const int TAG=1;
-  MPICheck(MPI_Sendrecv(sendbuf, ncomm, MPI_INT, (mynode+1) % numnode, TAG,
-			recvbuf, ncomm, MPI_INT, (mynode-1+numnode) % numnode, TAG,
-			MPI_COMM_WORLD, MPI_STATUS_IGNORE));
-
-  copy_DtoH_sync<int>(recvbuf, h_recvbuf, ncomm);
-  bool ok=true;
-  for (int i=0;i < ncomm;i++) {
-    if (h_recvbuf[i] != i) ok = false;
-  }
-
-  deallocate<int>(&sendbuf);
-  deallocate<int>(&recvbuf);
-  delete [] h_sendbuf;
-  delete [] h_recvbuf;
-
-  return ok;
-}
-
 void start_gpu(int numnode, int mynode, std::vector<int>& devices) {
 
   int deviceNum;
@@ -453,7 +416,7 @@ void start_gpu(int numnode, int mynode, std::vector<int>& devices) {
   }
 
   if (devices.size() != numnode) {
-    if (mynode == 0) std::cout << "Selecting GPUs most powerful first" << std::endl;
+    //if (mynode == 0) std::cout << "Selecting GPUs most powerful first" << std::endl;
     // Get all device properties and sort "most powerful first"
     std::vector<int> deviceID(deviceNum);
     std::vector<std::pair<int, cudaDeviceProp> > gpuList(deviceNum);
@@ -464,7 +427,7 @@ void start_gpu(int numnode, int mynode, std::vector<int>& devices) {
     std::sort(gpuList.begin(), gpuList.end(), gpuDevCompare);
     gpu_ind = gpuList.at(mynode % deviceNum).first;
   } else {
-    if (mynode == 0) std::cout << "Selecting GPUs using device list" << std::endl;
+    //if (mynode == 0) std::cout << "Selecting GPUs using device list" << std::endl;
     // Use devices in order determined by "devices"
     gpu_ind = devices.at(mynode % deviceNum);
   }
