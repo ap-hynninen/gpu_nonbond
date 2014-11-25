@@ -69,13 +69,9 @@ struct DirectSettings_t {
 
 // Enum for VdW and electrostatic models
 enum {NONE=0, 
-      VDW_VSH=1, VDW_VSW=2, VDW_VFSW=3, 
-      EWALD=4,
-      CSHIFT=5, CFSWIT=6, CSHFT=7, CSWIT=8, RSWIT=9,
-      RSHFT=10, RSHIFT=11, RFSWIT=12,
-      VDW_CUT=13,
-      EWALD_LOOKUP=14,
-      VDW_VGSH=15, GSHFT=16};
+      VDW_VSH=1, VDW_VSW=2, VDW_VFSW=3, VDW_VGSH=4, VDW_CUT=5,
+      EWALD=101, CSHIFT=102, CFSWIT=103, CSHFT=104, CSWIT=105, RSWIT=106,
+      RSHFT=107, RSHIFT=108, RFSWIT=109, GSHFT=110, EWALD_LOOKUP=111};
 
 // Enum for vdwparam
 enum {VDW_MAIN, VDW_IN14};

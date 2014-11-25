@@ -42,6 +42,8 @@
       EXPAND_ENERGY_VIRIAL(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, EWALD, __VA_ARGS__); \
     } else if (elec_model_loc == EWALD_LOOKUP) {			\
       EXPAND_ENERGY_VIRIAL(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, EWALD_LOOKUP, __VA_ARGS__); \
+    } else if (elec_model_loc == GSHFT) {				\
+      EXPAND_ENERGY_VIRIAL(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, GSHFT, __VA_ARGS__); \
     } else if (elec_model_loc == NONE) {				\
       EXPAND_ENERGY_VIRIAL(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, NONE, __VA_ARGS__); \
     } else {								\
@@ -60,17 +62,19 @@
       EXPAND_ELEC(KERNEL_CREATOR, KERNEL_NAME, VDW_VFSW, __VA_ARGS__);	\
     } else if (vdw_model_loc == VDW_CUT) {				\
       EXPAND_ELEC(KERNEL_CREATOR, KERNEL_NAME, VDW_CUT, __VA_ARGS__);	\
+    } else if (vdw_model_loc == VDW_VGSH) {				\
+      EXPAND_ELEC(KERNEL_CREATOR, KERNEL_NAME, VDW_VGSH, __VA_ARGS__);	\
     } else {								\
-      std::cout<<__func__<<" Invalid VDW model"<<vdw_model_loc<<std::endl; \
+      std::cout<<__func__<<" Invalid VDW model "<<vdw_model_loc<<std::endl; \
       exit(1);								\
     }									\
   }
-
 
 static __constant__ const float ccelec = 332.0716;
 
 //
 // Calculates VdW pair force & energy
+// NOTE: force (fij_vdw) is r*dU/dr
 //
 template <int vdw_model, bool calc_energy>
 __forceinline__ __device__
@@ -149,20 +153,20 @@ float pair_vdw_force(const float r2, const float r, const float rinv, const floa
     float rinv3 = rinv*rinv2;
     float rinv6 = rinv3*rinv3;
     float rinv12 = rinv6*rinv6;
-    float rinv7 = rinv*rinv6;
-    float rinv13 = rinv*rinv6;
     float r_ron = (r2 > d_setup.ron2) ? (r-d_setup.ron) : 0.0f;
-    float r_ron2 = r_ron*r_ron;
+    float r_ron2_r = r_ron*r_ron*r;
 
-    fij_vdw = c6*(6.0f*rinv7 + (d_setup.ga6 + d_setup.gb6*r_ron)*r_ron2 ) -
-      c12*(12.0f*rinv13 + (d_setup.ga12 + d_setup.gb12*r_ron)*r_ron2 );
+    fij_vdw = c6*(rinv6 + (d_setup.ga6 + d_setup.gb6*r_ron)*r_ron2_r ) -
+      c12*(rinv12 + (d_setup.ga12 + d_setup.gb12*r_ron)*r_ron2_r );
 
     if (calc_energy) {
+      const float one_twelve = 0.0833333333333333f;
+      const float one_six = 0.166666666666667f;
       const float one_third = (float)(1.0/3.0);
-      float r_ron3 = r_ron*r_ron2;
-      pot_vdw = (double)(c6*(-rinv6 + (one_third*d_setup.ga6 + 0.25f*d_setup.gb6*r_ron)*r_ron3 
+      float r_ron3 = r_ron*r_ron*r_ron;
+      pot_vdw = (double)(c6*(-one_six*rinv6 + (one_third*d_setup.ga6 + 0.25f*d_setup.gb6*r_ron)*r_ron3 
 			     + d_setup.gc6) +
-			 c12*(rinv12 - (one_third*d_setup.ga12 + 0.25f*d_setup.gb12*r_ron)*r_ron3 
+			 c12*(one_twelve*rinv12 - (one_third*d_setup.ga12 + 0.25f*d_setup.gb12*r_ron)*r_ron3 
 			      - d_setup.gc12));
     }
     /*
@@ -236,8 +240,7 @@ float pair_elec_force(const float r2, const float r, const float rinv,
     // NOTE THAT THIS EXPLICITLY ASSUMES ctonnb = 0
     //ctofnb4 = ctofnb2*ctofnb2
     //ctofnb5 = ctofnb4*ctofnb
-    float rinv2 = rinv*rinv;
-    fij_elec = qq*(rinv2 - (5.0f*d_setup.roffinv4 - 4.0f*d_setup.roffinv5*r)*r2 );
+    fij_elec = qq*(rinv - (5.0f*d_setup.roffinv4*r - 4.0f*d_setup.roffinv5*r2)*r2 );
     //d = -qscale*(one/r2 - 5.0*r2/ctofnb4 +4*r2*r/ctofnb5)
     if (calc_energy) {
       pot_elec = (double)(qq*(rinv - d_setup.GAconst + (d_setup.GBcoef*r - d_setup.roffinv5*r2)*r2));

@@ -398,16 +398,18 @@ void CudaPMEDirectForce<AT, CT>::setup(double boxx, double boxy, double boxz, do
   double roff_ron2 = roff_ron*roff_ron;
   double roff_ron3 = roff_ron*roff_ron2;
   double roff_ron4 = roff_ron2*roff_ron2;
-  double ga6 = -6.0*(10.0*roff - 7.0*ron)/(roff8*roff_ron2);
-  double gb6 =  6.0*( 9.0*roff - 7.0*ron)/(roff8*roff_ron3);
+  // NOTE: ga6, gb6, gc6 are divided by 6
+  //       ga12, gb12, gc12 are divided by 12
+  double ga6 = -(10.0*roff - 7.0*ron)/(roff8*roff_ron2);
+  double gb6 =  ( 9.0*roff - 7.0*ron)/(roff8*roff_ron3);
   h_setup->ga6  = ga6;
   h_setup->gb6  = gb6;
-  h_setup->gc6  = 1.0/roff6 - (ga6*roff_ron3)/3.0 - (gb6*roff_ron4)/4.0;
-  double ga12 = -12.0*(16.0*roff - 13.0*ron)/(roff14*roff_ron2);
-  double gb12 =  12.0*(15.0*roff - 13.0*ron)/(roff14*roff_ron3);
+  h_setup->gc6  = (1.0/roff6)/6.0 - (ga6*roff_ron3)/3.0 - (gb6*roff_ron4)/4.0;
+  double ga12 = -(16.0*roff - 13.0*ron)/(roff14*roff_ron2);
+  double gb12 =  (15.0*roff - 13.0*ron)/(roff14*roff_ron3);
   h_setup->ga12 = ga12;
   h_setup->gb12 = gb12;
-  h_setup->gc12 = 1.0/roff12 - (ga12*roff_ron3)/3.0 - (gb12*roff_ron4)/4.0;
+  h_setup->gc12 = (1.0/roff12)/12.0 - (ga12*roff_ron3)/3.0 - (gb12*roff_ron4)/4.0;
 
   h_setup->e14fac = e14fac;
 
