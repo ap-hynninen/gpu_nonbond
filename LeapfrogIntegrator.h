@@ -176,7 +176,7 @@ public:
   //
   // Runs dynamics for nstep steps
   //
-  void run(const int nstep) {
+  void run(const int nstep, const int print_freq) {
 
     for (int istep=0;istep < nstep;istep++) {
 
@@ -195,7 +195,8 @@ public:
       // (array re-orderings, if applicable)
       //
       bool last_step = (istep == nstep-1);
-      bool calc_energy = last_step;
+      bool print_energy = (print_freq != 0) && (istep % print_freq == 0);
+      bool calc_energy = last_step || print_energy;
       bool calc_virial = const_pressure() || last_step;
       calc_force(calc_energy, calc_virial);
       post_calc_force();
@@ -213,7 +214,7 @@ public:
       do_temperature();
       
       // Calculate temperature
-      if (last_step) {
+      if (print_energy) {
 	calc_temperature();
       }
       
@@ -222,9 +223,9 @@ public:
       // Calculate pressure
 
       // Print energies & other values on screen
-      //if (print_energy) {
-      //do_print_energy(istep);
-      //}
+      if (print_energy) {
+	do_print_energy(istep);
+      }
 
       if (!last_step) {
 	// Swap: dx <=> dx_prev

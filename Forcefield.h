@@ -8,7 +8,7 @@ class Forcefield {
 
  public:
   
-  virtual void print_energy_virial(int step)=0;
+  virtual void print_energy_virial(int step, const double energy_kin)=0;
 
 };
 

@@ -180,7 +180,7 @@ public:
 			double *dx, double *dy, double *dz,
 			double *fx, double *fy, double *fz);
 
-  void print_energy_virial(int step);
+  void print_energy_virial(int step, const double temp);
 };
 
 #endif // CUDAPMEFORCEFIELD_H

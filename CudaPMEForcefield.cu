@@ -225,6 +225,12 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial,
     ref_coord.realloc(domdec.get_ncoord_tot());
     force.realloc(domdec.get_ncoord_tot());
 
+    // Clear energy and virial variables
+    // NOTE: done_force_clear_event also waits for the energy & virial to clear
+    if (calc_energy || calc_virial) {
+      dir.clear_energy_virial(direct_stream[0]);
+    }
+
     // Clear forces
     force.clear(direct_stream[0]);
     cudaCheck(cudaEventRecord(done_force_clear_event, direct_stream[0]));
@@ -332,6 +338,12 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial,
   } else {
     neighborlist_updated = false;
 
+    // Clear energy and virial variables
+    // NOTE: done_force_clear_event also waits for the energy & virial to clear
+    if (calc_energy || calc_virial) {
+      dir.clear_energy_virial(direct_stream[0]);
+    }
+
     // Clear forces
     force.clear(direct_stream[0]);
     cudaCheck(cudaEventRecord(done_force_clear_event, direct_stream[0]));
@@ -411,8 +423,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial,
 
   // Clear energy and virial variables
   if (calc_energy || calc_virial) {
-    dir.clear_energy_virial();
-    bonded.clear_energy_virial();
+    bonded.clear_energy_virial(bonded_stream);
     if (recipComm.get_isRecip()) recip->clear_energy_virial();
   }
 
@@ -496,6 +507,15 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial,
 
   // Convert forces from FP to DP
   force.convert<double>(stream);
+
+  // If energy or virial is requested, make CPU wait here for computation to finish
+  if (calc_energy || calc_virial) {
+    cudaCheck(cudaEventSynchronize(done_in14_event));
+    cudaCheck(cudaEventSynchronize(done_bonded_event));
+    if (recipComm.get_isRecip()) cudaCheck(cudaEventSynchronize(done_recip_event));
+    cudaCheck(cudaEventSynchronize(done_direct_event[0]));
+    cudaCheck(cudaEventSynchronize(done_direct_event[1]));
+  }
 
   bonded.get_energy_virial(calc_energy, calc_virial,
 			   &energy_bond, &energy_ureyb,
@@ -621,10 +641,9 @@ bool CudaPMEForcefield::heuristic_check(const cudaXYZ<double>& coord, cudaStream
 //
 // Print energies and virials on screen
 //
-void CudaPMEForcefield::print_energy_virial(int step) {
+void CudaPMEForcefield::print_energy_virial(int step, const double energy_kin) {
   double tol = 0.0;
 
-  double energy_kin = 0.0;
   double energy = energy_bond + energy_angle + energy_ureyb + energy_dihe + energy_imdihe +
     energy_vdw + energy_elec + energy_ewksum + energy_ewself + energy_excl;
   double energy_tot = energy + energy_kin;

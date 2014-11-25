@@ -674,7 +674,7 @@ void test(const int nstep, const bool use_holoconst, const bool cudaAware, const
     leapfrog.set_timestep(timestep);
     MPICheck(MPI_Barrier( MPI_COMM_WORLD));
     double begin = MPI_Wtime();
-    leapfrog.run(nstep);
+    leapfrog.run(nstep, 0);
     double end = MPI_Wtime();
     double time_spent = end - begin;
     if (mynode == 0) {

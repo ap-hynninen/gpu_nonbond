@@ -2839,7 +2839,8 @@ void Grid<AT, CT, CT2>::clear_energy_virial() {
   for (int i=0;i < 6;i++) {
     h_energy_virial->virial[i] = 0.0;
   }
-  cudaCheck(cudaMemcpyToSymbol(d_energy_virial, h_energy_virial, sizeof(RecipEnergyVirial_t)));
+  cudaCheck(cudaMemcpyToSymbolAsync(d_energy_virial, h_energy_virial, sizeof(RecipEnergyVirial_t),
+				    0, cudaMemcpyHostToDevice, stream));
 }
 
 //

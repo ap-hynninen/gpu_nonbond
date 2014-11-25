@@ -311,6 +311,7 @@ void CudaLeapfrogIntegrator::calc_temperature() {
      step.x(), step.y(), step.z());
   cudaCheck(cudaGetLastError());
   // Retrieve result
+  cudaCheck(cudaStreamSynchronize(stream));
   cudaCheck(cudaMemcpyFromSymbol(h_CudaLeapfrogIntegrator_storage,
 				 d_CudaLeapfrogIntegrator_storage,
 				 sizeof(CudaLeapfrogIntegrator_storage_t),
@@ -415,7 +416,7 @@ void CudaLeapfrogIntegrator::do_temperature() {
 void CudaLeapfrogIntegrator::do_print_energy(int step) {
   if (forcefield != NULL) {
     CudaForcefield *p = static_cast<CudaForcefield*>(forcefield);
-    p->print_energy_virial(step);
+    p->print_energy_virial(step, h_CudaLeapfrogIntegrator_storage->kine);
   }
 }
 

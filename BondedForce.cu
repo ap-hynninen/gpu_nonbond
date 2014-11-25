@@ -1288,7 +1288,7 @@ void BondedForce<AT, CT>::calc_force(const float4 *xyzq,
 // Sets Energies and virials to zero
 //
 template <typename AT, typename CT>
-void BondedForce<AT, CT>::clear_energy_virial() {
+void BondedForce<AT, CT>::clear_energy_virial(cudaStream_t stream) {
   h_energy_virial->energy_bond = 0.0;
   h_energy_virial->energy_ureyb = 0.0;
   h_energy_virial->energy_angle = 0.0;
@@ -1300,7 +1300,8 @@ void BondedForce<AT, CT>::clear_energy_virial() {
     h_energy_virial->sforcey[i] = 0.0;
     h_energy_virial->sforcez[i] = 0.0;
   }
-  cudaCheck(cudaMemcpyToSymbol(d_energy_virial, h_energy_virial, sizeof(BondedEnergyVirial_t)));
+  cudaCheck(cudaMemcpyToSymbolAsync(d_energy_virial, h_energy_virial, sizeof(BondedEnergyVirial_t),
+				    0, cudaMemcpyHostToDevice, stream));
 }
 
 //
