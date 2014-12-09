@@ -33,7 +33,7 @@ template<typename T>
 class CudaAtomGroup : public CudaAtomGroupBase {
 
  private:
-  // Global group list, constant
+  // Global group list, constant. Stored in device memory
   T* groupList;
 
  public:

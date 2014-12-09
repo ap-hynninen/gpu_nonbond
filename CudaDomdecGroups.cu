@@ -350,10 +350,6 @@ void CudaDomdecGroups::finishGroups() {
     if (domdec.get_numnode() > 1) {
       int id = it->first;
       if (id >= CONST_START) {
-	/*
-	fprintf(stderr,"%d: i=%d id=%d %d %d\n",
-		domdec.get_mynode(),i,it->first,p->get_numGroupList(), p->get_size());
-	*/
 	// Record the start of constraint groups
 	if (!hasConstGroups) typeConstStart = i;
 	// Worst case = all constraints
@@ -380,27 +376,17 @@ void CudaDomdecGroups::finishGroups() {
     allocate<int>(&neighPos, 8);
     allocate_host<int>(&h_neighPos, 8);
     allocate_host<int>(&h_constTablePos, 1);
-    /*
-    allocate<int>(&nodeTablePos, 7);
-    h_nodeTable = new int*[7];
-    // We only set possible nodeTable[] entries (rest are NULL)
-    for (int ineigh=0;ineigh < 7;ineigh++) {
-      h_nodeTable[ineigh] = NULL;
-      int t = ineigh+1;
-      int iz = t/4;
-      t -= iz*4;
-      int iy = t/2;
-      int ix = t - iy*2;
-      if (ix > 0 && domdec.get_nx() == 1) continue;
-      if (iy > 0 && domdec.get_ny() == 1) continue;
-      if (iz > 0 && domdec.get_nz() == 1) continue;
-      allocate<int>(&h_nodeTable[ineigh], nodeTableLen);
-    }
-    allocate<int*>(&nodeTable, 7);
-    copy_HtoD_sync<int*>(h_nodeTable, nodeTable, 7);
-    //constComm = new CudaDomdecConstComm();
-    */
   }
+  /*
+  //--------------------------------
+  // Build molecules
+  //--------------------------------
+  bond_t *bond = this->getGroupList<bond_t>(BOND);
+  int numBonds = this->getNumGroupList(BOND);
+  bond_t *h_bond = new bond_t[numBonds];
+  this->buildMolecules(domdec.get_ncoord_glo(), numBonds, h_bond);
+  delete [] h_bond;
+  */
   //--------------------------------
   // Build groupData etc.
   //--------------------------------

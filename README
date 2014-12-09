@@ -31,3 +31,8 @@ gpu_dyna -nstep N
 - Test molecular dynamics run
 - Uses MPI for multi-GPU support
 
+Unused code:
+-------------
+These are classes that are half-written and not yet integrated into the engine
+-CudaMonteCarloBaroStat
+-LangevinPiston

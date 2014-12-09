@@ -4,11 +4,12 @@
 #include <vector>
 #include <map>
 #include <algorithm>
+#include "DomdecGroups.h"
 #include "Bonded_struct.h"
 #include "CudaDomdec.h"
 #include "CudaAtomGroup.h"
 
-class CudaDomdecGroups {
+class CudaDomdecGroups : public DomdecGroups {
 
  private:
 
@@ -117,6 +118,15 @@ class CudaDomdecGroups {
     return p->get_groupList();
   }
 
+  // Return number of groups in list
+  // NOTE: This is constant during the run
+  int getNumGroupList(const int id) {
+    std::map<int, AtomGroupBase*>::iterator it = atomGroups.find(id);
+    // Group "id" not found => return zero
+    if (it == atomGroups.end()) return 0;
+    return it->second->get_numGroupList();
+  }
+  
   // Return group table
   // NOTE: This changes at neighborlist update
   int* getGroupTable(const int id) {
