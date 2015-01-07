@@ -1049,37 +1049,37 @@ void BondedForce<AT, CT>::setup_list(const int nbondlist, const bondlist_t *h_bo
   this->nbondlist = nbondlist;
   if (nbondlist > 0) {
     reallocate<bondlist_t>(&bondlist, &bondlist_len, nbondlist, 1.2f);
-    copy_HtoD<bondlist_t>(h_bondlist, bondlist, nbondlist);
-  }
+    copy_HtoD_sync<bondlist_t>(h_bondlist, bondlist, nbondlist);
+  }  
 
   this->nureyblist = nureyblist;
   if (nureyblist > 0) {
     reallocate<bondlist_t>(&ureyblist, &ureyblist_len, nureyblist, 1.2f);
-    copy_HtoD<bondlist_t>(h_ureyblist, ureyblist, nureyblist);
+    copy_HtoD_sync<bondlist_t>(h_ureyblist, ureyblist, nureyblist);
   }
 
   this->nanglelist = nanglelist;
   if (nanglelist > 0) {
     reallocate<anglelist_t>(&anglelist, &anglelist_len, nanglelist, 1.2f);
-    copy_HtoD<anglelist_t>(h_anglelist, anglelist, nanglelist);
+    copy_HtoD_sync<anglelist_t>(h_anglelist, anglelist, nanglelist);
   }
 
   this->ndihelist = ndihelist;
   if (ndihelist > 0) {
     reallocate<dihelist_t>(&dihelist, &dihelist_len, ndihelist, 1.2f);
-    copy_HtoD<dihelist_t>(h_dihelist, dihelist, ndihelist);
+    copy_HtoD_sync<dihelist_t>(h_dihelist, dihelist, ndihelist);
   }
 
   this->nimdihelist = nimdihelist;
   if (nimdihelist > 0) {
     reallocate<dihelist_t>(&imdihelist, &imdihelist_len, nimdihelist, 1.2f);
-    copy_HtoD<dihelist_t>(h_imdihelist, imdihelist, nimdihelist);
+    copy_HtoD_sync<dihelist_t>(h_imdihelist, imdihelist, nimdihelist);
   }
 
   this->ncmaplist = ncmaplist;
   if (ncmaplist > 0) {
     reallocate<cmaplist_t>(&cmaplist, &cmaplist_len, ncmaplist, 1.2f);
-    copy_HtoD<cmaplist_t>(h_cmaplist, cmaplist, ncmaplist);
+    copy_HtoD_sync<cmaplist_t>(h_cmaplist, cmaplist, ncmaplist);
   }
 
 }
@@ -1342,4 +1342,3 @@ void BondedForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_cal
 //
 template class BondedForce<long long int, float>;
 template class BondedForce<long long int, double>;
-
