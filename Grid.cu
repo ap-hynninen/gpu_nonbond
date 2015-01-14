@@ -1,12 +1,10 @@
 #include <iostream>
 #include <cassert>
-#include <cuda.h>
 #include <math.h>
 #include "gpu_utils.h"
 #include "cuda_utils.h"
 #include "reduce.h"
-#include "Matrix3d.h"
-#include "MultiNodeMatrix3d.h"
+//#include "MultiNodeMatrix3d.h"
 #include "Grid.h"
 
 static const double pi = 3.14159265358979323846;
