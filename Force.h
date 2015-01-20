@@ -75,6 +75,8 @@ private:
   T* y() {return &_xyz[_stride];}
   T* z() {return &_xyz[_stride*2];}
 
+  void getXYZ(T* h_x, T* h_y, T* h_z);
+  
   int stride() const {return _stride;}
   int size() const {return _size;}
   const T* xyz() const {return _xyz;}

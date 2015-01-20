@@ -9,6 +9,17 @@
 #include "Bspline.h"
 #include "Matrix3d.h"
 
+// CCELEC is 1/ (4 pi eps ) in AKMA units, conversion from SI
+// units: CCELEC = e*e*Na / (4*pi*eps*1Kcal*1A)
+//
+//      parameter :: CCELEC=332.0636D0 ! old value of dubious origin
+//      parameter :: CCELEC=331.843D0  ! value from 1986-1987 CRC Handbook
+//                                   ! of Chemistry and Physics
+//  real(chm_real), parameter ::  &
+//       CCELEC_amber    = 332.0522173D0, &
+//       CCELEC_charmm   = 332.0716D0   , &
+//       CCELEC_discover = 332.054D0    , &
+//       CCELEC_namd     = 332.0636D0   
 const double ccelec = 332.0716;
 
 struct RecipEnergyVirial_t {
@@ -58,19 +69,7 @@ public:
   Matrix3d<CT2> *fft_grid;     // data2
 
 private:
-
-  // CCELEC is 1/ (4 pi eps ) in AKMA units, conversion from SI
-  // units: CCELEC = e*e*Na / (4*pi*eps*1Kcal*1A)
-  //
-  //      parameter :: CCELEC=332.0636D0 ! old value of dubious origin
-  //      parameter :: CCELEC=331.843D0  ! value from 1986-1987 CRC Handbook
-  //                                   ! of Chemistry and Physics
-  //  real(chm_real), parameter ::  &
-  //       CCELEC_amber    = 332.0522173D0, &
-  //       CCELEC_charmm   = 332.0716D0   , &
-  //       CCELEC_discover = 332.054D0    , &
-  //       CCELEC_namd     = 332.0636D0   
-
+  
   // Order of interpolation
   int order;
 

@@ -218,6 +218,21 @@ void Force<T>::save(const char* filename) {
 }
 
 //
+// Gets forces to host
+//
+template <typename T>
+void Force<T>::getXYZ(T* h_x, T* h_y, T* h_z) {
+  T *h_xyz = new T[_stride*3];
+  copy_DtoH_sync<T>(_xyz, h_xyz, _stride*3);
+  for (int i=0;i < _size;i++) {
+    h_x[i] = h_xyz[i];
+    h_y[i] = h_xyz[i + _stride];
+    h_z[i] = h_xyz[i + _stride*2];
+  }
+  delete [] h_xyz;
+}
+
+//
 // Explicit instances of Force class
 //
 template class Force<long long int>;

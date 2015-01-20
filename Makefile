@@ -83,6 +83,8 @@ OBJS_DYNA = cuda_utils.o gpu_dyna.o Force.o reduce.o CudaLeapfrogIntegrator.o Cu
 	DomdecD2DComm.o DomdecRecipComm.o CudaDomdecRecipComm.o CudaDomdecRecipLooper.o Domdec.o \
 	CudaDomdecConstComm.o
 
+OBJS_PAIR = gpu_pair.o Grid.o Force.o XYZQ.o cuda_utils.o reduce.o Matrix3d.o
+
 OBJS_TRANSPOSE = cpu_transpose.o mpi_utils.o CpuMultiNodeMatrix3d.o CpuMatrix3d.o
 
 ifeq ($(CUDA_COMPILER), $(YES))
@@ -91,6 +93,7 @@ OBJS = $(OBJS_RECIP)
 OBJS += $(OBJS_BONDED)
 OBJS += $(OBJS_CONST)
 OBJS += $(OBJS_DYNA)
+OBJS += $(OBJS_PAIR)
 endif
 ifeq ($(MPI_FOUND), $(YES))
 OBJS += $(OBJS_TRANSPOSE)
@@ -148,7 +151,7 @@ endif
 CUDA_LFLAGS += -lcudart -lcufft -lnvToolsExt
 
 ifeq ($(CUDA_COMPILER), $(YES))
-BINARIES = gpu_bonded gpu_recip gpu_const gpu_dyna gpu_direct
+BINARIES = gpu_bonded gpu_recip gpu_const gpu_dyna gpu_direct gpu_pair
 endif
 ifeq ($(MPI_FOUND), $(YES))
 BINARIES += cpu_transpose
@@ -170,6 +173,9 @@ gpu_const : $(OBJS_CONST)
 
 gpu_dyna : $(OBJS_DYNA)
 	$(CL) $(OPTLEV) $(CUDA_LFLAGS) -o gpu_dyna $(OBJS_DYNA)
+
+gpu_pair : $(OBJS_PAIR)
+	$(CL) $(OPTLEV) $(CUDA_LFLAGS) -o gpu_pair $(OBJS_PAIR)
 
 cpu_transpose : $(OBJS_TRANSPOSE)
 	$(CL) $(CUDA_LFLAGS) $(OPENMP_OPT) -o cpu_transpose $(OBJS_TRANSPOSE)
