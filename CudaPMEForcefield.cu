@@ -522,7 +522,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial,
 			   &energy_angle,
 			   &energy_dihe, &energy_imdihe,
 			   &energy_cmap,
-			   sforcex, sforcey, sforcez);
+			   sforce);
 
   dir.get_energy_virial(calc_energy, calc_virial,
 			&energy_vdw, &energy_elec,

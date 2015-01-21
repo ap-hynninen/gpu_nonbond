@@ -13,6 +13,14 @@ static __constant__ const double INV_FORCE_SCALE = (double)1.0/(double)(1ll << 4
 static __constant__ const float FORCE_SCALE_I = (float)(1 << 31);
 static __constant__ const double INV_FORCE_SCALE_I = (double)1.0/(double)(1 << 31);
 
+static __constant__ const float FORCE_SCALE_VIR = (float)(1ll << 30);
+static __constant__ const double INV_FORCE_SCALE_VIR = (double)1.0/(double)(1ll << 30);
+static __constant__ const long long int CONVERT_TO_VIR = (1ll << 10);
+
+// CPU code version
+static const double INV_FORCE_SCALE_CPU = (double)1.0/(double)(1ll << 40);
+static const double INV_FORCE_SCALE_VIR_CPU = (double)1.0/(double)(1ll << 30);
+
 #define cufftCheck(stmt) do {						\
     cufftResult err = stmt;						\
     if (err != CUFFT_SUCCESS) {						\
@@ -164,6 +172,19 @@ __device__ inline int iroundf(float f)
 }
 
 // ----------------------------------------------------------------------------------------------
+template <typename AT, typename CT>
+__forceinline__ __device__
+AT roundCTtoAT(CT a) {return (AT)a;}
+
+template <>
+__forceinline__ __device__
+long long int roundCTtoAT<long long int, float>(float a) {return lliroundf(a*FORCE_SCALE);}
+
+template <>
+__forceinline__ __device__
+long long int roundCTtoAT<long long int, double>(double a) {return lliroundd(a*FORCE_SCALE);}
+
+  // ----------------------------------------------------------------------------------------------
 template <typename AT, typename CT>
 __forceinline__ __device__
 void calc_component_force(CT fij,

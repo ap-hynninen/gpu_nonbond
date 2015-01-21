@@ -83,9 +83,7 @@ private:
   double energy_dihe;
   double energy_imdihe;
   double energy_cmap;
-  double sforcex[27];
-  double sforcey[27];
-  double sforcez[27];
+  double sforce[27*3];
 
   double energy_vdw;
   double energy_elec;

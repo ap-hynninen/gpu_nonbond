@@ -47,6 +47,97 @@ void load_ind(const int nind, const char *filename, const int n, T *ind) {
 
 }
 
+struct results_t {
+  double energy_bond;
+  double energy_ureyb;
+  double energy_angle;
+  double energy_dihe;
+  double energy_imdihe;
+  double energy_cmap;
+  double sforce[27*3];
+};
+
+void check_results(const bool calc_energy, const bool calc_virial,
+		   const results_t &results_ref, const results_t &results,
+		   Force<double> &force_ref, Force<double> &force) {
+  double max_diff;
+  double tol = 0.0058;
+  if (!force_ref.compare(force, tol, max_diff)) {
+    std::cout << "Bonded force comparison FAILED " << std::endl;
+  } else {
+    std::cout<<"Bonded force comparison OK (tolerance " << tol << " max difference " 
+	     << max_diff << ")" << std::endl;
+  }
+
+  if (calc_energy) {
+    tol = 0.0007;
+    max_diff = fabs(results_ref.energy_bond - results.energy_bond);
+    if (max_diff > tol) {
+      std::cout << "energy_bond comparison FAILED: ref = " << results_ref.energy_bond
+		<< " energy = " << results.energy_bond << std::endl;
+    } else {
+      std::cout << "energy_bond comparison OK (tolerance " << tol << " difference " 
+		<< max_diff << ")" << std::endl;
+    }
+
+    max_diff = fabs(results_ref.energy_ureyb - results.energy_ureyb);
+    if (max_diff > tol) {
+      std::cout << "energy_ureyb comparison FAILED: ref = " << results_ref.energy_ureyb
+		<< " energy = " << results.energy_ureyb << std::endl;
+    } else {
+      std::cout << "energy_ureyb comparison OK (tolerance " << tol << " difference " 
+		<< max_diff << ")" << std::endl;
+    }
+
+    max_diff = fabs(results_ref.energy_angle - results.energy_angle);
+    if (max_diff > tol) {
+      std::cout << "energy_angle comparison FAILED: ref = " << results_ref.energy_angle
+		<< " energy = " << results.energy_angle << std::endl;
+    } else {
+      std::cout << "energy_angle comparison OK (tolerance " << tol << " difference " 
+		<< max_diff << ")" << std::endl;
+    }
+
+    max_diff = fabs(results_ref.energy_dihe - results.energy_dihe);
+    if (max_diff > tol) {
+      std::cout << "energy_dihe comparison FAILED: ref = " << results_ref.energy_dihe
+		<< " energy = " << results.energy_dihe << std::endl;
+    } else {
+      std::cout << "energy_dihe comparison OK (tolerance " << tol << " difference " 
+		<< max_diff << ")" << std::endl;
+    }
+
+    max_diff = fabs(results_ref.energy_imdihe - results.energy_imdihe);
+    if (max_diff > tol) {
+      std::cout << "energy_imdihe comparison FAILED: ref = " << results_ref.energy_imdihe
+		<< " energy = " << results.energy_imdihe << std::endl;
+    } else {
+      std::cout << "energy_imdihe comparison OK (tolerance " << tol << " difference " 
+		<< max_diff << ")" << std::endl;
+    }
+  }
+
+  if (calc_virial) {
+    max_diff = 0.0;
+    tol = 0.16;
+    for (int i=0;i < 27*3;i++) {
+      max_diff = max(max_diff, fabs(results_ref.sforce[i] - results.sforce[i]));
+      if (max_diff > tol) {
+	printf("sforce_ref[%d] = %e\n",i,results_ref.sforce[i]);
+	printf("sforce[%d]     = %e\n",i,results.sforce[i]);
+	break;
+      }
+    }
+    if (max_diff > tol) {
+      std::cout << "sforce comparison FAILED" << std::endl;
+    } else {
+      std::cout << "sforce comparison OK (tolerance " << tol << " difference " 
+		<< max_diff << ")" << std::endl;
+    }
+  }
+  
+}
+
 //
 // Test the code using data in test_data/ -directory
 //
@@ -58,19 +149,19 @@ void test() {
   const double boxz = 62.23;
   const int ncoord = 23558;
 
-  const double energy_bond_ref = 715.08289;
-  const double energy_ureyb_ref = 167.39536;
-  const double energy_angle_ref = 1228.72913;
-  const double energy_dihe_ref = 921.88694;
-  const double energy_imdihe_ref = 102.07776;
+  results_t results_ref;
+  results_t results;
+  
+  results_ref.energy_bond = 715.08289;
+  results_ref.energy_ureyb = 167.39536;
+  results_ref.energy_angle = 1228.72913;
+  results_ref.energy_dihe = 921.88694;
+  results_ref.energy_imdihe = 102.07776;
 
-  double sforce_ref[81];
-  load_ind<double>(81, "test_data/sforce_bonded.txt", 1, sforce_ref);
-
-  double sforcex[27], sforcey[27], sforcez[27];
-  double energy_bond, energy_ureyb, energy_angle, energy_dihe, energy_imdihe, energy_cmap;
-
-  Force<double> force_bonded("test_data/force_bonded.txt");
+  // Compute reference virial
+  load_ind<double>(27*3, "test_data/sforce_bonded.txt", 1, results_ref.sforce);
+  
+  Force<double> force_ref("test_data/force_bonded.txt");
   Force<long long int> force_fp(ncoord);
   Force<double> force(ncoord);
 
@@ -125,13 +216,13 @@ void test() {
   //load_ind<int>(8, "test_data/cmaplist_176k.txt", ncmaplist, (int *)h_cmaplist);
   //load_ind<float>(2, "test_data/cmapcoef_176k.txt", ncmaplist, (float *)h_cmapcoef);
 
-  force_fp.clear();
+  std::cout << "--------------------------------------------------" << std::endl;
+  std::cout << " Single Precision - Fixed Precision" << std::endl;
+  std::cout << "--------------------------------------------------" << std::endl;
 
   // Single precision
   {
-    force_fp.clear();
     BondedForce<long long int, float> bondedforce;
-    bondedforce.clear_energy_virial();
     bondedforce.setup_coef(nbondcoef, h_bondcoef,
 			   nureybcoef, h_ureybcoef,
 			   nanglecoef, h_anglecoef,
@@ -145,87 +236,32 @@ void test() {
 			   nimdihelist, h_imdihelist, 
 			   ncmaplist, h_cmaplist);
 
-    bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, true, false,
-			   force_fp.stride(), force_fp.xyz(),
-			   true, true, true, true, true, true);
-    bondedforce.get_energy_virial(true, false,
-				  &energy_bond, &energy_ureyb,
-				  &energy_angle,
-				  &energy_dihe, &energy_imdihe,
-				  &energy_cmap,
-				  sforcex, sforcey, sforcez);
-    force_fp.convert(force);
-
-    double max_diff;
-    double tol = 0.0057;
-    if (!force_bonded.compare(force, tol, max_diff)) {
-      std::cout << "(SP) Bonded force comparison FAILED " << std::endl;
-    } else {
-      std::cout<<"(SP) Bonded force comparison OK (tolerance " << tol << " max difference " 
-	       << max_diff << ")" << std::endl;
+    // Loop through all four possibilities
+    for (int bb=0;bb <= 3;bb++) {
+      bool calc_energy = ((bb & 1) == 1);
+      bool calc_virial = ((bb & 2) == 2);
+      std::cout << "calc_energy, calc_virial = " << calc_energy << " " << calc_virial << std::endl;
+      force_fp.clear();
+      bondedforce.clear_energy_virial();
+      bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, calc_energy, calc_virial,
+			     force_fp.stride(), force_fp.xyz(),
+			     true, true, true, true, true, true);
+      bondedforce.get_energy_virial(calc_energy, calc_virial,
+				    &results.energy_bond, &results.energy_ureyb,
+				    &results.energy_angle,
+				    &results.energy_dihe, &results.energy_imdihe,
+				    &results.energy_cmap,
+				    results.sforce);
+      force_fp.convert(force);
+      check_results(calc_energy, calc_virial, results_ref, results, force_ref, force);
     }
-
-    max_diff = fabs(energy_bond_ref - energy_bond);
-    if (max_diff > tol) {
-      std::cout << "(SP) energy_bond comparison FAILED: ref = " << energy_bond_ref 
-		<< " energy = " << energy_bond << std::endl;
-    } else {
-      std::cout << "(SP) energy_bond comparison OK (tolerance " << tol << " difference " 
-		<< max_diff << ")" << std::endl;
-    }
-
-    max_diff = fabs(energy_ureyb_ref - energy_ureyb);
-    if (max_diff > tol) {
-      std::cout << "(SP) energy_ureyb comparison FAILED: ref = " << energy_ureyb_ref 
-		<< " energy = " << energy_ureyb << std::endl;
-    } else {
-      std::cout << "(SP) energy_ureyb comparison OK (tolerance " << tol << " difference " 
-		<< max_diff << ")" << std::endl;
-    }
-
-    max_diff = fabs(energy_angle_ref - energy_angle);
-    if (max_diff > tol) {
-      std::cout << "(SP) energy_angle comparison FAILED: ref = " << energy_angle_ref 
-		<< " energy = " << energy_angle << std::endl;
-    } else {
-      std::cout << "(SP) energy_angle comparison OK (tolerance " << tol << " difference " 
-		<< max_diff << ")" << std::endl;
-    }
-
-    max_diff = fabs(energy_dihe_ref - energy_dihe);
-    if (max_diff > tol) {
-      std::cout << "(SP) energy_dihe comparison FAILED: ref = " << energy_dihe_ref 
-		<< " energy = " << energy_dihe << std::endl;
-    } else {
-      std::cout << "(SP) energy_dihe comparison OK (tolerance " << tol << " difference " 
-		<< max_diff << ")" << std::endl;
-    }
-
-    max_diff = fabs(energy_imdihe_ref - energy_imdihe);
-    if (max_diff > tol) {
-      std::cout << "(SP) energy_imdihe comparison FAILED: ref = " << energy_imdihe_ref 
-		<< " energy = " << energy_imdihe << std::endl;
-    } else {
-      std::cout << "(SP) energy_imdihe comparison OK (tolerance " << tol << " difference " 
-		<< max_diff << ")" << std::endl;
-    }
-
-    force_fp.clear();
-    bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, false, false,
-			   force_fp.stride(), force_fp.xyz(),
-			   true, true, true, true, true, true);
-    force_fp.convert(force);
-
-    tol = 0.0057;
-    if (!force_bonded.compare(force, tol, max_diff)) {
-      std::cout << "(SP) Bonded force comparison FAILED " << std::endl;
-    } else {
-      std::cout<<"(SP) Bonded force comparison OK (tolerance " << tol << " max difference " 
-	       << max_diff << ")" << std::endl;
-    }
-
+    
   }
 
+  std::cout << "--------------------------------------------------" << std::endl;
+  std::cout << " Double Precision - Fixed Precision" << std::endl;
+  std::cout << "--------------------------------------------------" << std::endl;
+  
   // Double precision
   {
     force_fp.clear();
@@ -243,21 +279,28 @@ void test() {
 			   ndihelist, h_dihelist, 
 			   nimdihelist, h_imdihelist, 
 			   ncmaplist, h_cmaplist);
-    bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, true, false,
-			   force_fp.stride(), force_fp.xyz(),
-			   true, true, true, true, true, true);
-    force_fp.convert(force);
-
-    double max_diff;
-    double tol = 0.0058;
-    if (!force_bonded.compare(force, tol, max_diff)) {
-      std::cout<<"(DP) Bonded force comparison FAILED"<<std::endl;
-    } else {
-      std::cout<<"(DP) Bonded force comparison OK (tolerance " << tol << " max difference " 
-	       << max_diff << ")" << std::endl;
+    
+    // Loop through all four possibilities
+    for (int bb=0;bb <= 3;bb++) {
+      bool calc_energy = ((bb & 1) == 1);
+      bool calc_virial = ((bb & 2) == 2);
+      std::cout << "calc_energy, calc_virial = " << calc_energy << " " << calc_virial << std::endl;
+      force_fp.clear();
+      bondedforce.clear_energy_virial();    
+      bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, calc_energy, calc_virial,
+			     force_fp.stride(), force_fp.xyz(),
+			     true, true, true, true, true, true);
+      bondedforce.get_energy_virial(calc_energy, calc_virial,
+				    &results.energy_bond, &results.energy_ureyb,
+				    &results.energy_angle,
+				    &results.energy_dihe, &results.energy_imdihe,
+				    &results.energy_cmap,
+				    results.sforce);
+      force_fp.convert(force);
+      check_results(calc_energy, calc_virial, results_ref, results, force_ref, force);
     }
   }
-
+  
   delete [] h_bondlist;
   delete [] h_bondcoef;
   

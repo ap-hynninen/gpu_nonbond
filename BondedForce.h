@@ -67,6 +67,8 @@ struct BondedSettings_t {
 };
 */
 
+//#define USE_DP_SFORCE
+
 // Data structure for saving energies and virials
 struct BondedEnergyVirial_t {
   // Energies
@@ -78,9 +80,11 @@ struct BondedEnergyVirial_t {
   double energy_cmap;
 
   // Shift forces for calculating virials
-  double sforcex[27];
-  double sforcey[27];
-  double sforcez[27];
+#ifdef USE_DP_SFORCE
+  double sforce[27*3];
+#else
+  long long int sforce[27*3];
+#endif
 };
 
 
@@ -212,7 +216,7 @@ public:
 			 double *energy_angle,
 			 double *energy_dihe, double *energy_imdihe,
 			 double *energy_cmap,
-			 double *sforcex, double *sforcey, double *sforcez);
+			 double *sforce);
 
   void print();
 };

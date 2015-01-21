@@ -62,37 +62,37 @@ bool Force<T>::compare(Force<T>& force, const double tol, double& max_diff) {
   xyz1.set_data_sync(force.size(), force.x(), force.y(), force.z());
   xyz2.set_data_sync(this->size(), this->x(), this->y(), this->z());
 
-  bool ok = true;
-
   max_diff = 0.0;
 
   int i;
   double fx1, fy1, fz1;
   double fx2, fy2, fz2;
   double diff;
-  try {
-    for (i=0;i < this->size();i++) {
-      fx1 = (double)(xyz1.x()[i]);
-      fy1 = (double)(xyz1.y()[i]);
-      fz1 = (double)(xyz1.z()[i]);
-      fx2 = (double)(xyz2.x()[i]);
-      fy2 = (double)(xyz2.y()[i]);
-      fz2 = (double)(xyz2.z()[i]);
-      if (isnan(fx1) || isnan(fy1) || isnan(fz1) || isnan(fx2) || isnan(fy2) || isnan(fz2)) throw 1;
-      diff = max(fabs(fx1-fx2), max(fabs(fy1-fy2), fabs(fz1-fz2)));
-      max_diff = max(diff, max_diff);
-      if (diff > tol) throw 2;
+  for (i=0;i < this->size();i++) {
+    fx1 = (double)(xyz1.x()[i]);
+    fy1 = (double)(xyz1.y()[i]);
+    fz1 = (double)(xyz1.z()[i]);
+    fx2 = (double)(xyz2.x()[i]);
+    fy2 = (double)(xyz2.y()[i]);
+    fz2 = (double)(xyz2.z()[i]);
+    if (isnan(fx1) || isnan(fy1) || isnan(fz1) || isnan(fx2) || isnan(fy2) || isnan(fz2)) {
+      std::cout << "i = "<< i << std::endl;
+      std::cout << "this: fx1 fy1 fz1 = " << fx1 << " "<< fy1 << " "<< fz1 << std::endl;
+      std::cout << "force:fx2 fy2 fz2 = " << fx2 << " "<< fy2 << " "<< fz2 << std::endl;
+      return false;
+    }
+    diff = max(fabs(fx1-fx2), max(fabs(fy1-fy2), fabs(fz1-fz2)));
+    max_diff = max(diff, max_diff);
+    if (diff > tol) {
+      std::cout << "i = "<< i << std::endl;
+      std::cout << "this: fx1 fy1 fz1 = " << fx1 << " "<< fy1 << " "<< fz1 << std::endl;
+      std::cout << "force:fx2 fy2 fz2 = " << fx2 << " "<< fy2 << " "<< fz2 << std::endl;
+      std::cout << "difference: " << diff << std::endl;
+      return false;
     }
   }
-  catch (int a) {
-    std::cout << "i = "<< i << std::endl;
-    std::cout << "this: fx1 fy1 fz1 = " << fx1 << " "<< fy1 << " "<< fz1 << std::endl;
-    std::cout << "force:fx2 fy2 fz2 = " << fx2 << " "<< fy2 << " "<< fz2 << std::endl;
-    if (a == 2) std::cout << "difference: " << diff << std::endl;
-    ok = false;
-  }
 
-  return ok;
+  return true;
 }
 
 //

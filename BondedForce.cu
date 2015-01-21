@@ -14,8 +14,8 @@ static __device__ BondedEnergyVirial_t d_energy_virial;
 // Reduces energy values
 //
 __forceinline__ __device__
-void reduce_energy(const double epot, volatile double *sh_epot,
-		   double *global_epot) {
+void reduce_energy(const double epot, volatile double *sh_epot, double *global_epot) {
+#if __CUDA_ARCH__ < 300
   sh_epot[threadIdx.x] = epot;
   __syncthreads();
   for (int i=1;i < blockDim.x;i *= 2) {
@@ -25,10 +25,30 @@ void reduce_energy(const double epot, volatile double *sh_epot,
     sh_epot[threadIdx.x] += epot_val;
     __syncthreads();
   }
-  if (threadIdx.x == 0) {
-    double epot_val = sh_epot[0];
-    atomicAdd(global_epot, epot_val);
+  if (threadIdx.x == 0) atomicAdd(global_epot, sh_epot[0]);
+#else
+  const int tid = threadIdx.x & (warpsize-1);
+  const int base = (threadIdx.x/warpsize);
+  // Reduce within warps
+  double energy = epot;
+  for (int d=warpsize/2;d >= 1;d /= 2) {
+    energy += __hiloint2double(__shfl(__double2hiint(energy), tid+d),
+			       __shfl(__double2loint(energy), tid+d));
   }
+  // Reduce between warps
+  // NOTE: this __syncthreads() is needed because we're using a single shared memory buffer
+  __syncthreads();
+  if (tid == 0) sh_epot[base] = energy;
+  __syncthreads();
+  if (base == 0) {
+    energy = (tid < blockDim.x/warpsize) ? sh_epot[tid] : 0.0;
+    for (int d=warpsize/2;d >= 1;d /= 2) {
+      energy += __hiloint2double(__shfl(__double2hiint(energy), tid+d),
+				 __shfl(__double2loint(energy), tid+d));
+    }
+  }
+  if (threadIdx.x == 0) atomicAdd(global_epot, energy);
+#endif
 }
 
 //
@@ -85,14 +105,22 @@ __device__ void calc_bond_force_device(const int pos,
   // Store forces
   write_force<AT>(fxij, fyij, fzij, ii, stride, force);
   write_force<AT>(-fxij, -fyij, -fzij, jj, stride, force);
-  
-  // Store shifted forces
+
+  // Store virial
   if (calc_virial) {
-    //       sforce(is)   = sforce(is)   + fx
-    //       sforce(is+1) = sforce(is+1) + fy
-    //       sforce(is+2) = sforce(is+2) + fz
+#ifdef USE_DP_SFORCE
+    atomicAdd(&d_energy_virial.sforce[ish-1], (double)(fij*dx));
+    atomicAdd(&d_energy_virial.sforce[ish],   (double)(fij*dy));
+    atomicAdd(&d_energy_virial.sforce[ish+1], (double)(fij*dz));
+#else
+    fxij /= CONVERT_TO_VIR;
+    fyij /= CONVERT_TO_VIR;
+    fzij /= CONVERT_TO_VIR;
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ish-1], llitoulli(fxij));
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ish],   llitoulli(fyij));
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ish+1], llitoulli(fzij));
+#endif
   }
-  
 }
 
 //
@@ -100,17 +128,16 @@ __device__ void calc_bond_force_device(const int pos,
 // bondcoef.y = cbc
 //
 template <typename AT, typename CT, bool calc_energy, bool calc_virial>
-__global__ void calc_bond_force_kernel(
-				       const int nbondlist,
+__global__ void calc_bond_force_kernel(const int nbondlist,
 				       const bondlist_t* __restrict__ bondlist,
 				       const float2* __restrict__ bondcoef,
 				       const float4* __restrict__ xyzq,
 				       const int stride,
 				       const float boxx, const float boxy, const float boxz,
-				       AT* __restrict__ force
-) {
+				       AT* __restrict__ force) {
   // Amount of shared memory required:
-  // sh_epot: blockDim.x*sizeof(double)
+  // CUDA_ARCH <  300: blockDim.x*sizeof(double)
+  // CUDA_ARCH >= 300: (blockDim.x/warpsize)*sizeof(double)
   extern __shared__ double sh_epot[];
 
   int pos = threadIdx.x + blockIdx.x*blockDim.x;
@@ -122,9 +149,7 @@ __global__ void calc_bond_force_kernel(
 
   while (pos < nbondlist) {
     calc_bond_force_device<AT, CT, calc_energy, calc_virial>
-      (pos, bondlist, bondcoef, xyzq,
-       stride, boxx, boxy, boxz,
-       force, epot);
+      (pos, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force, epot);
     pos += blockDim.x*gridDim.x;
   }
 
@@ -147,8 +172,7 @@ __global__ void calc_ureyb_force_kernel(
 				       const float4* __restrict__ xyzq,
 				       const int stride,
 				       const float boxx, const float boxy, const float boxz,
-				       AT* __restrict__ force
-) {
+				       AT* __restrict__ force) {
   // Amount of shared memory required:
   // sh_epot: blockDim.x*sizeof(double)
   extern __shared__ double sh_epot[];
@@ -162,9 +186,7 @@ __global__ void calc_ureyb_force_kernel(
 
   while (pos < nureyblist) {
     calc_bond_force_device<AT, CT, calc_energy, calc_virial>
-      (pos, ureyblist, ureybcoef, xyzq,
-       stride, boxx, boxy, boxz,
-       force, epot);
+      (pos, ureyblist, ureybcoef, xyzq, stride, boxx, boxy, boxz, force, epot);
     pos += blockDim.x*gridDim.x;
   }
 
@@ -252,22 +274,31 @@ __device__ void calc_angle_force_device(const int pos,
     write_force<AT>(AT_dtxi, AT_dtyi, AT_dtzi, ii, stride, force);
     write_force<AT>(AT_dtxj, AT_dtyj, AT_dtzj, kk, stride, force);
     write_force<AT>(-AT_dtxi-AT_dtxj, -AT_dtyi-AT_dtyj, -AT_dtzi-AT_dtzj, jj, stride, force);
-    
-    if (calc_virial) {
-      //       sforce(is) = sforce(is) + dtxi
-      //       sforce(ks) = sforce(ks) + dtxj
-    }
-    
-    if (calc_virial) {
-      //       sforce(is+1) = sforce(is+1) + dtxi
-      //       sforce(ks+1) = sforce(ks+1) + dtxj
-    }
 
+    // Store virial
     if (calc_virial) {
-      //       sforce(is+2) = sforce(is+2) + dtxi
-      //       sforce(ks+2) = sforce(ks+2) + dtxj
+#ifdef USE_DP_SFORCE
+      atomicAdd(&d_energy_virial.sforce[ish-1], (double)(df*dtxi));
+      atomicAdd(&d_energy_virial.sforce[ish],   (double)(df*dtyi));
+      atomicAdd(&d_energy_virial.sforce[ish+1], (double)(df*dtzi));
+      atomicAdd(&d_energy_virial.sforce[ksh-1], (double)(df*dtxj));
+      atomicAdd(&d_energy_virial.sforce[ksh],   (double)(df*dtyj));
+      atomicAdd(&d_energy_virial.sforce[ksh+1], (double)(df*dtzj));
+#else
+      AT_dtxi /= CONVERT_TO_VIR;
+      AT_dtyi /= CONVERT_TO_VIR;
+      AT_dtzi /= CONVERT_TO_VIR;
+      AT_dtxj /= CONVERT_TO_VIR;
+      AT_dtyj /= CONVERT_TO_VIR;
+      AT_dtzj /= CONVERT_TO_VIR;
+      atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ish-1], llitoulli(AT_dtxi));
+      atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ish],   llitoulli(AT_dtyi));
+      atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ish+1], llitoulli(AT_dtzi));
+      atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ksh-1], llitoulli(AT_dtxj));
+      atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ksh],   llitoulli(AT_dtyj));
+      atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ksh+1], llitoulli(AT_dtzj));
+#endif
     }
-
 }
 
 //
@@ -546,21 +577,38 @@ __device__ void calc_dihe_force_device(const int pos,
   write_force<AT>(-dhx-dgx, -dhy-dgy, -dhz-dgz, kk, stride, force);
   write_force<AT>(dhx, dhy, dhz, ll, stride, force);
 
+  // Store virial
   if (calc_virial) {
-    //       sforce(is)   = sforce(is)   + dfx
-    //       sforce(is+1) = sforce(is+1) + dfy
-    //       sforce(is+2) = sforce(is+2) + dfz
-  }
-
-  if (calc_virial) {
-    //       sforce(js)   = sforce(js)   - dfx + dgx
-    //       sforce(js+1) = sforce(js+1) - dfy + dgy
-    //       sforce(js+2) = sforce(js+2) - dfz + dgz
-  }
-  if (calc_virial) {
-    //       sforce(ls)   = sforce(ls)   + dhx
-    //       sforce(ls+1) = sforce(ls+1) + dhy
-    //       sforce(ls+2) = sforce(ls+2) + dhz
+#ifdef USE_DP_SFORCE
+    atomicAdd(&d_energy_virial.sforce[ish-1], (double)(-gaa*ax));
+    atomicAdd(&d_energy_virial.sforce[ish],   (double)(-gaa*ay));
+    atomicAdd(&d_energy_virial.sforce[ish+1], (double)(-gaa*az));
+    atomicAdd(&d_energy_virial.sforce[jsh-1], (double)(fga*ax - hgb*bx + gaa*ax));
+    atomicAdd(&d_energy_virial.sforce[jsh],   (double)(fga*ay - hgb*by + gaa*ay));
+    atomicAdd(&d_energy_virial.sforce[jsh+1], (double)(fga*az - hgb*bz + gaa*az));
+    atomicAdd(&d_energy_virial.sforce[lsh-1], (double )(gbb*bx));
+    atomicAdd(&d_energy_virial.sforce[lsh],   (double )(gbb*by));
+    atomicAdd(&d_energy_virial.sforce[lsh+1], (double )(gbb*bz));
+#else
+    dfx /= CONVERT_TO_VIR;
+    dfy /= CONVERT_TO_VIR;
+    dfz /= CONVERT_TO_VIR;
+    dgx /= CONVERT_TO_VIR;
+    dgy /= CONVERT_TO_VIR;
+    dgz /= CONVERT_TO_VIR;
+    dhx /= CONVERT_TO_VIR;
+    dhy /= CONVERT_TO_VIR;
+    dhz /= CONVERT_TO_VIR;
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ish-1], llitoulli(dfx));
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ish],   llitoulli(dfy));
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[ish+1], llitoulli(dfz));
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[jsh-1], llitoulli(dgx-dfx));
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[jsh],   llitoulli(dgy-dfy));
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[jsh+1], llitoulli(dgz-dfz));
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[lsh-1], llitoulli(dhx));
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[lsh],   llitoulli(dhy));
+    atomicAdd((unsigned long long int *)&d_energy_virial.sforce[lsh+1], llitoulli(dhz));
+#endif
   }
 
 }
@@ -1187,98 +1235,118 @@ void BondedForce<AT, CT>::calc_force(const float4 *xyzq,
     exit(1);
   }
 
-  int nthread, nblock, shmem_size;
-
-  nthread = 512;
-  nblock = (nbondlist -1)/nthread + 1;
-  shmem_size = 0;
   if (calc_energy) {
-    shmem_size += nthread*sizeof(double);
-  }
 
-  if (calc_energy) {
-    if (calc_virial) {
-      std::cerr << "BondedForce<AT, CT>::calc_force, calc_virial not implemented yet (1)" << std::endl;
-    }
-
-    if (calc_bond) {
-      nthread = 512;
-      nblock = (nbondlist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_bond_force_kernel<AT, CT, true, false >
-	<<< nblock, nthread, shmem_size, stream >>>
-	(nbondlist, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force);
+    if (calc_bond) {	
+      int nthread = 512;
+      int nblock = (nbondlist -1)/nthread + 1;
+      int shmem_size = (nthread/((get_cuda_arch() < 300) ? 1 : warpsize))*sizeof(double);
+      if (calc_virial) {
+	calc_bond_force_kernel<AT, CT, true, true >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nbondlist, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force);
+      } else {
+	calc_bond_force_kernel<AT, CT, true, false >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nbondlist, bondlist, bondcoef, xyzq, stride, boxx, boxy, boxz, force);
+      }
       cudaCheck(cudaGetLastError());
     }
     
     if (calc_ureyb) {
-      nthread = 512;
-      nblock = (nureyblist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_ureyb_force_kernel<AT, CT, true, false >
-	<<< nblock, nthread, shmem_size, stream >>>
-	(nureyblist, ureyblist, ureybcoef, xyzq, stride, boxx, boxy, boxz, force);
+      int nthread = 512;
+      int nblock = (nureyblist -1)/nthread + 1;
+      int shmem_size = (nthread/((get_cuda_arch() < 300) ? 1 : warpsize))*sizeof(double);
+      if (calc_virial) {
+	calc_ureyb_force_kernel<AT, CT, true, true >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nureyblist, ureyblist, ureybcoef, xyzq, stride, boxx, boxy, boxz, force);
+      } else {
+	calc_ureyb_force_kernel<AT, CT, true, false >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nureyblist, ureyblist, ureybcoef, xyzq, stride, boxx, boxy, boxz, force);
+      }
       cudaCheck(cudaGetLastError());
     }
     
     if (calc_angle) {
-      nthread = 512;
-      nblock = (nanglelist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_angle_force_kernel<AT, CT, true, false >
-	<<< nblock, nthread, shmem_size, stream >>>
-	(nanglelist, anglelist, anglecoef, xyzq, stride, boxx, boxy, boxz, force);
+      int nthread = 512;
+      int nblock = (nanglelist -1)/nthread + 1;
+      int shmem_size = (nthread/((get_cuda_arch() < 300) ? 1 : warpsize))*sizeof(double);
+      if (calc_virial) {
+	calc_angle_force_kernel<AT, CT, true, true >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nanglelist, anglelist, anglecoef, xyzq, stride, boxx, boxy, boxz, force);
+      } else {
+	calc_angle_force_kernel<AT, CT, true, false >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nanglelist, anglelist, anglecoef, xyzq, stride, boxx, boxy, boxz, force);
+      }
       cudaCheck(cudaGetLastError());
     }
     
     if (calc_dihe) {
-      nthread = 512;
-      nblock = (ndihelist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_dihe_force_kernel<AT, CT, true, false >
-	<<< nblock, nthread, shmem_size, stream >>>
-	(ndihelist, dihelist, dihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      int nthread = 512;
+      int nblock = (ndihelist -1)/nthread + 1;
+      int shmem_size = (nthread/((get_cuda_arch() < 300) ? 1 : warpsize))*sizeof(double);
+      if (calc_virial) {
+	calc_dihe_force_kernel<AT, CT, true, true >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (ndihelist, dihelist, dihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      } else {
+	calc_dihe_force_kernel<AT, CT, true, false >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (ndihelist, dihelist, dihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      }
       cudaCheck(cudaGetLastError());
     }
     
     if (calc_imdihe) {
-      nthread = 512;
-      nblock = (nimdihelist -1)/nthread + 1;
-      shmem_size = 0;
-      if (calc_energy) shmem_size += nthread*sizeof(double);
-      calc_imdihe_force_kernel<AT, CT, true, false >
-	<<< nblock, nthread, shmem_size, stream >>>
-	(nimdihelist, imdihelist, imdihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      int nthread = 512;
+      int nblock = (nimdihelist -1)/nthread + 1;
+      int shmem_size = (nthread/((get_cuda_arch() < 300) ? 1 : warpsize))*sizeof(double);
+      if (calc_virial) {
+	calc_imdihe_force_kernel<AT, CT, true, true >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nimdihelist, imdihelist, imdihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      } else {
+	calc_imdihe_force_kernel<AT, CT, true, false >
+	  <<< nblock, nthread, shmem_size, stream >>>
+	  (nimdihelist, imdihelist, imdihecoef, xyzq, stride, boxx, boxy, boxz, force);
+      }
       cudaCheck(cudaGetLastError());
     }
-
   } else {
-    if (calc_virial) {
-      std::cerr << "BondedForce<AT, CT>::calc_force, calc_virial not implemented yet (2)" << std::endl;
-    }
-
     int nbondlist_loc   = (calc_bond)   ? nbondlist   : 0;
     int nureyblist_loc  = (calc_ureyb)  ? nureyblist  : 0;
     int nanglelist_loc  = (calc_angle)  ? nanglelist  : 0;
     int ndihelist_loc   = (calc_dihe)   ? ndihelist   : 0;
     int nimdihelist_loc = (calc_imdihe) ? nimdihelist : 0;
-    
-    nthread = 512;
-    nblock = (nbondlist_loc + nureyblist_loc + nanglelist_loc + 
-	      ndihelist_loc + nimdihelist_loc -1)/nthread + 1;
-    
-    calc_all_forces_kernel<AT, CT, false, false>
-      <<< nblock, nthread, shmem_size, stream>>>
-      (nbondlist_loc, bondlist, bondcoef,
-       nureyblist_loc, ureyblist, ureybcoef,
-       nanglelist_loc, anglelist, anglecoef,
-       ndihelist_loc, dihelist, dihecoef,
-       nimdihelist_loc, imdihelist, imdihecoef,
-       xyzq, stride, boxx, boxy, boxz, force);
+
+    int nthread = 512;
+    int nblock = (nbondlist_loc + nureyblist_loc + nanglelist_loc + 
+		  ndihelist_loc + nimdihelist_loc -1)/nthread + 1;
+    int shmem_size = 0;
+
+    if (calc_virial) {
+      calc_all_forces_kernel<AT, CT, false, true>
+	<<< nblock, nthread, shmem_size, stream>>>
+	(nbondlist_loc, bondlist, bondcoef,
+	 nureyblist_loc, ureyblist, ureybcoef,
+	 nanglelist_loc, anglelist, anglecoef,
+	 ndihelist_loc, dihelist, dihecoef,
+	 nimdihelist_loc, imdihelist, imdihecoef,
+	 xyzq, stride, boxx, boxy, boxz, force);
+    } else {
+      calc_all_forces_kernel<AT, CT, false, false>
+	<<< nblock, nthread, shmem_size, stream>>>
+	(nbondlist_loc, bondlist, bondcoef,
+	 nureyblist_loc, ureyblist, ureybcoef,
+	 nanglelist_loc, anglelist, anglecoef,
+	 ndihelist_loc, dihelist, dihecoef,
+	 nimdihelist_loc, imdihelist, imdihecoef,
+	 xyzq, stride, boxx, boxy, boxz, force);
+    }
     cudaCheck(cudaGetLastError());
   }
 
@@ -1295,10 +1363,12 @@ void BondedForce<AT, CT>::clear_energy_virial(cudaStream_t stream) {
   h_energy_virial->energy_dihe = 0.0;
   h_energy_virial->energy_imdihe = 0.0;
   h_energy_virial->energy_cmap = 0.0;
-  for (int i=0;i < 27;i++) {
-    h_energy_virial->sforcex[i] = 0.0;
-    h_energy_virial->sforcey[i] = 0.0;
-    h_energy_virial->sforcez[i] = 0.0;
+  for (int i=0;i < 27*3;i++) {
+#ifdef USE_DP_SFORCE
+    h_energy_virial->sforce[i] = 0.0;
+#else
+    h_energy_virial->sforce[i] = 0ll;
+#endif
   }
   cudaCheck(cudaMemcpyToSymbolAsync(d_energy_virial, h_energy_virial, sizeof(BondedEnergyVirial_t),
 				    0, cudaMemcpyHostToDevice, stream));
@@ -1315,13 +1385,13 @@ void BondedForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_cal
 					    double *energy_angle,
 					    double *energy_dihe, double *energy_imdihe,
 					    double *energy_cmap,
-					    double *sforcex, double *sforcey, double *sforcez) {
+					    double *sforce) {
   if (prev_calc_energy && prev_calc_virial) {
     cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(BondedEnergyVirial_t)));
   } else if (prev_calc_energy) {
     cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 6*sizeof(double)));
   } else if (prev_calc_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 27*3*sizeof(double),
+    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial->sforce, d_energy_virial, 27*3*sizeof(long long int),
 				   6*sizeof(double)));
   }
   *energy_bond = h_energy_virial->energy_bond;
@@ -1330,10 +1400,12 @@ void BondedForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_cal
   *energy_dihe = h_energy_virial->energy_dihe;
   *energy_imdihe = h_energy_virial->energy_imdihe;
   *energy_cmap = h_energy_virial->energy_cmap;
-  for (int i=0;i < 27;i++) {
-    sforcex[i] = h_energy_virial->sforcex[i];
-    sforcey[i] = h_energy_virial->sforcey[i];
-    sforcez[i] = h_energy_virial->sforcez[i];
+  for (int i=0;i < 27*3;i++) {
+#ifdef USE_DP_SFORCE    
+    sforce[i] = h_energy_virial->sforce[i];
+#else
+    sforce[i] = ((double)h_energy_virial->sforce[i])*INV_FORCE_SCALE_VIR_CPU;
+#endif
   }
 }
 
