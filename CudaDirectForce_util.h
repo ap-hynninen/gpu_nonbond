@@ -11,7 +11,6 @@
       (__VA_ARGS__);							\
   }
 
-
 #define CREATE_KERNEL14(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, CALC_ENERGY, CALC_VIRIAL, TEX_VDWPARAM, ...) \
   {									\
     KERNEL_NAME <AT, CT, VDW_MODEL, ELEC_MODEL, CALC_ENERGY, CALC_VIRIAL, TEX_VDWPARAM> \
@@ -79,8 +78,7 @@ static __constant__ const float ccelec = 332.0716;
 template <int vdw_model, bool calc_energy>
 __forceinline__ __device__
 float pair_vdw_force(const float r2, const float r, const float rinv, const float rinv2,
-		     const float c6, const float c12,
-		     double &pot_vdw) {
+		     const float c6, const float c12,float &pot_vdw) {
 
   float fij_vdw;
 
@@ -88,13 +86,11 @@ float pair_vdw_force(const float r2, const float r, const float rinv, const floa
     float r6 = r2*r2*r2;
     float rinv6 = rinv2*rinv2*rinv2;
     float rinv12 = rinv6*rinv6;
-	    
     if (calc_energy) {
       const float one_twelve = 0.0833333333333333f;
       const float one_six = 0.166666666666667f;
-      pot_vdw = (double)(c12*one_twelve*(rinv12 + 2.0f*r6*d_setup.roffinv18 - 
-					 3.0f*d_setup.roffinv12)-
-			 c6*one_six*(rinv6 + r6*d_setup.roffinv12 - 2.0f*d_setup.roffinv6));
+      pot_vdw = c12*one_twelve*(rinv12 + 2.0f*r6*d_setup.roffinv18 - 3.0f*d_setup.roffinv12)-
+	c6*one_six*(rinv6 + r6*d_setup.roffinv12 - 2.0f*d_setup.roffinv6);
     }
 	  
     fij_vdw = c6*(rinv6 - r6*d_setup.roffinv12) - c12*(rinv12 + r6*d_setup.roffinv18);
@@ -112,16 +108,15 @@ float pair_vdw_force(const float r2, const float r, const float rinv, const floa
     if (calc_energy) {
       const float one_twelve = 0.0833333333333333f;
       const float one_six = 0.166666666666667f;
-      pot_vdw = (double)( sw*rinv6*(one_twelve*c12*rinv6 - one_six*c6) );
+      pot_vdw = sw*rinv6*(one_twelve*c12*rinv6 - one_six*c6);
     }
   } else if (vdw_model == VDW_CUT) {
     float rinv6 = rinv2*rinv2*rinv2;
-	  
     if (calc_energy) {
       const float one_twelve = 0.0833333333333333f;
       const float one_six = 0.166666666666667f;
       float rinv12 = rinv6*rinv6;
-      pot_vdw = (double)(c12*one_twelve*rinv12 - c6*one_six*rinv6);
+      pot_vdw = c12*one_twelve*rinv12 - c6*one_six*rinv6;
       fij_vdw = c6*rinv6 - c12*rinv12;
     } else {
       fij_vdw = c6*rinv6 - c12*rinv6*rinv6;
@@ -146,8 +141,7 @@ float pair_vdw_force(const float r2, const float r, const float rinv, const floa
       float rinv6_B12_sq = rinv6 - B12;
       rinv6_B12_sq *= rinv6_B12_sq;
 
-      pot_vdw = (double)(one_twelve*c12*(A12*rinv6_B12_sq + C12) -
-			 one_six*c6*(A6*rinv3_B6_sq + C6));
+      pot_vdw = one_twelve*c12*(A12*rinv6_B12_sq + C12) - one_six*c6*(A6*rinv3_B6_sq + C6);
     }
   } else if (vdw_model == VDW_VGSH) {
     float rinv3 = rinv*rinv2;
@@ -164,10 +158,10 @@ float pair_vdw_force(const float r2, const float r, const float rinv, const floa
       const float one_six = 0.166666666666667f;
       const float one_third = (float)(1.0/3.0);
       float r_ron3 = r_ron*r_ron*r_ron;
-      pot_vdw = (double)(c6*(-one_six*rinv6 + (one_third*d_setup.ga6 + 0.25f*d_setup.gb6*r_ron)*r_ron3 
-			     + d_setup.gc6) +
-			 c12*(one_twelve*rinv12 - (one_third*d_setup.ga12 + 0.25f*d_setup.gb12*r_ron)*r_ron3 
-			      - d_setup.gc12));
+      pot_vdw = c6*(-one_six*rinv6 + (one_third*d_setup.ga6 + 0.25f*d_setup.gb6*r_ron)*r_ron3 
+		    + d_setup.gc6) +
+	c12*(one_twelve*rinv12 - (one_third*d_setup.ga12 + 0.25f*d_setup.gb12*r_ron)*r_ron3 
+	     - d_setup.gc12);
     }
     /*
     if (r > ctonnb) then
@@ -188,7 +182,7 @@ float pair_vdw_force(const float r2, const float r, const float rinv, const floa
   } else if (vdw_model == NONE) {
     fij_vdw = 0.0f;
     if (calc_energy) {
-      pot_vdw = 0.0;
+      pot_vdw = 0.0f;
     }
   }
 
@@ -220,7 +214,7 @@ __forceinline__ __device__ float lookup_force(const float r, const float hinv) {
 template <int elec_model, bool calc_energy>
 __forceinline__ __device__
 float pair_elec_force(const float r2, const float r, const float rinv, 
-		      const float qq, double &pot_elec) {
+		      const float qq, float &pot_elec) {
 
   float fij_elec;
 
@@ -230,7 +224,7 @@ float pair_elec_force(const float r2, const float r, const float rinv,
     float erfc_val = fasterfc(d_setup.kappa*r);
     float exp_val = expf(-d_setup.kappa2*r2);
     if (calc_energy) {
-      pot_elec = (double)(qq*erfc_val*rinv);
+      pot_elec = qq*erfc_val*rinv;
     }
     const float two_sqrtpi = 1.12837916709551f;    // 2/sqrt(pi)
     fij_elec = qq*(two_sqrtpi*d_setup.kappa*exp_val + erfc_val*rinv);
@@ -243,13 +237,13 @@ float pair_elec_force(const float r2, const float r, const float rinv,
     fij_elec = qq*(rinv - (5.0f*d_setup.roffinv4*r - 4.0f*d_setup.roffinv5*r2)*r2 );
     //d = -qscale*(one/r2 - 5.0*r2/ctofnb4 +4*r2*r/ctofnb5)
     if (calc_energy) {
-      pot_elec = (double)(qq*(rinv - d_setup.GAconst + (d_setup.GBcoef*r - d_setup.roffinv5*r2)*r2));
+      pot_elec = qq*(rinv - d_setup.GAconst + (d_setup.GBcoef*r - d_setup.roffinv5*r2)*r2);
       //e = qscale*(one/r - GAconst + r*r2*GBcoef - r2*r2/ctofnb5)
     }
   } else if (elec_model == NONE) {
     fij_elec = 0.0f;
     if (calc_energy) {
-      pot_elec = 0.0;
+      pot_elec = 0.0f;
     }
   }
 
@@ -262,7 +256,7 @@ float pair_elec_force(const float r2, const float r, const float rinv,
 template <int elec_model, bool calc_energy>
 __forceinline__ __device__
 float pair_elec_force_14(const float r2, const float r, const float rinv,
-			 const float qq, const float e14fac, double &pot_elec) {
+			 const float qq, const float e14fac, float &pot_elec) {
 
   float fij_elec;
 
@@ -271,14 +265,14 @@ float pair_elec_force_14(const float r2, const float r, const float rinv,
     float exp_val = expf(-d_setup.kappa2*r2);
     float qq_efac_rinv = qq*(erfc_val + e14fac - 1.0f)*rinv;
     if (calc_energy) {
-      pot_elec = (double)qq_efac_rinv;
+      pot_elec = qq_efac_rinv;
     }
     const float two_sqrtpi = 1.12837916709551f;    // 2/sqrt(pi)
     fij_elec = -qq*two_sqrtpi*d_setup.kappa*exp_val - qq_efac_rinv;
   } else if (elec_model == NONE) {
     fij_elec = 0.0f;
     if (calc_energy) {
-      pot_elec = 0.0;
+      pot_elec = 0.0f;
     }
   }
 
@@ -340,14 +334,14 @@ __device__ void calc_in14_force_device(
 
   CT rinv2 = rinv*rinv;
 
-  double dpot_vdw;
+  float dpot_vdw;
   CT fij_vdw = pair_vdw_force<vdw_model, calc_energy>(r2, r, rinv, rinv2, c6, c12, dpot_vdw);
-  if (calc_energy) vdw_pot += dpot_vdw;
+  if (calc_energy) vdw_pot += (double)dpot_vdw;
 
-  double dpot_elec;
+  float dpot_elec;
   CT fij_elec = pair_elec_force_14<elec_model, calc_energy>(r2, r, rinv, qq,
   							    d_setup.e14fac, dpot_elec);
-  if (calc_energy) elec_pot += dpot_elec;
+  if (calc_energy) elec_pot += (double)dpot_elec;
 
   CT fij = (fij_vdw + fij_elec)*rinv2;
 
@@ -393,10 +387,10 @@ __device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list
   CT r = sqrtf(r2);
   CT rinv = ((CT)1)/r;
   CT rinv2 = rinv*rinv;
-  double dpot_elec;
+  float dpot_elec;
   CT fij_elec = pair_elec_force_14<elec_model, calc_energy>(r2, r, rinv, qq,
 							    0.0f, dpot_elec);
-  if (calc_energy) elec_pot += dpot_elec;
+  if (calc_energy) elec_pot += (double)dpot_elec;
   CT fij = fij_elec*rinv2;
   // Calculate force components
   AT fxij, fyij, fzij;
@@ -514,7 +508,11 @@ __global__ void calc_force_kernel(
 				  const float* __restrict__ vdwparam, const int nvdwparam,
 				  const float4* __restrict__ xyzq, const int* __restrict__ vdwtype,
 #ifdef USE_BLOCK
+				  const int numBlock,
+				  const float* __restrict__ bixlam,
 				  const int* __restrict__ blocktype,
+				  AT* __restrict__ biflam,
+				  AT* __restrict__ biflam2,
 #ifdef USE_TEXTURE_OBJECTS
 				  const cudaTextureObject_t block_tex,
 #endif
@@ -547,6 +545,10 @@ __global__ void calc_force_kernel(
   // sh_fix, sh_fiy, sh_fiz    : (blockDim.x/warpsize)*warpsize*sizeof(AT)
   // sh_vdwparam               : nvdwparam*sizeof(float)
   //
+  // ## For USE_BLOCK ##
+  // sh_blocktypei             : (blockDim.x/warpsize)*tilesize*sizeof(int)
+  // sh_bixlam                 : numBlock*sizeof(float)
+  //
   // (x_i, y_i, z_i, q_i, vdwtype_i) are private to each warp
   // (fix, fiy, fiz) are private for each warp
   // vdwparam_sh is for the entire thread block
@@ -567,6 +569,14 @@ __global__ void calc_force_kernel(
 #endif
 #endif
 
+#ifdef USE_BLOCK
+#ifndef NUMBLOCK_LARGE
+  // For large numBlock values, to conserve shared memory, we don't store bixlam into shared memory.
+  int *sh_bixlam = (int *)&shmem[shmem_pos];
+  shmem_pos += numBlock*sizeof(float);
+#endif
+#endif
+  
   volatile AT *sh_fix = (AT *)&shmem[shmem_pos + (threadIdx.x/warpsize)*warpsize*sizeof(AT)];
   shmem_pos += (blockDim.x/warpsize)*warpsize*sizeof(AT);
   volatile AT *sh_fiy = (AT *)&shmem[shmem_pos + (threadIdx.x/warpsize)*warpsize*sizeof(AT)];
@@ -638,6 +648,16 @@ __global__ void calc_force_kernel(
     __syncthreads();
   }
 
+#ifdef USE_BLOCK
+#ifndef NUMBLOCK_LARGE
+    // Copy bixlam to shared memory
+    for (int i=threadIdx.x;i < numBlock;i+=blockDim.x)
+      sh_bixlam[i] = bixlam[i];
+    __syncthreads();
+  }
+#endif
+#endif
+  
   double vdwpotl;
   double coulpotl;
   if (calc_energy) {
@@ -719,10 +739,11 @@ __global__ void calc_force_kernel(
 	float rinv = rsqrtf(r2);
 	float r = r2*rinv;
 	
-	double dpot_elec;
+	float dpot_elec;
 	float fij_elec = pair_elec_force<elec_model, calc_energy>(r2, r, rinv, qq, dpot_elec);
-	coulpotl += dpot_elec;
-
+#ifndef USE_BLOCK
+	if (calc_energy) coulpotl += (double)dpot_elec;
+#endif
 	int aa = (ja > ia) ? ja : ia;      // aa = max(ja,ia)
 	
 	float c6, c12;
@@ -744,12 +765,21 @@ __global__ void calc_force_kernel(
 	}
 	
 	float rinv2 = rinv*rinv;
-	double dpot_vdw;
+	float dpot_vdw;
 	float fij_vdw = pair_vdw_force<vdw_model, calc_energy>(r2, r, rinv, rinv2,
 							       c6, c12, dpot_vdw);
-	vdwpotl += dpot_vdw;
+#ifndef USE_BLOCK
+	if (calc_energy) vdwpotl += (double)dpot_vdw;
+#endif
+	
+	float fij = (fij_vdw - fij_elec)*rinv*rinv;
 
 #ifdef USE_BLOCK
+	// ib: highest 16 bits is the site number (isitemld), lowest 16 bits is the block number
+	int ib_site = ib & 0xffff0000;
+	int jb_site = jb & 0xffff0000;
+	ib &= 0xffff;
+	jb &= 0xffff;
 	int bb = (jb > ib) ? jb : ib;      // bb = max(jb,ib)
 	int iblock = (bb*(bb-3) + 2*(jb + ib) - 2);
 #ifdef USE_TEXTURE_OBJECTS
@@ -757,14 +787,54 @@ __global__ void calc_force_kernel(
 #else
 	float scale = tex1Dfetch(blockparam_texref, iblock);
 #endif
-	fij_vdw *= scale;
-	fij_elec *= scale;
+	fij *= scale;
 	if (calc_energy) {
+	  if (scale != 1.0f && scale != 0.0f) {
+	    float dpot = (dpot_elec + dpot_vdw)*FORCE_SCALE_VIR;
+	    int ibb = (ib == jb) ? ib : ( ib == 0 ? jb : (jb == 0 ? ib : -1) );
+
+	    //float dpot_scale = 1.0f;
+	    //if (ibb < 0) {
+	    //  dpot_scale = bixlam[ib];
+	    //  ibb += 
+	    //}
+	    //biflam[ibb] += (double)dpot;
+	    
+	    if (ibb >= 0) {
+	      //biflam[ibb] += (double)dpot;
+	      AT dpotAT = lliroundf(dpot);
+	      atomicAdd((unsigned long long int *)&biflam[ibb], llitoulli(dpotAT));
+	    } else if (ib_site != jb_site) {
+#ifdef NUMBLOCK_LARGE
+	      AT dpotiAT = lliroundf(bixlam[ib]*dpot);
+	      AT dpotjAT = lliroundf(bixlam[jb]*dpot);
+#else
+	      AT dpotiAT = lliroundf(sh_bixlam[ib]*dpot);
+	      AT dpotjAT = lliroundf(sh_bixlam[jb]*dpot);
+#endif
+	      atomicAdd((unsigned long long int *)&biflam2[ib], llitoulli(dpotiAT));
+	      atomicAdd((unsigned long long int *)&biflam2[jb], llitoulli(dpotjAT));
+	    }
+
+	    	  /*
+      if (ibl.eq.jbl) then
+         biflam(ibl) = biflam(ibl) + energy
+      elseif (ibl.eq.1) then
+         biflam(jbl) = biflam(jbl) + energy
+      elseif (jbl.eq.1) then
+         biflam(ibl) = biflam(ibl) + energy
+      elseif (isitemld(ibl).ne.isitemld(jbl)) then
+         biflam2(jbl) = biflam2(jbl) + bixlam(ibl)*energy
+         biflam2(ibl) = biflam2(ibl) + bixlam(jbl)*energy
+      endif
+	  */
+
+	  }
 	  
+	  coulpotl += (double)(dpot_elec*scale);
+	  vdwpotl += (double)(dpot_vdw*scale);
 	}
 #endif
-
-	float fij = (fij_vdw - fij_elec)*rinv*rinv;
 
 	AT fxij;
 	AT fyij;

@@ -550,6 +550,7 @@ __device__ void flush_atomj(const int wid, const int istart,
 
 //
 // Flush jlist into global memory
+// sh_jlist[0...n_jlist-1] = list of jcells
 //
 template <int tilesize>
 __device__ void flush_jlist(const int wid, const int istart, const int iend,
@@ -591,7 +592,6 @@ __device__ void flush_jlist(const int wid, const int istart, const int iend,
   // Loop through j-cells
   for (int i_jlist=0;i_jlist < n_jlist;i_jlist++) {
     int jcell = sh_jlist[i_jlist];
-    //if (jcell < 0 || jcell >= d_NlistParam.ncell) atomicOr(&d_NlistParam.tmp, jcell);
     int jstart = cell_patom[jcell];
     int jend   = cell_patom[jcell + 1] - 1;
 
