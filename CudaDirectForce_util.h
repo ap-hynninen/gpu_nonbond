@@ -802,27 +802,29 @@ __global__ void calc_force_kernel(
   if (calc_virial) {
     // Virial is calculated from (sh_fix[], sh_fiy[], sh_fiz[])
     // Variable "ish" depends on warp => Reduce within warp
+    // NOTE: we skip the center element because it doesn't contribute to the virial
+    if (ish != 13) {
+      // Convert into double
+      volatile double *sh_sfix = (double *)sh_fix;
+      volatile double *sh_sfiy = (double *)sh_fiy;
+      volatile double *sh_sfiz = (double *)sh_fiz;
 
-    // Convert into double
-    volatile double *sh_sfix = (double *)sh_fix;
-    volatile double *sh_sfiy = (double *)sh_fiy;
-    volatile double *sh_sfiz = (double *)sh_fiz;
+      sh_sfix[wid] = ((double)sh_fix[wid])*INV_FORCE_SCALE;
+      sh_sfiy[wid] = ((double)sh_fiy[wid])*INV_FORCE_SCALE;
+      sh_sfiz[wid] = ((double)sh_fiz[wid])*INV_FORCE_SCALE;
 
-    sh_sfix[wid] = ((double)sh_fix[wid])*INV_FORCE_SCALE;
-    sh_sfiy[wid] = ((double)sh_fiy[wid])*INV_FORCE_SCALE;
-    sh_sfiz[wid] = ((double)sh_fiz[wid])*INV_FORCE_SCALE;
-
-    for (int d=16;d >= 1;d/=2) {
-      if (wid < d) {
-	sh_sfix[wid] += sh_sfix[wid + d];
-	sh_sfiy[wid] += sh_sfiy[wid + d];
-	sh_sfiz[wid] += sh_sfiz[wid + d];
+      for (int d=16;d >= 1;d/=2) {
+	if (wid < d) {
+	  sh_sfix[wid] += sh_sfix[wid + d];
+	  sh_sfiy[wid] += sh_sfiy[wid + d];
+	  sh_sfiz[wid] += sh_sfiz[wid + d];
+	}
       }
-    }
-    if (wid == 0) {
-      atomicAdd(&d_energy_virial.sforcex[ish], sh_sfix[0]);
-      atomicAdd(&d_energy_virial.sforcey[ish], sh_sfiy[0]);
-      atomicAdd(&d_energy_virial.sforcez[ish], sh_sfiz[0]);
+      if (wid == 0) {
+	atomicAdd(&d_energy_virial.sforcex[ish], sh_sfix[0]);
+	atomicAdd(&d_energy_virial.sforcey[ish], sh_sfiy[0]);
+	atomicAdd(&d_energy_virial.sforcez[ish], sh_sfiz[0]);
+      }
     }
   }
 

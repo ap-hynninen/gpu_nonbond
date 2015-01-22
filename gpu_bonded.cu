@@ -158,9 +158,13 @@ void test() {
   results_ref.energy_dihe = 921.88694;
   results_ref.energy_imdihe = 102.07776;
 
-  // Compute reference virial
+  // Load reference virial
   load_ind<double>(27*3, "test_data/sforce_bonded.txt", 1, results_ref.sforce);
-  
+  // Zero the center element of sforce that doesn't contribute to the virial
+  results_ref.sforce[39] = 0.0;
+  results_ref.sforce[40] = 0.0;
+  results_ref.sforce[41] = 0.0;
+   
   Force<double> force_ref("test_data/force_bonded.txt");
   Force<long long int> force_fp(ncoord);
   Force<double> force(ncoord);

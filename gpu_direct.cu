@@ -70,8 +70,8 @@ void test() {
 				   159.656334638202, 57272.9410562695, 894.635309171291,
 				   483.080609561938, 894.635309171288, 56639.3675265570};
   const double ref_vir = 57553.5284132295;
-  //const double ref_energy_vdw = 8198.14425;
-  //const double ref_energy_elec = -73396.45998;
+  const double ref_energy_vdw = 8198.14425;
+  const double ref_energy_elec = -73396.45998;
 
   Force<float> force_main("test_data/force_direct_main.txt");
   Force<float> force_total("test_data/force_direct.txt");
@@ -151,8 +151,6 @@ void test() {
   nlist.analyze();
   std::cout << "=======================================" << std::endl;
 
-  deallocate<int>(&loc2glo);
-
   // ------------------- Non-bonded -----------------
 
   CudaPMEDirectForce<long long int, float> dir;
@@ -187,6 +185,7 @@ void test() {
   force_fp.clear();
   dir.clear_energy_virial();
   dir.calc_force(xyzq.xyzq, nlist_ref.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
+  force_fp.convert(force);
   dir.calc_virial(ncoord, xyzq.xyzq, force_fp.stride(), force_fp.xyz());
 
   double energy_vdw;
@@ -195,8 +194,23 @@ void test() {
   double virtensor[9];
   dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
   cudaCheck(cudaDeviceSynchronize());
-  double vir = (virtensor[0] + virtensor[4] + virtensor[8])/3.0;
+  tol = 7.71e-4;
+  if (!force_main.compare(force, tol, max_diff)) {
+    std::cout<<"Non-bonded (main) force comparison FAILED"<<std::endl;
+  } else {
+    std::cout<<"Non-bonded (main) force comparison OK"<<std::endl;
+    std::cout<<"(tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+  }
+
   std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
+  max_diff = max(fabs(energy_vdw-ref_energy_vdw), fabs(energy_elec-ref_energy_elec));
+  if (max_diff < 0.007) {
+    std::cout << "Nonbonded energy comparison OK" << std::endl;
+  } else {
+    std::cout << "Nonbonded energy comparison FAILED max_diff=" << max_diff << std::endl;
+  }
+
+  double vir = (virtensor[0] + virtensor[4] + virtensor[8])/3.0;
   std::cout << "vir = " << vir << " virtensor=" << std::endl;
   max_diff = 0.0;
   for (int j=0;j < 3;j++) {
@@ -216,16 +230,65 @@ void test() {
   std::cout << "max_diff(vir_tensor) = " << max_diff << std::endl;
   std::cout << "max_diff(vir) = " << fabs(vir - ref_vir) << std::endl;
 
-  //--------------- Non-bonded using GPU build neighborlist -----------
+  //--------------- Non-bonded using GPU built neighborlist -----------
+
+  // Update vdwtype to reflect new ordering of atoms
+  int *h_glo_vdwtype = new int[ncoord];
+  load_ind<int>(1, "test_data/glo_vdwtype.txt", ncoord, h_glo_vdwtype);
+  int *glo_vdwtype;
+  allocate<int>(&glo_vdwtype, ncoord);
+  copy_HtoD_sync<int>(h_glo_vdwtype, glo_vdwtype, ncoord);
+  dir.set_vdwtype(ncoord, glo_vdwtype, loc2glo);
+  delete [] h_glo_vdwtype;
+  deallocate<int>(&glo_vdwtype);
+  
   force_fp.clear();
   dir.clear_energy_virial();
   dir.calc_force(xyzq_sorted.xyzq, nlist.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
+  force_fp.convert(force);
   dir.calc_virial(ncoord, xyzq_sorted.xyzq, force_fp.stride(), force_fp.xyz());
 
   dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
   cudaCheck(cudaDeviceSynchronize());
-  vir = (virtensor[0] + virtensor[4] + virtensor[8])/3.0;
+
   std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
+  max_diff = max(fabs(energy_vdw-ref_energy_vdw), fabs(energy_elec-ref_energy_elec));
+  if (max_diff < 0.005) {
+    std::cout << "Nonbonded energy comparison OK" << std::endl;
+  } else {
+    std::cout << "Nonbonded energy comparison FAILED max_diff=" << max_diff << std::endl;
+  }
+
+  // NOTE: we're not doing the force comparison here because our reference forces are in
+  //       different order
+  /*
+  tol = 7.71e-4;
+  if (!force_main.compare(force, tol, max_diff)) {
+    std::cout<<"Non-bonded (main) force comparison FAILED"<<std::endl;
+  } else {
+    std::cout<<"Non-bonded (main) force comparison OK"<<std::endl;
+    std::cout<<"(tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+  }
+  */
+  
+  vir = (virtensor[0] + virtensor[4] + virtensor[8])/3.0;
+  std::cout << "vir = " << vir << " virtensor=" << std::endl;
+  max_diff = 0.0;
+  for (int j=0;j < 3;j++) {
+    for (int i=0;i < 3;i++) {
+      double diff = fabs(virtensor[j*3+i] - ref_virtensor[j*3+i]);
+      max_diff = max(max_diff, diff);
+      std::cout << virtensor[j*3+i] << " (" << diff/ref_virtensor[j*3+i] << ") ";
+    }
+    std::cout << std::endl;
+  }
+  if (max_diff < 3.13) {
+    std::cout << "Nonbonded virial comparison OK" << std::endl;
+  } else {
+    std::cout << "Nonbonded virial comparison FAILED" << std::endl;
+  }
+  std::cout << "max_diff(vir_tensor) = " << max_diff << std::endl;
+  std::cout << "max_diff(vir) = " << fabs(vir - ref_vir) << std::endl;
 
   // -------------------- END -----------------
 
@@ -234,6 +297,8 @@ void test() {
 
   delete [] iblo14;
   delete [] inb14;
+
+  deallocate<int>(&loc2glo);
 
   return;
 
