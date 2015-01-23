@@ -1,3 +1,4 @@
+#ifndef NOCUDAC
 
 #ifndef BONDED_STRUCT_H
 #define BONDED_STRUCT_H
@@ -106,14 +107,68 @@ struct solvent_t {
 // Data structures for bonds, angles, dihedrals, and cmap
 struct bondlist_t {
   int i, j, itype, ishift;
+  // bondlist_t++
+  bondlist_t operator++(int) {
+    bondlist_t temp = *this;
+    this->i++;
+    this->j++;
+    this->itype++;
+    return temp;
+  }
+  // bondlist_t--
+  bondlist_t operator--(int) {
+    bondlist_t temp = *this;
+    this->i--;
+    this->j--;
+    this->itype--;
+    return temp;
+  }
 };
 
 struct anglelist_t {
   int i, j, k, itype, ishift1, ishift2;
+  // anglelist_t++
+  anglelist_t operator++(int) {
+    anglelist_t temp = *this;
+    this->i++;
+    this->j++;
+    this->k++;
+    this->itype++;
+    return temp;
+  }
+  // anglelist_t--
+  anglelist_t operator--(int) {
+    anglelist_t temp = *this;
+    this->i--;
+    this->j--;
+    this->k--;
+    this->itype--;
+    return temp;
+  }
 };
 
 struct dihelist_t {
   int i, j, k, l, itype, ishift1, ishift2, ishift3;
+  // dihelist_t++
+  dihelist_t operator++(int) {
+    dihelist_t temp = *this;
+    this->i++;
+    this->j++;
+    this->k++;
+    this->l++;
+    this->itype++;
+    return temp;
+  }
+  // dihelist_t--
+  dihelist_t operator--(int) {
+    dihelist_t temp = *this;
+    this->i--;
+    this->j--;
+    this->k--;
+    this->l--;
+    this->itype--;
+    return temp;
+  }
 };
 
 struct cmaplist_t {
@@ -125,3 +180,4 @@ struct xx14list_t {
 };
 
 #endif // BONDED_STRUCT_H
+#endif //NOCUDAC

@@ -514,7 +514,7 @@ __global__ void calc_force_kernel(
 				  AT* __restrict__ biflam,
 				  AT* __restrict__ biflam2,
 #ifdef USE_TEXTURE_OBJECTS
-				  const cudaTextureObject_t block_tex,
+				  const cudaTextureObject_t blockParamTexObj,
 #endif
 #endif
 				  AT* __restrict__ force) {
@@ -650,11 +650,10 @@ __global__ void calc_force_kernel(
 
 #ifdef USE_BLOCK
 #ifndef NUMBLOCK_LARGE
-    // Copy bixlam to shared memory
-    for (int i=threadIdx.x;i < numBlock;i+=blockDim.x)
-      sh_bixlam[i] = bixlam[i];
-    __syncthreads();
-  }
+  // Copy bixlam to shared memory
+  for (int i=threadIdx.x;i < numBlock;i+=blockDim.x)
+    sh_bixlam[i] = bixlam[i];
+  __syncthreads();
 #endif
 #endif
   
@@ -783,9 +782,9 @@ __global__ void calc_force_kernel(
 	int bb = (jb > ib) ? jb : ib;      // bb = max(jb,ib)
 	int iblock = (bb*(bb-3) + 2*(jb + ib) - 2);
 #ifdef USE_TEXTURE_OBJECTS
-	float scale = tex1Dfetch<float>(block_tex, iblock);
+	float scale = tex1Dfetch<float>(blockParamTexObj, iblock);
 #else
-	float scale = tex1Dfetch(blockparam_texref, iblock);
+	float scale = tex1Dfetch(blockParamTexRef, iblock);
 #endif
 	fij *= scale;
 	if (calc_energy) {

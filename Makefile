@@ -68,7 +68,7 @@ OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o Force.o reduce.o cuda_utils.o gp
 
 OBJS_DIRECT = XYZQ.o Force.o reduce.o cuda_utils.o CudaPMEDirectForce.o \
 	CudaNeighborList.o CudaNeighborListSort.o CudaNeighborListBuild.o \
-	CudaTopExcl.o BondedForce.o gpu_direct.o
+	CudaTopExcl.o BondedForce.o gpu_direct.o CudaPMEDirectForceBlock.o CudaBlock.o
 
 #	CudaPMEDirectForceBlock.o \
 

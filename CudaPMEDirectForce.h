@@ -76,8 +76,71 @@ enum {NONE=0,
 // Enum for vdwparam
 enum {VDW_MAIN, VDW_IN14};
 
+//
+// Purely abstract base class. Used to declare the methods that are expected in all derived classes
+//
 template <typename AT, typename CT>
-class CudaPMEDirectForce {
+class CudaPMEDirectForceBase {
+public:
+  virtual ~CudaPMEDirectForceBase(){}
+  virtual void setup(double boxx, double boxy, double boxz, double kappa,
+		     double roff, double ron, double e14fac,
+		     int vdw_model, int elec_model)=0;
+
+  virtual void get_box_size(CT &boxx, CT &boxy, CT &boxz)=0;
+  virtual void set_box_size(const CT boxx, const CT boxy, const CT boxz)=0;
+
+  virtual void set_calc_vdw(const bool calc_vdw)=0;
+  virtual void set_calc_elec(const bool calc_elec)=0;
+
+  virtual void set_vdwparam(const int nvdwparam, const CT *h_vdwparam)=0;
+  virtual void set_vdwparam(const int nvdwparam, const char *filename)=0;
+  virtual void set_vdwparam14(const int nvdwparam, const CT *h_vdwparam)=0;
+  virtual void set_vdwparam14(const int nvdwparam, const char *filename)=0;
+
+  virtual void set_vdwtype(const int ncoord, const int *h_vdwtype)=0;
+  virtual void set_vdwtype(const int ncoord, const char *filename)=0;
+  virtual void set_vdwtype(const int ncoord, const int *glo_vdwtype,
+			   const int *loc2glo, cudaStream_t stream=0)=0;
+  
+  virtual void set_14_list(int nin14list, int nex14list,
+			   xx14list_t* h_in14list, xx14list_t* h_ex14list)=0;
+
+  virtual void set_14_list(const float4 *xyzq,
+			   const float boxx, const float boxy, const float boxz,
+			   const int *glo2loc_ind,
+			   const int nin14_tbl, const int *in14_tbl, const xx14_t *in14,
+			   const int nex14_tbl, const int *ex14_tbl, const xx14_t *ex14,
+			   cudaStream_t stream=0)=0;
+
+  virtual void calc_14_force(const float4 *xyzq,
+			     const bool calc_energy, const bool calc_virial,
+			     const int stride, AT *force, cudaStream_t stream=0)=0;
+
+  virtual void calc_force(const float4 *xyzq,
+			  const CudaNeighborListBuild<32>& nlist,
+			  const bool calc_energy,
+			  const bool calc_virial,
+			  const int stride, AT *force, cudaStream_t stream=0)=0;
+
+  virtual void calc_virial(const int ncoord, const float4 *xyzq,
+			   const int stride, AT *force,
+			   cudaStream_t stream=0)=0;
+
+  virtual void clear_energy_virial(cudaStream_t stream=0)=0;
+  
+  virtual void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
+				 double *energy_vdw, double *energy_elec,
+				 double *energy_excl,
+				 double *vir)=0;
+
+};
+
+//
+// Actual class
+//
+template <typename AT, typename CT>
+class CudaPMEDirectForce : public CudaPMEDirectForceBase<AT, CT> {
 
 protected:
 
