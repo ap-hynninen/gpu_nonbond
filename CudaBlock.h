@@ -35,8 +35,8 @@ public:
   ~CudaBlock();
 
   void setBlockType(const int ncoord, const int *h_blockType);
-  void setBlockParam(const double *h_blockParam);
-  void setBixlam(const double *h_bixlam);
+  void setBlockParam(const float *h_blockParam);
+  void setBixlam(const float *h_bixlam);
   
   int getNumBlock() {return numBlock;}
   int *getBlockType() {return blockType;}

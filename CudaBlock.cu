@@ -78,21 +78,15 @@ void CudaBlock::setBlockType(const int ncoord, const int *h_blockType) {
 //
 // Sets block parameters by copying them from CPU
 //
-void CudaBlock::setBlockParam(const double *h_blockParam) {
-  float* h_blockParam_f = new float[numBlock*(numBlock+1)/2];
-  for (int i=0;i < numBlock*(numBlock+1)/2;i++) h_blockParam_f[i] = (float)h_blockParam[i];
-  copy_HtoD_sync<float>(h_blockParam_f, blockParam, numBlock*(numBlock+1)/2);
-  delete [] h_blockParam_f;
+void CudaBlock::setBlockParam(const float *h_blockParam) {
+  copy_HtoD_sync<float>(h_blockParam, blockParam, numBlock*(numBlock+1)/2);
 }
 
 //
 // Sets bixlam by copying them from CPU
 //
-void CudaBlock::setBixlam(const double *h_bixlam) {
-  float* h_bixlam_f = new float[numBlock];
-  for (int i=0;i < numBlock;i++) h_bixlam_f[i] = (float)h_bixlam[i];
-  copy_HtoD_sync<float>(h_bixlam_f, bixlam, numBlock);
-  delete [] h_bixlam_f;
+void CudaBlock::setBixlam(const float *h_bixlam) {
+  copy_HtoD_sync<float>(h_bixlam, bixlam, numBlock);
 }
 
 //
