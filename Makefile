@@ -68,9 +68,8 @@ OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o Force.o reduce.o cuda_utils.o gp
 
 OBJS_DIRECT = XYZQ.o Force.o reduce.o cuda_utils.o CudaPMEDirectForce.o \
 	CudaNeighborList.o CudaNeighborListSort.o CudaNeighborListBuild.o \
-	CudaTopExcl.o BondedForce.o gpu_direct.o CudaPMEDirectForceBlock.o CudaBlock.o
-
-#	CudaPMEDirectForceBlock.o \
+	CudaTopExcl.o BondedForce.o gpu_direct.o CudaPMEDirectForceBlock.o CudaBlock.o \
+	CudaDirectForceKernels.o
 
 OBJS_BONDED = XYZQ.o Force.o reduce.o cuda_utils.o BondedForce.o gpu_bonded.o
 
@@ -81,7 +80,7 @@ OBJS_DYNA = cuda_utils.o gpu_dyna.o Force.o reduce.o CudaLeapfrogIntegrator.o Cu
 	CudaPMEDirectForce.o BondedForce.o Grid.o Matrix3d.o XYZQ.o CudaDomdec.o \
 	CudaDomdecGroups.o HoloConst.o CudaDomdecHomezone.o CudaMPI.o mpi_utils.o CudaDomdecD2DComm.o \
 	DomdecD2DComm.o DomdecRecipComm.o CudaDomdecRecipComm.o CudaDomdecRecipLooper.o Domdec.o \
-	CudaDomdecConstComm.o
+	CudaDomdecConstComm.o CudaDirectForceKernels.o
 
 OBJS_PAIR = gpu_pair.o Grid.o Force.o XYZQ.o cuda_utils.o reduce.o Matrix3d.o
 
@@ -89,7 +88,7 @@ OBJS_TRANSPOSE = cpu_transpose.o mpi_utils.o CpuMultiNodeMatrix3d.o CpuMatrix3d.
 
 ifeq ($(CUDA_COMPILER), $(YES))
 OBJS = $(OBJS_RECIP)
-#OBJS += $(OBJS_DIRECT)
+OBJS += $(OBJS_DIRECT)
 OBJS += $(OBJS_BONDED)
 OBJS += $(OBJS_CONST)
 OBJS += $(OBJS_DYNA)

@@ -6,31 +6,7 @@
 #include "gpu_utils.h"
 #include "cuda_utils.h"
 #include "CudaPMEDirectForceBlock.h"
-
-extern __constant__ DirectSettings_t d_setup;
-extern __device__ DirectEnergyVirial_t d_energy_virial;
-
-#ifndef USE_TEXTURE_OBJECTS
-// VdW parameter texture reference
-static texture<float2, 1, cudaReadModeElementType> vdwparam_block_texref;
-static bool vdwparam_block_texref_bound = false;
-static texture<float2, 1, cudaReadModeElementType> vdwparam14_block_texref;
-static bool vdwparam14_block_texref_bound = false;
-//static texture<float, 1, cudaReadModeElementType> blockparam_texref;
-extern texture<float, 1, cudaReadModeElementType> blockParamTexRef;
-#endif
-
-#ifndef USE_TEXTURE_OBJECTS
-#define VDWPARAM_TEXREF vdwparam_block_texref
-#define VDWPARAM14_TEXREF vdwparam14_block_texref
-#endif
-
-//#define NUMBLOCK_LARGE
-
-#define USE_BLOCK
-#include "CudaDirectForce_util.h"
-#undef USE_BLOCK
-
+#include "CudaDirectForceKernels.h"
 
 __global__ void merge_biflam_kernel(const int numBlock,
 				    const long long int* __restrict__ biflam_in,
@@ -136,8 +112,6 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_force(const float4 *xyzq,
 						 const int stride, AT *force,
 						 cudaStream_t stream) {
 
-  const int tilesize = 32;
-
 #ifdef USE_TEXTURE_OBJECTS
   if (this->vdwparam_tex == 0) {
     std::cerr << "CudaPMEDirectForceBlock<AT, CT>::calc_force, vdwparam_tex must be created" << std::endl;
@@ -148,9 +122,9 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_force(const float4 *xyzq,
     exit(1);
   }
 #else
-  if (!vdwparam_block_texref_bound) {
-    std::cerr << "CudaPMEDirectForceBlock<AT, CT>::calc_force, vdwparam_block_texref must be bound"
-	      << std::endl;
+  if (!get_vdwparam_texref_bound()) {
+    std::cerr << "CudaPMEDirectForceBlock<AT, CT>::calc_force, vdwparam_texref must be bound"
+  	      << std::endl;
     exit(1);
   }
 #endif
@@ -199,10 +173,16 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_force(const float4 *xyzq,
   if (calc_energy) shmem_size = max(shmem_size, (int)(nthread*sizeof(double)*2));
   if (calc_virial) shmem_size = max(shmem_size, (int)(nthread*sizeof(double)*3));
 
+  calcForceKernelChoice<AT,CT>(nblock_tot, nthread, shmem_size, stream,
+			       vdw_model_loc, elec_model_loc, calc_energy, calc_virial,
+			       nlist, stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
+			       this->d_energy_virial, force, &cudaBlock, this->biflam, this->biflam2);
+
+  /*
   int3 max_nblock3 = get_max_nblock();
   unsigned int max_nblock = max_nblock3.x;
   unsigned int base = 0;
-
+  
   while (nblock_tot != 0) {
 
     int nblock = (nblock_tot > max_nblock) ? max_nblock : nblock_tot;
@@ -226,7 +206,8 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_force(const float4 *xyzq,
 
     cudaCheck(cudaGetLastError());
   }
-
+  */
+  
   // Convert biflam and biflam2 into double precision and add to cudaBlock.biflam -arrays
   merge_biflam_kernel<<< (cudaBlock.getNumBlock()-1)/64+1, 64, 0, stream >>>
     (cudaBlock.getNumBlock(), biflam, biflam2, cudaBlock.getBiflam(), cudaBlock.getBiflam2());
@@ -238,8 +219,3 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_force(const float4 *xyzq,
 // Explicit instances of CudaPMEDirectForceBlock
 //
 template class CudaPMEDirectForceBlock<long long int, float>;
-
-#ifndef USE_TEXTURE_OBJECTS
-#undef VDWPARAM_TEXREF
-#undef VDWPARAM14_TEXREF
-#endif

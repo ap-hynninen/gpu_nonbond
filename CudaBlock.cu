@@ -3,11 +3,14 @@
 #include "gpu_utils.h"
 #include "cuda_utils.h"
 #include "CudaBlock.h"
-
 #ifndef USE_TEXTURE_OBJECTS
-// VdW parameter texture reference
-static texture<float, 1, cudaReadModeElementType> blockParamTexRef;
+#include "CudaDirectForceKernels.h"
 #endif
+
+//#ifndef USE_TEXTURE_OBJECTS
+// VdW parameter texture reference
+//texture<float, 1, cudaReadModeElementType> blockParamTexRef;
+//#endif
 
 //
 // Class creator
@@ -35,17 +38,19 @@ CudaBlock::CudaBlock(const int numBlock) : numBlock(numBlock) {
   texDesc.readMode = cudaReadModeElementType;
   cudaCreateTextureObject(&blockParamTexObj, &resDesc, &texDesc, NULL);
 #else
+  assert(!getBlockParamTexRefBound());
   // Bind blockparam texture
-  memset(&blockParamTexRef, 0, sizeof(blockParamTexRef));
-  blockParamTexRef.normalized = 0;
-  blockParamTexRef.filterMode = cudaFilterModePoint;
-  blockParamTexRef.addressMode[0] = cudaAddressModeClamp;
-  blockParamTexRef.channelDesc.x = 32;
-  blockParamTexRef.channelDesc.y = 0;
-  blockParamTexRef.channelDesc.z = 0;
-  blockParamTexRef.channelDesc.w = 0;
-  blockParamTexRef.channelDesc.f = cudaChannelFormatKindFloat;
-  cudaCheck(cudaBindTexture(NULL, blockParamTexRef, blockParam, numBlock*(numBlock+1)/2*sizeof(float)));
+  memset(getBlockParamTexRef(), 0, sizeof(texture<float, 1, cudaReadModeElementType>));
+  getBlockParamTexRef()->normalized = 0;
+  getBlockParamTexRef()->filterMode = cudaFilterModePoint;
+  getBlockParamTexRef()->addressMode[0] = cudaAddressModeClamp;
+  getBlockParamTexRef()->channelDesc.x = 32;
+  getBlockParamTexRef()->channelDesc.y = 0;
+  getBlockParamTexRef()->channelDesc.z = 0;
+  getBlockParamTexRef()->channelDesc.w = 0;
+  getBlockParamTexRef()->channelDesc.f = cudaChannelFormatKindFloat;
+  cudaCheck(cudaBindTexture(NULL, *getBlockParamTexRef(), blockParam, numBlock*(numBlock+1)/2*sizeof(float)));
+  setBlockParamTexRefBound(true);
 #endif
 }
 
@@ -56,7 +61,7 @@ CudaBlock::~CudaBlock() {
 #ifdef USE_TEXTURE_OBJECTS
   cudaCheck(cudaDestroyTextureObject(blockParamTexObj));
 #else
-  cudaCheck(cudaUnbindTexture(blockParamTexRef));
+  cudaCheck(cudaUnbindTexture(*getBlockParamTexRef()));
 #endif
   if (blockType != NULL) deallocate<int>(&blockType);
   deallocate<float>(&blockParam);

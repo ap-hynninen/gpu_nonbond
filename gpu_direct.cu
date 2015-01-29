@@ -240,7 +240,6 @@ void test() {
   copy_HtoD_sync<int>(h_glo_vdwtype, glo_vdwtype, ncoord);
   dir.set_vdwtype(ncoord, glo_vdwtype, loc2glo);
   delete [] h_glo_vdwtype;
-  deallocate<int>(&glo_vdwtype);
   
   force_fp.clear();
   dir.clear_energy_virial();
@@ -290,6 +289,44 @@ void test() {
   std::cout << "max_diff(vir_tensor) = " << max_diff << std::endl;
   std::cout << "max_diff(vir) = " << fabs(vir - ref_vir) << std::endl;
 
+  // Before creating another CudaPMEDirectForce object, clear the textures
+  dir.clearTextures();
+  
+  //--------------- Non-bonded with block  -----------
+  CudaBlock cudaBlock(2);
+  CudaPMEDirectForceBlock<long long int, float> dirblock(cudaBlock);
+  //CudaPMEDirectForce<long long int, float> dirblock;
+  
+  // Setup blockType
+  int* h_blockType = new int[ncoord];
+  for (int i=0;i < ncoord/2;i++) h_blockType[i] = 0;
+  for (int i=ncoord/2;i < ncoord;i++) h_blockType[i] = 1;
+  cudaBlock.setBlockType(ncoord, h_blockType);
+  delete [] h_blockType;
+  // Setup bixlam
+  float h_bixlam[2] = {1.0f, 0.8f};
+  cudaBlock.setBixlam(h_bixlam);
+  float h_blockParam[4];
+  for (int j=0;j < 2;j++) {
+    for (int i=0;i < 2;i++) {
+      h_blockParam[i+j*2] = h_bixlam[i]*h_bixlam[j];
+    }
+  }
+  cudaBlock.setBlockParam(h_blockParam);
+  dirblock.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, VDW_VSH, EWALD);
+  dirblock.set_vdwparam(1260, "test_data/vdwparam.txt");
+  dirblock.set_vdwtype(ncoord, glo_vdwtype, loc2glo);
+    // Calculate forces, energies, and virial
+  force_fp.clear();
+  dirblock.clear_energy_virial();
+  dirblock.calc_force(xyzq_sorted.xyzq, nlist.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
+  force_fp.convert(force);
+  dirblock.calc_virial(ncoord, xyzq_sorted.xyzq, force_fp.stride(), force_fp.xyz());
+  dirblock.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
+  cudaCheck(cudaDeviceSynchronize());
+
+  std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
+  
   // -------------------- END -----------------
 
   delete [] in14list;
@@ -299,6 +336,7 @@ void test() {
   delete [] inb14;
 
   deallocate<int>(&loc2glo);
+  deallocate<int>(&glo_vdwtype);
 
   return;
 

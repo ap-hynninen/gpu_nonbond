@@ -127,6 +127,7 @@ void test4() {
 
   // Warm up
   //grid.spread_charge(xyzq.ncoord, bspline);
+  grid.clear_energy_virial();
   grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
   grid.r2c_fft();
   grid.scalar_sum(recip, kappa, true, true);
@@ -345,6 +346,7 @@ void test6() {
 
   // Warm up
   //grid.spread_charge(xyzq.ncoord, bspline);
+  grid.clear_energy_virial();
   grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
   grid.r2c_fft();
   grid.scalar_sum(recip, kappa, true, true);

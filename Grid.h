@@ -128,7 +128,9 @@ private:
   CT* prefac_y;
   CT* prefac_z;
 
+  // Host and device versions of energy and virials
   RecipEnergyVirial_t *h_energy_virial;
+  RecipEnergyVirial_t *d_energy_virial;
 
   void init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 	  bool y_land_locked, bool z_land_locked);

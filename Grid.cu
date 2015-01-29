@@ -22,9 +22,6 @@ static const double pi = 3.14159265358979323846;
 // Note that usually x0=0, x1=nfftx-1
 //
 
-// Energy and virial in device memory
-static __device__ RecipEnergyVirial_t d_energy_virial;
-
 template <typename T>
 __forceinline__ __device__ void write_grid(const float val, const int ind,
 					   T* data) {
@@ -946,7 +943,8 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
 					const T recip11, const T recip22, const T recip33,
 					const T* prefac1, const T* prefac2, const T* prefac3,
 					const T fac, const T piv_inv,
-					const bool global_base, T2* data) {
+					const bool global_base, T2* data,
+					RecipEnergyVirial_t *energy_virial) {
   extern __shared__ T sh_prefac[];
 
   // Create pointers to shared memory
@@ -1214,13 +1212,13 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
       virial4 = sh_ev[0].virial[4];
       virial5 = sh_ev[0].virial[5];
 #endif
-      atomicAdd(&d_energy_virial.energy, energy);
-      atomicAdd(&d_energy_virial.virial[0], virial0);
-      atomicAdd(&d_energy_virial.virial[1], virial1);
-      atomicAdd(&d_energy_virial.virial[2], virial2);
-      atomicAdd(&d_energy_virial.virial[3], virial3);
-      atomicAdd(&d_energy_virial.virial[4], virial4);
-      atomicAdd(&d_energy_virial.virial[5], virial5);
+      atomicAdd(&energy_virial->energy, energy);
+      atomicAdd(&energy_virial->virial[0], virial0);
+      atomicAdd(&energy_virial->virial[1], virial1);
+      atomicAdd(&energy_virial->virial[2], virial2);
+      atomicAdd(&energy_virial->virial[3], virial3);
+      atomicAdd(&energy_virial->virial[4], virial4);
+      atomicAdd(&energy_virial->virial[5], virial5);
     }
 
   }
@@ -2386,7 +2384,8 @@ __global__ void gather_force_8_ortho_kernel(const float4 *xyzq, const int ncoord
 //
 // Calculates self energy
 //
-__global__ void calc_self_energy_kernel(const int ncoord, const float4* xyzq) {
+__global__ void calc_self_energy_kernel(const int ncoord, const float4* xyzq,
+					RecipEnergyVirial_t *energy_virial) {
   // Shared memory
   // Required space: blockDim.x*sizeof(double)
   extern __shared__ double sh_q2[];
@@ -2404,7 +2403,7 @@ __global__ void calc_self_energy_kernel(const int ncoord, const float4* xyzq) {
     __syncthreads();
   }
   if (threadIdx.x == 0) {
-    atomicAdd(&d_energy_virial.energy_self, sh_q2[0]);
+    atomicAdd(&energy_virial->energy_self, sh_q2[0]);
   }
 
 }
@@ -2583,6 +2582,7 @@ Grid<AT, CT, CT2>::Grid(int nfftx, int nffty, int nfftz, int order,
     allocate<CT>(&prefac_z, nfftz);
     calc_prefac();
 
+    allocate<RecipEnergyVirial_t>(&d_energy_virial, 1);
     allocate_host<RecipEnergyVirial_t>(&h_energy_virial, 1);
 
     clear_energy_virial();
@@ -2756,6 +2756,7 @@ Grid<AT, CT, CT2>::~Grid() {
   deallocate<CT>(&prefac_y);
   deallocate<CT>(&prefac_z);
 
+  if (d_energy_virial != NULL) deallocate<RecipEnergyVirial_t>(&d_energy_virial);
   if (h_energy_virial != NULL) deallocate_host<RecipEnergyVirial_t>(&h_energy_virial);
 }
 
@@ -3011,7 +3012,7 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
 	 nf1, nf2, nf3,
 	 recip1, recip2, recip3,
 	 prefac1, prefac2, prefac3,
-	 fac, piv_inv, global_base, datap);
+	 fac, piv_inv, global_base, datap, d_energy_virial);
       cudaCheck(cudaGetLastError());
     } else {
       scalar_sum_ortho_kernel<CT, CT2, false>
@@ -3021,7 +3022,7 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
 	 nf1, nf2, nf3,
 	 recip1, recip2, recip3,
 	 prefac1, prefac2, prefac3,
-	 fac, piv_inv, global_base, datap);
+	 fac, piv_inv, global_base, datap, d_energy_virial);
       cudaCheck(cudaGetLastError());
     }
   } else {
@@ -3039,7 +3040,7 @@ void Grid<AT, CT, CT2>::calc_self_energy(const float4 *xyzq, const int ncoord) {
   int nthread = 256;
   int nblock = (ncoord-1)/nthread+1;
   int shmem_size = nthread*sizeof(double);
-  calc_self_energy_kernel<<< nblock, nthread, shmem_size, stream >>>(ncoord, xyzq);
+  calc_self_energy_kernel<<< nblock, nthread, shmem_size, stream >>>(ncoord, xyzq, d_energy_virial);
   cudaCheck(cudaGetLastError());
 }
 
@@ -3197,8 +3198,7 @@ void Grid<AT, CT, CT2>::clear_energy_virial() {
   for (int i=0;i < 6;i++) {
     h_energy_virial->virial[i] = 0.0;
   }
-  cudaCheck(cudaMemcpyToSymbolAsync(d_energy_virial, h_energy_virial, sizeof(RecipEnergyVirial_t),
-				    0, cudaMemcpyHostToDevice, stream));
+  copy_HtoD<RecipEnergyVirial_t>(h_energy_virial, d_energy_virial, 1, stream);
 }
 
 //
@@ -3212,7 +3212,7 @@ void Grid<AT, CT, CT2>::get_energy_virial(const double kappa,
   bool prev_calc_energy_virial = (prev_calc_energy || prev_calc_virial);
 
   if (prev_calc_energy_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(RecipEnergyVirial_t)));
+    copy_DtoH_sync<RecipEnergyVirial_t>(d_energy_virial, h_energy_virial, 1);
   }
 
   double cfact = 0.5*ccelec;
@@ -3220,16 +3220,16 @@ void Grid<AT, CT, CT2>::get_energy_virial(const double kappa,
   energy = h_energy_virial->energy*cfact;
   energy_self = -h_energy_virial->energy_self*kappa*ccelec/sqrt(pi);
 
-  // add in pressure contributions
-  virial[0] -= h_energy_virial->virial[0]*cfact;
-  virial[1] -= h_energy_virial->virial[1]*cfact;
-  virial[2] -= h_energy_virial->virial[2]*cfact;
-  virial[3] -= h_energy_virial->virial[1]*cfact;
-  virial[4] -= h_energy_virial->virial[3]*cfact;
-  virial[5] -= h_energy_virial->virial[4]*cfact;
-  virial[6] -= h_energy_virial->virial[2]*cfact;
-  virial[7] -= h_energy_virial->virial[4]*cfact;
-  virial[8] -= h_energy_virial->virial[5]*cfact;
+  // Set virial pressure contributions
+  virial[0] = -h_energy_virial->virial[0]*cfact;
+  virial[1] = -h_energy_virial->virial[1]*cfact;
+  virial[2] = -h_energy_virial->virial[2]*cfact;
+  virial[3] = -h_energy_virial->virial[1]*cfact;
+  virial[4] = -h_energy_virial->virial[3]*cfact;
+  virial[5] = -h_energy_virial->virial[4]*cfact;
+  virial[6] = -h_energy_virial->virial[2]*cfact;
+  virial[7] = -h_energy_virial->virial[4]*cfact;
+  virial[8] = -h_energy_virial->virial[5]*cfact;
 }
 
 

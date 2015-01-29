@@ -3,6 +3,7 @@
 #include <cuda.h>
 #include "Bonded_struct.h"
 #include "CudaNeighborListBuild.h"
+#include "CudaDirectForceTypes.h"
 
 // If this variable is set, we'll use texture objects.
 // Unset for now because of the problem with texture objects on GTX 750
@@ -16,65 +17,6 @@
 // AT = accumulation type
 // CT = calculation type
 //
-
-struct DirectEnergyVirial_t {
-  // Energies
-  double energy_vdw;
-  double energy_elec;
-  double energy_excl;
-
-  // Finished virial
-  double vir[9];
-
-  // Shift forces for virial calculation
-  double sforcex[27];
-  double sforcey[27];
-  double sforcez[27];
-
-};
-
-struct DirectSettings_t {
-  float kappa;
-  float kappa2;
-
-  float boxx;
-  float boxy;
-  float boxz;
-
-  float roff2;
-  float ron2;
-  float ron;
-
-  float roffinv3;
-  float roffinv4;
-  float roffinv5;
-  float roffinv6;
-  float roffinv12;
-  float roffinv18;
-
-  float inv_roff2_ron2;
-
-  float k6, k12, dv6, dv12;
-
-  float ga6, gb6, gc6;
-  float ga12, gb12, gc12;
-  float GAconst, GBcoef;
-
-  float e14fac;
-
-  float hinv;
-  float *ewald_force;
-
-};
-
-// Enum for VdW and electrostatic models
-enum {NONE=0, 
-      VDW_VSH=1, VDW_VSW=2, VDW_VFSW=3, VDW_VGSH=4, VDW_CUT=5,
-      EWALD=101, CSHIFT=102, CFSWIT=103, CSHFT=104, CSWIT=105, RSWIT=106,
-      RSHFT=107, RSHIFT=108, RFSWIT=109, GSHFT=110, EWALD_LOOKUP=111};
-
-// Enum for vdwparam
-enum {VDW_MAIN, VDW_IN14};
 
 //
 // Purely abstract base class. Used to declare the methods that are expected in all derived classes
@@ -188,9 +130,13 @@ protected:
   CT *ewald_force;
   int n_ewald_force;
 
+  // Host version of setup
   DirectSettings_t *h_setup;
-  DirectEnergyVirial_t *h_energy_virial;
 
+  // Host and Device versions of energy and virial global variables
+  DirectEnergyVirial_t *h_energy_virial;
+  DirectEnergyVirial_t *d_energy_virial;
+  
   // We save previous calculated values of energies / virial here
   DirectEnergyVirial_t h_energy_virial_prev;
 
@@ -210,6 +156,8 @@ public:
 	     double roff, double ron, double e14fac,
 	     int vdw_model, int elec_model);
 
+  void clearTextures();
+  
   void get_box_size(CT &boxx, CT &boxy, CT &boxz);
   void set_box_size(const CT boxx, const CT boxy, const CT boxz);
 
