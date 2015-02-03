@@ -137,11 +137,15 @@ void CudaPMEDirectForce<AT, CT>::setup(double boxx, double boxy, double boxz, do
 				       int vdw_model, int elec_model) {
 
   double ron2 = ron*ron;
+  double ron4 = ron2*ron2;
   double ron3 = ron*ron*ron;
+  double ron5 = ron3*ron2;
   double ron6 = ron3*ron3;
 
   double roff2 = roff*roff;
   double roff3 = roff*roff*roff;
+  double roff4 = roff2*roff2;
+  double roff5 = roff4*roff;
   double roff6 = roff3*roff3;
   double roff8 = roff6*roff2;
   double roff12 = roff6*roff6;
@@ -152,10 +156,15 @@ void CudaPMEDirectForce<AT, CT>::setup(double boxx, double boxy, double boxz, do
   h_setup->boxz = boxz;
   h_setup->kappa = kappa;
   h_setup->kappa2 = kappa*kappa;
+  h_setup->roff = roff;
   h_setup->roff2 = roff2;
-  h_setup->ron2 = ron2;
+  h_setup->roff3 = roff3;
+  h_setup->roff5 = roff5;
   h_setup->ron = ron;
+  h_setup->ron2 = ron2;
 
+  h_setup->roffinv =  ((CT)1.0)/roff;
+  h_setup->roffinv2 =  ((CT)1.0)/roff2;
   h_setup->roffinv3 =  ((CT)1.0)/roff3;
   h_setup->roffinv4 = ((CT)1.0)/(roff2*roff2);
   h_setup->roffinv5 = ((CT)1.0)/(roff*roff2*roff2);
@@ -164,8 +173,9 @@ void CudaPMEDirectForce<AT, CT>::setup(double boxx, double boxy, double boxz, do
   h_setup->roffinv18 = h_setup->roffinv12*h_setup->roffinv6;
 
   double roff2_min_ron2 = roff2 - ron2;
-  h_setup->inv_roff2_ron2 = (CT)(1.0/(roff2_min_ron2*roff2_min_ron2*roff2_min_ron2));
-
+  double inv_roff2_ron2_3 = 1.0/(roff2_min_ron2*roff2_min_ron2*roff2_min_ron2);
+  h_setup->inv_roff2_ron2_3 = (CT)inv_roff2_ron2_3;
+ 
   // Constants for VFSW
   if (ron < roff) {
     h_setup->k6 = roff3/(roff3 - ron3);
@@ -179,6 +189,27 @@ void CudaPMEDirectForce<AT, CT>::setup(double boxx, double boxy, double boxz, do
     h_setup->dv12 = -((CT)1.0)/(roff6*roff6);
   }
 
+  double g = (roff2 - ron2)*(roff2 - ron2)*(roff2 - ron2);
+  h_setup->Aconst = roff4*(roff2 - 3.0*ron2)/g;
+  h_setup->Bconst = 6.0*roff2*ron2/g;
+  h_setup->Cconst = -(ron2 + roff2)/g;
+  h_setup->Dconst = 2.0/(5.0*g);
+  h_setup->dvc = 8.0*(ron2*roff2*(roff-ron) - (roff5 - ron5)/5.0)/g;
+  if (ron < roff) {
+    double Denom = 1.0/g;
+    h_setup->Denom = Denom;
+    double Acoef = roff4*(roff2 - 3.0*ron2)*Denom;
+    h_setup->Acoef = Acoef;
+    double Bcoef = 6.0*roff2*ron2*Denom;
+    h_setup->Bcoef = Bcoef;
+    double Ccoef = -3.0*(ron2 + roff2)*Denom;
+    h_setup->Ccoef = Ccoef;
+    h_setup->Constr = 2.0*Bcoef*log(roff) - Acoef/roff2 + Ccoef*roff2 + Denom*roff4;
+    h_setup->Eaddr = (12.0*ron2*roff2*log(roff/ron) - 3.0*(roff4 - ron4))*Denom;
+  } else {
+    h_setup->Eaddr = -1.0/roff2;
+  }
+  
   // Constants for Gromacs-style potentials
   // Copy-pasted from Michael G. Lerner code
   h_setup->GAconst = (CT)(5.0/(3.0*roff));
@@ -209,6 +240,24 @@ void CudaPMEDirectForce<AT, CT>::setup(double boxx, double boxy, double boxz, do
   set_calc_elec(true);
 
   update_setup();
+}
+
+//
+// Returns parameters for the nonbonded computation
+//
+template <typename AT, typename CT>
+void CudaPMEDirectForce<AT, CT>::get_setup(float& boxx, float& boxy, float& boxz, float& kappa,
+					   float& roff, float& ron, float& e14fac,
+					   int& vdw_model, int& elec_model) {
+  boxx       = h_setup->boxx;
+  boxy       = h_setup->boxy;
+  boxz       = h_setup->boxz;
+  kappa      = h_setup->kappa;
+  roff       = h_setup->roff;
+  ron        = h_setup->ron;
+  e14fac     = h_setup->e14fac;
+  vdw_model  = this->vdw_model;
+  elec_model = this->elec_model;
 }
 
 //
@@ -246,6 +295,22 @@ void CudaPMEDirectForce<AT, CT>::set_calc_vdw(const bool calc_vdw) {
 template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::set_calc_elec(const bool calc_elec) {
   this->calc_elec = calc_elec;
+}
+
+//
+// Returns "calc_vdw" flag
+//
+template <typename AT, typename CT>
+bool CudaPMEDirectForce<AT, CT>::get_calc_vdw() {
+  return this->calc_vdw;
+}
+
+//
+// Returns "calc_elec" flag
+//
+template <typename AT, typename CT>
+bool CudaPMEDirectForce<AT, CT>::get_calc_elec() {
+  return this->calc_elec;
 }
 
 //
@@ -676,6 +741,14 @@ void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
 			       vdw_model_loc, elec_model_loc, calc_energy, calc_virial,
 			       nlist, stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
 			       this->d_energy_virial, force);
+}
+
+//
+// Evaluates force and energy for a single distance. Used for unit testing
+//
+template <typename AT, typename CT>
+void CudaPMEDirectForce<AT, CT>::evalPairForce(const float r, double& force_val, double& energy_val) {
+  evalForceKernelChoice<AT,CT>(vdw_model, elec_model, r, force_val, energy_val);
 }
 
 //

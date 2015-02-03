@@ -28,12 +28,17 @@ public:
   virtual void setup(double boxx, double boxy, double boxz, double kappa,
 		     double roff, double ron, double e14fac,
 		     int vdw_model, int elec_model)=0;
+  virtual void get_setup(float& boxx, float& boxy, float& boxz, float& kappa,
+			 float& roff, float& ron, float& e14fac,
+			 int& vdw_model, int& elec_model)=0;
 
   virtual void get_box_size(CT &boxx, CT &boxy, CT &boxz)=0;
   virtual void set_box_size(const CT boxx, const CT boxy, const CT boxz)=0;
 
   virtual void set_calc_vdw(const bool calc_vdw)=0;
   virtual void set_calc_elec(const bool calc_elec)=0;
+  virtual bool get_calc_vdw()=0;
+  virtual bool get_calc_elec()=0;
 
   virtual void set_vdwparam(const int nvdwparam, const CT *h_vdwparam)=0;
   virtual void set_vdwparam(const int nvdwparam, const char *filename)=0;
@@ -58,12 +63,13 @@ public:
   virtual void calc_14_force(const float4 *xyzq,
 			     const bool calc_energy, const bool calc_virial,
 			     const int stride, AT *force, cudaStream_t stream=0)=0;
-
+  
   virtual void calc_force(const float4 *xyzq,
 			  const CudaNeighborListBuild<32>& nlist,
 			  const bool calc_energy,
 			  const bool calc_virial,
 			  const int stride, AT *force, cudaStream_t stream=0)=0;
+  virtual void evalPairForce(const float r, double& force_val, double& energy_val)=0;
 
   virtual void calc_virial(const int ncoord, const float4 *xyzq,
 			   const int stride, AT *force,
@@ -155,7 +161,11 @@ public:
   void setup(double boxx, double boxy, double boxz, double kappa,
 	     double roff, double ron, double e14fac,
 	     int vdw_model, int elec_model);
-
+  
+  void get_setup(float& boxx, float& boxy, float& boxz, float& kappa,
+		 float& roff, float& ron, float& e14fac,
+		 int& vdw_model, int& elec_model);
+    
   void clearTextures();
   
   void get_box_size(CT &boxx, CT &boxy, CT &boxz);
@@ -163,6 +173,8 @@ public:
 
   void set_calc_vdw(const bool calc_vdw);
   void set_calc_elec(const bool calc_elec);
+  bool get_calc_vdw();
+  bool get_calc_elec();
 
   void set_vdwparam(const int nvdwparam, const CT *h_vdwparam);
   void set_vdwparam(const int nvdwparam, const char *filename);
@@ -193,6 +205,7 @@ public:
 		  const bool calc_energy,
 		  const bool calc_virial,
 		  const int stride, AT *force, cudaStream_t stream=0);
+  void evalPairForce(const float r, double& force_val, double& energy_val);
 
   void calc_virial(const int ncoord, const float4 *xyzq,
 		   const int stride, AT *force,

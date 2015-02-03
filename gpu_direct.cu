@@ -160,7 +160,7 @@ void test() {
   dir.calc_force(xyzq.xyzq, nlist_ref.getBuilder(0), false, false, force_fp.stride(), force_fp.xyz());
   force_fp.convert(force);
   cudaCheck(cudaDeviceSynchronize());
-  tol = 7.71e-4;
+  tol = 7.72e-4;
   if (!force_main.compare(force, tol, max_diff)) {
     std::cout<<"Non-bonded (main) force comparison FAILED"<<std::endl;
   } else {
@@ -173,7 +173,7 @@ void test() {
   dir.calc_14_force(xyzq.xyzq, false, false, force_fp.stride(), force_fp.xyz());
   force_fp.convert(force);
   cudaCheck(cudaDeviceSynchronize());
-  tol = 7.71e-4;
+  tol = 7.73e-4;
   if (!force_total.compare(force, tol, max_diff)) {
     std::cout<<"Non-bonded (total) force comparison FAILED"<<std::endl;
   } else {
@@ -194,7 +194,7 @@ void test() {
   double virtensor[9];
   dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
   cudaCheck(cudaDeviceSynchronize());
-  tol = 7.71e-4;
+  tol = 7.73e-4;
   if (!force_main.compare(force, tol, max_diff)) {
     std::cout<<"Non-bonded (main) force comparison FAILED"<<std::endl;
   } else {

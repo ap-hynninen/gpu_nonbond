@@ -251,7 +251,7 @@ __global__ void CUDA_KERNEL_NAME(
 	float r = r2*rinv;
 	
 	float dpot_elec;
-	float fij_elec = pair_elec_force<elec_model, calc_energy>(r2, r, rinv, qq, dpot_elec);
+	float fij_elec = pair_elec_force<elec_model, calc_energy, false>(r2, r, rinv, qq, 0.0f, dpot_elec);
 #ifndef USE_BLOCK
 	if (calc_energy) coulpotl += (double)dpot_elec;
 #endif
@@ -283,7 +283,7 @@ __global__ void CUDA_KERNEL_NAME(
 	if (calc_energy) vdwpotl += (double)dpot_vdw;
 #endif
 	
-	float fij = (fij_vdw - fij_elec)*rinv*rinv;
+	float fij = (fij_vdw + fij_elec)*rinv*rinv;
 
 #ifdef USE_BLOCK
 	// ib: highest 16 bits is the site number (isitemld), lowest 16 bits is the block number

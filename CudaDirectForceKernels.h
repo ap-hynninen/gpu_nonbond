@@ -29,6 +29,10 @@ void setBlockParamTexRefBound(const bool val);
 
 const int tilesize = 32;
 
+
+template <typename AT, typename CT>
+void evalForceKernelChoice(const int vdw_model, const int elec_model, const float r, double &force_val, double &energy_val);
+
 template <typename AT, typename CT>
 void calcForceKernelChoice(const int nblock_tot_in, const int nthread, const int shmem_size, cudaStream_t stream,
 			   const int vdw_model, const int elec_model, const bool calc_energy, const bool calc_virial,

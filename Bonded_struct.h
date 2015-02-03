@@ -1,5 +1,3 @@
-#ifndef NOCUDAC
-
 #ifndef BONDED_STRUCT_H
 #define BONDED_STRUCT_H
 
@@ -177,7 +175,20 @@ struct cmaplist_t {
 
 struct xx14list_t {
   int i, j, ishift;
+  // xx14list_t++
+  xx14list_t operator++(int) {
+    xx14list_t temp = *this;
+    this->i++;
+    this->j++;
+    return temp;
+  }
+  // xx14list_t--
+  xx14list_t operator--(int) {
+    xx14list_t temp = *this;
+    this->i--;
+    this->j--;
+    return temp;
+  }
 };
 
 #endif // BONDED_STRUCT_H
-#endif //NOCUDAC

@@ -25,10 +25,11 @@ struct DirectSettings_t {
   float boxy;
   float boxz;
 
-  float roff2;
-  float ron2;
-  float ron;
+  float roff, roff2, roff3, roff5;
+  float ron, ron2;
 
+  float roffinv;
+  float roffinv2;
   float roffinv3;
   float roffinv4;
   float roffinv5;
@@ -36,14 +37,20 @@ struct DirectSettings_t {
   float roffinv12;
   float roffinv18;
 
-  float inv_roff2_ron2;
-
+  float inv_roff2_ron2_3;
+  
   float k6, k12, dv6, dv12;
 
   float ga6, gb6, gc6;
   float ga12, gb12, gc12;
   float GAconst, GBcoef;
 
+  float Aconst, Bconst, Cconst, Dconst;
+  float dvc;
+
+  float Acoef, Bcoef, Ccoef;
+  float Denom, Eaddr, Constr;
+  
   float e14fac;
 
   float hinv;

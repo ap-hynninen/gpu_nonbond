@@ -196,10 +196,10 @@ float pair_vdw_force(const float r2, const float r, const float rinv, const floa
     float roff2_r2_sq = d_setup.roff2 - r2;
     roff2_r2_sq *= roff2_r2_sq;
     float sw = (r2 <= d_setup.ron2) ? 1.0f : 
-      roff2_r2_sq*(d_setup.roff2 + 2.0f*r2 - 3.0f*d_setup.ron2)*d_setup.inv_roff2_ron2;
+      roff2_r2_sq*(d_setup.roff2 + 2.0f*r2 - 3.0f*d_setup.ron2)*d_setup.inv_roff2_ron2_3;
     // dsw_6 = dsw/6.0
     float dsw_6 = (r2 <= d_setup.ron2) ? 0.0f : 
-      (d_setup.roff2-r2)*(d_setup.ron2-r2)*d_setup.inv_roff2_ron2;
+      (d_setup.roff2-r2)*(d_setup.ron2-r2)*d_setup.inv_roff2_ron2_3;
     float rinv4 = rinv2*rinv2;
     float rinv6 = rinv4*rinv2;
     fij_vdw = rinv4*( c12*rinv6*(dsw_6 - sw*rinv2) - c6*(2.0f*dsw_6 - sw*rinv2) );
@@ -307,18 +307,81 @@ __forceinline__ __device__ float lookup_force(const float r, const float hinv) {
 }
 
 //
+// Switching function from CHARMM J. Comp. Chem. 1983 paper
+// -------------------------------------------------------------
+// if (x <= xon) then
+//   sw = one
+// elseif (x > xoff) then
+//   sw = zero
+// else
+//   sw = (xoff-x)**2*(xoff + 2.0f*x - 3.0f*xon)/(xoff-xon)**3
+// endif
+// -------------------------------------------------------------
+//
+__forceinline__ __device__
+float sw(const float x, const float xon, const float xoff, const float inv_xoff_xon3) {
+  float res = 0.0f;
+  if (x <= xoff) {
+    res = (x <= xon) ? 1.0f : (xoff-x)*(xoff-x)*(xoff + 2.0f*x - 3.0f*xon)*inv_xoff_xon3;
+  }
+  return res;
+}
+
+//
+// Derivative of switching function from CHARMM J. Comp. Chem. 1983 paper
+// -------------------------------------------------------------
+//    if (x <= xon) then
+//       dsw = zero
+//    elseif (x > xoff) then
+//       dsw = zero
+//    else
+//       dsw = six*(xoff-x)*(xon-x)/(xoff-xon)**3
+//    endif
+// -------------------------------------------------------------
+//
+__forceinline__ __device__
+float dsw(const float x, const float xon, const float xoff, const float inv_xoff_xon3) {
+  float res = 0.0f;
+  if (x > xon && x <= xoff) {
+    res = 6.0f*(xoff-x)*(xon-x)*inv_xoff_xon3;
+  }
+  return res;
+}
+
+//
 // Calculates electrostatic force & energy
 //
-template <int elec_model, bool calc_energy>
+template <int elec_model, bool calc_energy, bool use_e14fac>
 __forceinline__ __device__
 float pair_elec_force(const float r2, const float r, const float rinv, 
-		      const float qq, float &pot_elec) {
+		      float qq, const float e14fac, float &pot_elec) {
 
   float fij_elec;
 
+  if (use_e14fac && elec_model != EWALD_LOOKUP && elec_model != EWALD) {
+    // If we're using non-Ewald method, e14fac scales the charges
+    qq *= e14fac;
+  }
+  
   if (elec_model == EWALD_LOOKUP) {
     fij_elec = qq*lookup_force(r, d_setup.hinv);
   } else if (elec_model == EWALD) {
+
+    float erfc_val = fasterfc(d_setup.kappa*r);
+    float exp_val = expf(-d_setup.kappa2*r2);
+    float qq_efac_rinv;
+    if (use_e14fac) {
+      qq_efac_rinv = qq*(erfc_val + e14fac - 1.0f)*rinv;
+    } else {
+      qq_efac_rinv = qq*erfc_val*rinv;
+    }
+    if (calc_energy) {
+      pot_elec = qq_efac_rinv;
+    }
+    const float two_sqrtpi = 1.12837916709551f;    // 2/sqrt(pi)
+    fij_elec = -qq*two_sqrtpi*d_setup.kappa*exp_val - qq_efac_rinv;
+
+    /*
     float erfc_val = fasterfc(d_setup.kappa*r);
     float exp_val = expf(-d_setup.kappa2*r2);
     if (calc_energy) {
@@ -326,18 +389,81 @@ float pair_elec_force(const float r2, const float r, const float rinv,
     }
     const float two_sqrtpi = 1.12837916709551f;    // 2/sqrt(pi)
     fij_elec = qq*(two_sqrtpi*d_setup.kappa*exp_val + erfc_val*rinv);
+    */
+    
+  } else if (elec_model == CSHIFT) {
+    fij_elec = -qq*(rinv - r*d_setup.roffinv2);
+    if (calc_energy) {
+      pot_elec = qq*rinv*(1.0f - 2.0f*r*d_setup.roffinv + r2*d_setup.roffinv2);
+    }
+  } else if (elec_model == CFSWIT) {
+    float r3 = r2*r;
+    float r5 = r3*r2;
+    fij_elec = (r <= d_setup.ron) ? -qq*rinv : -qq*(d_setup.Aconst*rinv + d_setup.Bconst*r + 3.0f*d_setup.Cconst*r3 + 5.0f*d_setup.Dconst*r5);
+    if (calc_energy) {
+      //pot_elec = (r <= d_setup.ron) ? qq*(rinv + d_setup.dvc) : qq*(d_setup.Aconst*(rinv - d_setup.roffinv) + d_setup.Bconst*(d_setup.roff - r) + 
+      //								    d_setup.Cconst*(d_setup.roff3 - r3) + d_setup.Dconst*(d_setup.roff5 - r5));
+      double tmp = (r <= d_setup.ron) ?
+	(double)qq*((double)rinv + (double)d_setup.dvc) :
+	(double)qq*((double)d_setup.Aconst*(rinv - d_setup.roffinv) + (double)d_setup.Bconst*(d_setup.roff - r) + 
+		    (double)d_setup.Cconst*(d_setup.roff3 - r3) + (double)d_setup.Dconst*(d_setup.roff5 - r5));
+      pot_elec = (float)tmp;
+    }
+  } else if (elec_model == CSHFT) {
+    // Shift 1/r energy
+    float tmp = (1.0f - r2*d_setup.roffinv2);
+    fij_elec = -qq*(rinv*tmp*tmp + 4.0f*r*d_setup.roffinv2*tmp);
+    if (calc_energy) {
+      pot_elec = qq*rinv*tmp*tmp;
+    }
+  } else if (elec_model == CSWIT) {
+    // Switch 1/r energy
+    float tmp = sw(r2, d_setup.ron2, d_setup.roff2, d_setup.inv_roff2_ron2_3);
+    fij_elec = -qq*(rinv*tmp - 2.0f*r*dsw(r2, d_setup.ron2, d_setup.roff2, d_setup.inv_roff2_ron2_3));
+    if (calc_energy) {
+      pot_elec = qq*rinv*tmp;
+    }
+  } else if (elec_model == RSWIT) {
+    // Switch 1/r^2 energy
+    float rinv2 = rinv*rinv;
+    float tmp = sw(r2, d_setup.ron2, d_setup.roff2, d_setup.inv_roff2_ron2_3);
+    fij_elec = -2.0f*qq*(rinv2*tmp - dsw(r2, d_setup.ron2, d_setup.roff2, d_setup.inv_roff2_ron2_3));
+    if (calc_energy) {
+      pot_elec = qq*rinv2*tmp;
+    }
+  } else if (elec_model == RSHFT) {
+    // Shift 1/r^2 energy
+    float rinv2 = rinv*rinv;
+    float tmp = (1.0f - r2*d_setup.roffinv2);
+    fij_elec = -qq*(2.0f*rinv2*tmp*tmp + 4.0f*d_setup.roffinv2*tmp);
+    if (calc_energy) {
+      pot_elec = qq*rinv2*tmp*tmp;
+    }
+  } else if (elec_model == RSHIFT) {
+    // Shift 1/r^2 force with (r/rc -1)
+    fij_elec = -qq*rinv*2.0f*(rinv - d_setup.roffinv);
+    if (calc_energy) {
+      pot_elec = qq*rinv*rinv*(1.0f - 2.0f*r*d_setup.roffinv + r2*d_setup.roffinv2);
+    }
+  } else if (elec_model == RFSWIT) {
+    // Switch 1/r^2 force
+    float rinv2 = rinv*rinv;
+    fij_elec = (r <= d_setup.ron) ? -2.0f*qq*rinv2 : -2.0f*qq*(d_setup.Acoef*rinv2 + d_setup.Bcoef + d_setup.Ccoef*r2 + 2.0f*d_setup.Denom*r2*r2);
+    if (calc_energy) {
+      pot_elec = (r <= d_setup.ron) ? qq*(rinv2 + d_setup.Eaddr) : qq*(d_setup.Acoef*rinv2 - 2.0f*d_setup.Bcoef*logf(r) - r2*(d_setup.Ccoef + r2*d_setup.Denom) + d_setup.Constr);
+    }
   } else if (elec_model == GSHFT) {
     // GROMACS style shift 1/r^2 force
     // MGL special casing ctonnb=0 might speed this up
     // NOTE THAT THIS EXPLICITLY ASSUMES ctonnb = 0
     //ctofnb4 = ctofnb2*ctofnb2
     //ctofnb5 = ctofnb4*ctofnb
-    fij_elec = qq*(rinv - (5.0f*d_setup.roffinv4*r - 4.0f*d_setup.roffinv5*r2)*r2 );
-    //d = -qscale*(one/r2 - 5.0*r2/ctofnb4 +4*r2*r/ctofnb5)
+    fij_elec = -qq*(rinv - (5.0f*d_setup.roffinv4*r - 4.0f*d_setup.roffinv5*r2)*r2 );
     if (calc_energy) {
       pot_elec = qq*(rinv - d_setup.GAconst + (d_setup.GBcoef*r - d_setup.roffinv5*r2)*r2);
-      //e = qscale*(one/r - GAconst + r*r2*GBcoef - r2*r2/ctofnb5)
     }
+    //d = -qscale*(one/r2 - 5.0*r2/ctofnb4 +4*r2*r/ctofnb5)
+    //e = qscale*(one/r - GAconst + r*r2*GBcoef - r2*r2/ctofnb5)
   } else if (elec_model == NONE) {
     fij_elec = 0.0f;
     if (calc_energy) {
@@ -348,6 +474,7 @@ float pair_elec_force(const float r2, const float r, const float rinv,
   return fij_elec;
 }
 
+/*
 //
 // Calculates electrostatic force & energy for 1-4 interactions and exclusions
 //
@@ -376,6 +503,7 @@ float pair_elec_force_14(const float r2, const float r, const float rinv,
 
   return fij_elec;
 }
+*/
 
 //
 // 1-4 exclusion force
@@ -403,8 +531,11 @@ __device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list
   CT rinv = ((CT)1)/r;
   CT rinv2 = rinv*rinv;
   float dpot_elec;
-  CT fij_elec = pair_elec_force_14<elec_model, calc_energy>(r2, r, rinv, qq,
-							    0.0f, dpot_elec);
+
+  CT fij_elec = pair_elec_force<elec_model, calc_energy, true>(r2, r, rinv, qq, 0.0f, dpot_elec);
+  //CT fij_elec = pair_elec_force_14<elec_model, calc_energy>(r2, r, rinv, qq,
+  //							    0.0f, dpot_elec);
+  
   if (calc_energy) elec_pot += (double)dpot_elec;
   CT fij = fij_elec*rinv2;
   // Calculate force components
@@ -483,8 +614,8 @@ __device__ void calc_in14_force_device(
   if (calc_energy) vdw_pot += (double)dpot_vdw;
 
   float dpot_elec;
-  CT fij_elec = pair_elec_force_14<elec_model, calc_energy>(r2, r, rinv, qq,
-  							    d_setup.e14fac, dpot_elec);
+  CT fij_elec = pair_elec_force<elec_model, calc_energy, true>(r2, r, rinv, qq,
+							       d_setup.e14fac, dpot_elec);
   if (calc_energy) elec_pot += (double)dpot_elec;
 
   CT fij = (fij_vdw + fij_elec)*rinv2;
@@ -504,6 +635,23 @@ __device__ void calc_in14_force_device(
     //sforce(is+2) = sforce(is+2) + fijz
   }
 
+}
+
+//
+// Evaluates a single pair force and energy for c6=c12=qq=1.0f
+//
+template <int vdw_model, int elec_model>
+__global__ void evalForceKernel(const float r, double *force_val, double *energy_val) {
+  if (threadIdx.x + blockIdx.x*blockDim.x == 0) {
+    float r2 = r*r;
+    float rinv = 1.0f/r;
+    float rinv2 = rinv*rinv;
+    float energy_vdw, energy_elec;
+    float force_vdw = pair_vdw_force<vdw_model, true>(r2, r, rinv, rinv2, 1.0f, 1.0f, energy_vdw);
+    float force_elec = pair_elec_force<elec_model, true, false>(r2, r, rinv, 1.0f, d_setup.e14fac, energy_elec);
+    *force_val = (double)force_vdw + (double)force_elec;
+    *energy_val = (double)energy_vdw + (double)energy_elec;
+  }
 }
 
 //
@@ -562,7 +710,8 @@ __global__ void calc_14_force_kernel(
       }
     }
 
-  } else {
+  } else if (elec_model == EWALD || elec_model == EWALD_LOOKUP) {
+    // NOTE: Only Ewald potentials calculte 1-4 exclusions
     double excl_pot;
     if (calc_energy) excl_pot = 0.0;
 
@@ -590,6 +739,13 @@ __global__ void calc_14_force_kernel(
   }
 
 }
+
+#define CREATE_EVAL_KERNEL(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, ...)	\
+  {									\
+    KERNEL_NAME <VDW_MODEL, ELEC_MODEL>					\
+    <<< 1, 1, 0, 0 >>>							\
+    (__VA_ARGS__);							\
+  }
 
 #define CREATE_KERNEL(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, CALC_ENERGY, CALC_VIRIAL, TEX_VDWPARAM, ...) \
   {									\
@@ -622,34 +778,55 @@ __global__ void calc_14_force_kernel(
     }									\
   }
 
-#define EXPAND_ELEC(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, ...)	\
+#define EXPAND_ENERGY_VIRIAL_NONE(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, ELEC_MODEL, ...) \
+  {									\
+    KERNEL_CREATOR(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, __VA_ARGS__);	\
+  }
+
+#define EXPAND_ELEC(EXPAND_ENERGY_VIRIAL_NAME, KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, ...)	\
   {									\
     if (elec_model == EWALD) {					\
-      EXPAND_ENERGY_VIRIAL(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, EWALD, __VA_ARGS__); \
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, EWALD, __VA_ARGS__); \
     } else if (elec_model == EWALD_LOOKUP) {			\
-      EXPAND_ENERGY_VIRIAL(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, EWALD_LOOKUP, __VA_ARGS__); \
-    } else if (elec_model == GSHFT) {				\
-      EXPAND_ENERGY_VIRIAL(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, GSHFT, __VA_ARGS__); \
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, EWALD_LOOKUP, __VA_ARGS__); \
+    } else if (elec_model == CSHIFT) {				\
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, CSHIFT, __VA_ARGS__); \
+    } else if (elec_model == CFSWIT) {				\
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, CFSWIT, __VA_ARGS__); \
+    } else if (elec_model == CSHFT) {				\
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, CSHFT, __VA_ARGS__); \
+    } else if (elec_model == CSWIT) {				\
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, CSWIT, __VA_ARGS__); \
+    } else if (elec_model == RSWIT) {					\
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, RSWIT, __VA_ARGS__); \
+    } else if (elec_model == RSHFT) {				\
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, RSHFT, __VA_ARGS__); \
+    } else if (elec_model == RSHIFT) {				\
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, RSHIFT, __VA_ARGS__); \
+    } else if (elec_model == RFSWIT) {					\
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, RFSWIT, __VA_ARGS__); \
+    } else if (elec_model == GSHFT) {					\
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, GSHFT, __VA_ARGS__); \
     } else if (elec_model == NONE) {				\
-      EXPAND_ENERGY_VIRIAL(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, NONE, __VA_ARGS__); \
+      EXPAND_ENERGY_VIRIAL_NAME(KERNEL_CREATOR, KERNEL_NAME, VDW_MODEL, NONE, __VA_ARGS__); \
     } else {								\
       std::cout<<__func__<<" Invalid EWALD model "<<elec_model<<std::endl; \
       exit(1);								\
     }									\
   }
 
-#define CREATE_KERNELS(KERNEL_CREATOR, KERNEL_NAME, ...)		\
+#define CREATE_KERNELS(EXPAND_ENERGY_VIRIAL_NAME, KERNEL_CREATOR, KERNEL_NAME, ...) \
   {									\
     if (vdw_model == VDW_VSH) {					\
-      EXPAND_ELEC(KERNEL_CREATOR, KERNEL_NAME, VDW_VSH, __VA_ARGS__);	\
+      EXPAND_ELEC(EXPAND_ENERGY_VIRIAL_NAME, KERNEL_CREATOR, KERNEL_NAME, VDW_VSH, __VA_ARGS__);	\
     } else if (vdw_model == VDW_VSW) {				\
-      EXPAND_ELEC(KERNEL_CREATOR, KERNEL_NAME, VDW_VSW, __VA_ARGS__);	\
+      EXPAND_ELEC(EXPAND_ENERGY_VIRIAL_NAME, KERNEL_CREATOR, KERNEL_NAME, VDW_VSW, __VA_ARGS__);	\
     } else if (vdw_model == VDW_VFSW) {				\
-      EXPAND_ELEC(KERNEL_CREATOR, KERNEL_NAME, VDW_VFSW, __VA_ARGS__);	\
+      EXPAND_ELEC(EXPAND_ENERGY_VIRIAL_NAME, KERNEL_CREATOR, KERNEL_NAME, VDW_VFSW, __VA_ARGS__); \
     } else if (vdw_model == VDW_CUT) {				\
-      EXPAND_ELEC(KERNEL_CREATOR, KERNEL_NAME, VDW_CUT, __VA_ARGS__);	\
+      EXPAND_ELEC(EXPAND_ENERGY_VIRIAL_NAME, KERNEL_CREATOR, KERNEL_NAME, VDW_CUT, __VA_ARGS__);	\
     } else if (vdw_model == VDW_VGSH) {				\
-      EXPAND_ELEC(KERNEL_CREATOR, KERNEL_NAME, VDW_VGSH, __VA_ARGS__);	\
+      EXPAND_ELEC(EXPAND_ENERGY_VIRIAL_NAME, KERNEL_CREATOR, KERNEL_NAME, VDW_VGSH, __VA_ARGS__); \
     } else {								\
       std::cout<<__func__<<" Invalid VDW model "<<vdw_model<<std::endl; \
       exit(1);								\
@@ -681,6 +858,18 @@ __global__ void calc_14_force_kernel(
 //------------------------------------------------------------
 
 template <typename AT, typename CT>
+void evalForceKernelChoice(const int vdw_model, const int elec_model, const float r, double &force_val, double &energy_val) {
+  double h_result[2];
+  double *d_result;
+  allocate<double>(&d_result, 2);
+  CREATE_KERNELS(EXPAND_ENERGY_VIRIAL_NONE, CREATE_EVAL_KERNEL, evalForceKernel, r, &d_result[0], &d_result[1]);
+  copy_DtoH_sync<double>(d_result, h_result, 2);
+  deallocate<double>(&d_result);
+  force_val  = h_result[0];
+  energy_val = h_result[1];
+}
+
+template <typename AT, typename CT>
 void calcForceKernelChoice(const int nblock_tot_in, const int nthread, const int shmem_size, cudaStream_t stream,
 			   const int vdw_model, const int elec_model, const bool calc_energy, const bool calc_virial,
 			   const CudaNeighborListBuild<32>& nlist,
@@ -708,25 +897,25 @@ void calcForceKernelChoice(const int nblock_tot_in, const int nthread, const int
 	 d_energy_virial, force);
       */
 #ifdef USE_TEXTURE_OBJECTS
-      CREATE_KERNELS(CREATE_KERNEL, calcForceKernel, vdwparam_tex,
+      CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL, calcForceKernel, vdwparam_tex,
 		     base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
 		     nlist.get_tile_excl(), stride, vdwparam, nvdwparam, xyzq, vdwtype,
 		     d_energy_virial, force);
 #else
-      CREATE_KERNELS(CREATE_KERNEL, calcForceKernel,
+      CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL, calcForceKernel,
 		     base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
 		     nlist.get_tile_excl(), stride, vdwparam, nvdwparam, xyzq, vdwtype,
 		     d_energy_virial, force);
 #endif
     } else {
 #ifdef USE_TEXTURE_OBJECTS
-      CREATE_KERNELS(CREATE_KERNEL, calcForceBlockKernel, vdwparam_tex,
+      CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL, calcForceBlockKernel, vdwparam_tex,
 		     base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
 		     nlist.get_tile_excl(), stride, vdwparam, nvdwparam, xyzq, vdwtype,
 		     cudaBlock->getNumBlock(), cudaBlock->getBixlam(), cudaBlock->getBlockType(),
 		     biflam, biflam2, cudaBlock->getBlockParamTexObj(), d_energy_virial, force);
 #else
-      CREATE_KERNELS(CREATE_KERNEL, calcForceBlockKernel,
+      CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL, calcForceBlockKernel,
 		     base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
 		     nlist.get_tile_excl(), stride, vdwparam, nvdwparam, xyzq, vdwtype,
 		     cudaBlock->getNumBlock(), cudaBlock->getBixlam(), cudaBlock->getBlockType(),
@@ -748,11 +937,11 @@ void calcForce14KernelChoice(const int nblock, const int nthread, const int shme
 			     const int stride, DirectEnergyVirial_t* d_energy_virial, AT* force) {
   
 #ifdef USE_TEXTURE_OBJECTS
-  CREATE_KERNELS(CREATE_KERNEL14, calc_14_force_kernel, vdwparam14_tex,
+  CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL14, calc_14_force_kernel, vdwparam14_tex,
 		 nin14list, nex14list, nin14block, in14list, ex14list,
 		 vdwtype, vdwparam14, xyzq, stride, d_energy_virial, force);
 #else
-  CREATE_KERNELS(CREATE_KERNEL14, calc_14_force_kernel,
+  CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL14, calc_14_force_kernel,
 		 nin14list, nex14list, nin14block, in14list, ex14list,
 		 vdwtype, vdwparam14, xyzq, stride, d_energy_virial, force);
 #endif
@@ -781,7 +970,9 @@ void calcVirial(const int ncoord, const float4 *xyzq,
 void updateDirectForceSetup(const DirectSettings_t* h_setup) {
  cudaCheck(cudaMemcpyToSymbol(d_setup, h_setup, sizeof(DirectSettings_t)));
 }
- 
+
+template void evalForceKernelChoice<long long int, float>(const int vdw_model, const int elec_model, const float r, double &force_val, double &energy_val);
+
 template void calcForceKernelChoice<long long int, float>
 (const int nblock_tot_in, const int nthread, const int shmem_size, cudaStream_t stream,
  const int vdw_model, const int elec_model, const bool calc_energy, const bool calc_virial,
