@@ -10,11 +10,11 @@ struct DirectEnergyVirial_t {
   // Finished virial
   double vir[9];
 
-  // Shift forces for virial calculation
-  double sforcex[27];
-  double sforcey[27];
-  double sforcez[27];
+  // DP Shift forces for virial calculation
+  double sforce[27*3];
 
+  // FP Shift forces for virial calculation
+  long long int sforce_fp[27*3];
 };
 
 struct DirectSettings_t {

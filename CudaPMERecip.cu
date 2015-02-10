@@ -4,12 +4,12 @@
 #include "gpu_utils.h"
 #include "cuda_utils.h"
 #include "reduce.h"
-#include "Grid.h"
+#include "CudaPMERecip.h"
 
 static const double pi = 3.14159265358979323846;
 
 //
-// Grid class
+// CudaPMERecip class
 //
 // AT  = Accumulation Type
 // CT  = Calculation Type (real)
@@ -18,7 +18,7 @@ static const double pi = 3.14159265358979323846;
 // (c) Antti-Pekka Hynninen, 2013, aphynninen@hotmail.com
 //
 // In real space:
-// Each instance of grid is responsible for grid region (x0..x1) x (y0..y1) x (z0..z1)
+// Each instance of CudaPMERecip is responsible for grid region (x0..x1) x (y0..y1) x (z0..z1)
 // Note that usually x0=0, x1=nfftx-1
 //
 
@@ -931,6 +931,12 @@ spread_charge_ortho_8(const float4 *xyzq, const int ncoord,
 
 }
 
+// Local structure for scalar_sum -function for energy and virial reductions
+struct RecipVirial_t {
+  double energy;
+  double virial[6];
+};
+
 //
 // Performs scalar sum on data(nfft1, nfft2, nfft3)
 // T = float or double
@@ -944,7 +950,8 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
 					const T* prefac1, const T* prefac2, const T* prefac3,
 					const T fac, const T piv_inv,
 					const bool global_base, T2* data,
-					RecipEnergyVirial_t *energy_virial) {
+					double* __restrict__ energy_recip,
+					Virial_t* __restrict__ virial) {
   extern __shared__ T sh_prefac[];
 
   // Create pointers to shared memory
@@ -1107,8 +1114,8 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
   // Reduce energy and virial
   if (calc_energy_virial) {
 #if __CUDA_ARCH__ < 300
-    // Requires blockDim.x*sizeof(RecipEnergyVirial_t) amount of shared memory
-    volatile RecipEnergyVirial_t* sh_ev = (RecipEnergyVirial_t *)sh_prefac;
+    // Requires blockDim.x*sizeof(RecipVirial_t) amount of shared memory
+    volatile RecipVirial_t* sh_ev = (RecipVirial_t *)sh_prefac;
     // NOTE: this __syncthreads() is needed because we're using a single shared memory buffer
     __syncthreads();
     sh_ev[threadIdx.x].energy  = energy;
@@ -1143,7 +1150,7 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
 #else
     const int tid = threadIdx.x & (warpsize-1);
     const int base = (threadIdx.x/warpsize);
-    volatile RecipEnergyVirial_t* sh_ev = (RecipEnergyVirial_t *)sh_prefac;
+    volatile RecipVirial_t* sh_ev = (RecipVirial_t *)sh_prefac;
     // Reduce within warps
     for (int d=warpsize/2;d >= 1;d /= 2) {
       energy += __hiloint2double(__shfl(__double2hiint(energy), tid+d),
@@ -1212,13 +1219,22 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
       virial4 = sh_ev[0].virial[4];
       virial5 = sh_ev[0].virial[5];
 #endif
-      atomicAdd(&energy_virial->energy, energy);
-      atomicAdd(&energy_virial->virial[0], virial0);
-      atomicAdd(&energy_virial->virial[1], virial1);
-      atomicAdd(&energy_virial->virial[2], virial2);
-      atomicAdd(&energy_virial->virial[3], virial3);
-      atomicAdd(&energy_virial->virial[4], virial4);
-      atomicAdd(&energy_virial->virial[5], virial5);
+      atomicAdd(energy_recip, energy*half_ccelec);
+      virial0 *= -half_ccelec;
+      virial1 *= -half_ccelec;
+      virial2 *= -half_ccelec;
+      virial3 *= -half_ccelec;
+      virial4 *= -half_ccelec;
+      virial5 *= -half_ccelec;
+      atomicAdd(&virial->virmat[0], virial0);
+      atomicAdd(&virial->virmat[1], virial1);
+      atomicAdd(&virial->virmat[2], virial2);
+      atomicAdd(&virial->virmat[3], virial1);
+      atomicAdd(&virial->virmat[4], virial3);
+      atomicAdd(&virial->virmat[5], virial4);
+      atomicAdd(&virial->virmat[6], virial2);
+      atomicAdd(&virial->virmat[7], virial4);
+      atomicAdd(&virial->virmat[8], virial5);
     }
 
   }
@@ -2383,9 +2399,11 @@ __global__ void gather_force_8_ortho_kernel(const float4 *xyzq, const int ncoord
 
 //
 // Calculates self energy
+// kappa_ccelec_sqrtpi = kappa*ccelec/sqrt(pi)
 //
 __global__ void calc_self_energy_kernel(const int ncoord, const float4* xyzq,
-					RecipEnergyVirial_t *energy_virial) {
+					const double kappa_ccelec_sqrtpi,
+					double* __restrict__ energy_self) {
   // Shared memory
   // Required space: blockDim.x*sizeof(double)
   extern __shared__ double sh_q2[];
@@ -2403,7 +2421,7 @@ __global__ void calc_self_energy_kernel(const int ncoord, const float4* xyzq,
     __syncthreads();
   }
   if (threadIdx.x == 0) {
-    atomicAdd(&energy_virial->energy_self, sh_q2[0]);
+    atomicAdd(energy_self, -sh_q2[0]*kappa_ccelec_sqrtpi);
   }
 
 }
@@ -2435,7 +2453,7 @@ void bind_grid_texture<float>(const float *data, const int data_len) {
 // Initializer
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
+void CudaPMERecip<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 			     bool y_land_locked, bool z_land_locked) {
   
   this->x0 = x0;
@@ -2521,78 +2539,88 @@ void Grid<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int
 // Class creator 
 //
 template <typename AT, typename CT, typename CT2>
-Grid<AT, CT, CT2>::Grid(int nfftx, int nffty, int nfftz, int order,
+CudaPMERecip<AT, CT, CT2>::CudaPMERecip(int nfftx, int nffty, int nfftz, int order,
 			FFTtype fft_type, int nnode, int mynode,
-			cudaStream_t stream) : nfftx(nfftx), nffty(nffty), nfftz(nfftz),
-					       fft_type(fft_type), stream(stream) {
+			CudaEnergyVirial& energyVirial, const char* nameRecip, const char* nameSelf,
+			cudaStream_t stream) :
+  nfftx(nfftx), nffty(nffty), nfftz(nfftz), fft_type(fft_type),
+  energyVirial(energyVirial), stream(stream) {
 
-    assert(nnode >= 1);
-    assert(mynode >= 0 && mynode < nnode);
-    assert(sizeof(AT) >= sizeof(CT));
+  assert(nnode >= 1);
+  assert(mynode >= 0 && mynode < nnode);
+  assert(sizeof(AT) >= sizeof(CT));
+  assert(nameRecip != NULL);
+  assert(nameSelf != NULL);
 
-    int nnode_y, nnode_z;
-
-    if (fft_type == COLUMN) {
-      nnode_y = max(1,(int)ceil( sqrt( (double)(nnode*nffty) / (double)(nfftz) )));
+  // Insert energy terms
+  energyVirial.insert(nameRecip);
+  strRecip = nameRecip;
+  energyVirial.insert(nameSelf);
+  strSelf = nameSelf;
+  
+  int nnode_y, nnode_z;
+  
+  if (fft_type == COLUMN) {
+    nnode_y = max(1,(int)ceil( sqrt( (double)(nnode*nffty) / (double)(nfftz) )));
+    nnode_z = nnode/nnode_y;
+    while (nnode_y*nnode_z != nnode) {
+      nnode_y = nnode_y - 1;
       nnode_z = nnode/nnode_y;
-      while (nnode_y*nnode_z != nnode) {
-	nnode_y = nnode_y - 1;
-	nnode_z = nnode/nnode_y;
-      }
-    } else if (fft_type == SLAB) {
-      nnode_y = 1;
-      nnode_z = nnode;
-      assert(nfftz/nnode_z >= 1);
-    } else if (fft_type == BOX) {
-      assert(nnode == 1);
-      nnode_y = 1;
-      nnode_z = 1;
-    } else {
-      std::cerr<<"Grid::fft_type invalid"<<std::endl;
-      exit(1);
     }
+  } else if (fft_type == SLAB) {
+    nnode_y = 1;
+    nnode_z = nnode;
+    assert(nfftz/nnode_z >= 1);
+  } else if (fft_type == BOX) {
+    assert(nnode == 1);
+    nnode_y = 1;
+    nnode_z = 1;
+  } else {
+    std::cerr<<"CudaPMERecip::fft_type invalid"<<std::endl;
+    exit(1);
+  }
 
-    // We have nodes nnode_y * nnode_z. Get y and z index of this node:
-    int inode_y = mynode % nnode_y;
-    int inode_z = mynode/nnode_y;
+  // We have nodes nnode_y * nnode_z. Get y and z index of this node:
+  int inode_y = mynode % nnode_y;
+  int inode_z = mynode/nnode_y;
 
-    assert(nnode_y != 0);
-    assert(nnode_z != 0);
+  assert(nnode_y != 0);
+  assert(nnode_z != 0);
 
-    int x0 = 0;
-    int x1 = nfftx-1;
+  int x0 = 0;
+  int x1 = nfftx-1;
       
-    int y0 = inode_y*nffty/nnode_y;
-    int y1 = (inode_y+1)*nffty/nnode_y - 1;
+  int y0 = inode_y*nffty/nnode_y;
+  int y1 = (inode_y+1)*nffty/nnode_y - 1;
 
-    int z0 = inode_z*nfftz/nnode_z;
-    int z1 = (inode_z+1)*nfftz/nnode_z - 1;
+  int z0 = inode_z*nfftz/nnode_z;
+  int z1 = (inode_z+1)*nfftz/nnode_z - 1;
 
-    bool y_land_locked = (inode_y-1 >= 0) && (inode_y+1 < nnode_y);
-    bool z_land_locked = (inode_z-1 >= 0) && (inode_z+1 < nnode_z);
+  bool y_land_locked = (inode_y-1 >= 0) && (inode_y+1 < nnode_y);
+  bool z_land_locked = (inode_z-1 >= 0) && (inode_z+1 < nnode_z);
 
-    multi_gpu = false;
+  multi_gpu = false;
 
-    assert((multi_gpu && fft_type==BOX) || !multi_gpu);
+  assert((multi_gpu && fft_type==BOX) || !multi_gpu);
 
-    init(x0, x1, y0, y1, z0, z1, order, y_land_locked, z_land_locked);
+  init(x0, x1, y0, y1, z0, z1, order, y_land_locked, z_land_locked);
 
-    allocate<CT>(&prefac_x, nfftx);
-    allocate<CT>(&prefac_y, nffty);
-    allocate<CT>(&prefac_z, nfftz);
-    calc_prefac();
+  allocate<CT>(&prefac_x, nfftx);
+  allocate<CT>(&prefac_y, nffty);
+  allocate<CT>(&prefac_z, nfftz);
+  calc_prefac();
 
-    allocate<RecipEnergyVirial_t>(&d_energy_virial, 1);
-    allocate_host<RecipEnergyVirial_t>(&h_energy_virial, 1);
+  //allocate<RecipEnergyVirial_t>(&d_energy_virial, 1);
+  //allocate_host<RecipEnergyVirial_t>(&h_energy_virial, 1);
 
-    clear_energy_virial();
+  //clear_energy_virial();
 }
 
 //
 // Create FFT plans
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::make_fft_plans() {
+void CudaPMERecip<AT, CT, CT2>::make_fft_plans() {
 
   if (fft_type == COLUMN) {
     // Set the size of the local FFT transforms
@@ -2688,7 +2716,7 @@ void Grid<AT, CT, CT2>::make_fft_plans() {
 // Set stream
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::set_stream(cudaStream_t stream) {
+void CudaPMERecip<AT, CT, CT2>::set_stream(cudaStream_t stream) {
 
   this->stream = stream;
 
@@ -2713,7 +2741,7 @@ void Grid<AT, CT, CT2>::set_stream(cudaStream_t stream) {
 // Class destructor
 //
 template <typename AT, typename CT, typename CT2>
-Grid<AT, CT, CT2>::~Grid() {
+CudaPMERecip<AT, CT, CT2>::~CudaPMERecip() {
 
   // Unbind grid texture
   cudaCheck(cudaUnbindTexture(grid_texref));
@@ -2756,12 +2784,12 @@ Grid<AT, CT, CT2>::~Grid() {
   deallocate<CT>(&prefac_y);
   deallocate<CT>(&prefac_z);
 
-  if (d_energy_virial != NULL) deallocate<RecipEnergyVirial_t>(&d_energy_virial);
-  if (h_energy_virial != NULL) deallocate_host<RecipEnergyVirial_t>(&h_energy_virial);
+  //if (d_energy_virial != NULL) deallocate<RecipEnergyVirial_t>(&d_energy_virial);
+  //if (h_energy_virial != NULL) deallocate_host<RecipEnergyVirial_t>(&h_energy_virial);
 }
 
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::print_info() {
+void CudaPMERecip<AT, CT, CT2>::print_info() {
   std::cout << "fft_type = ";
   if (fft_type == COLUMN) {
     std::cout << "COLUMN" << std::endl;
@@ -2786,7 +2814,7 @@ void Grid<AT, CT, CT2>::print_info() {
 // Spreads charge on grid. Uses pre-calculated B-splines (slower)
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspline) {
+void CudaPMERecip<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspline) {
 
   clear_gpu_array<AT>((AT *)accum_grid->data, xsize*ysize*zsize, stream);
 
@@ -2815,7 +2843,7 @@ void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspli
     break;
 
   default:
-    std::cerr<<"Grid::spread_charge: order "<<order<<" not implemented"<<std::endl;
+    std::cerr<<"CudaPMERecip::spread_charge: order "<<order<<" not implemented"<<std::endl;
     exit(1);
   }
   cudaCheck(cudaGetLastError());
@@ -2838,7 +2866,7 @@ void Grid<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspli
 // Spreads charge on grid. Calculates B-splines on-the-fly (faster)
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, const double *recip) {
+void CudaPMERecip<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, const double *recip) {
 
   clear_gpu_array<AT>((AT *)accum_grid->data, xsize*ysize*zsize, stream);
 
@@ -2889,7 +2917,7 @@ void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, cons
     break;
 
   default:
-    std::cerr<<"Grid::spread_charge: order "<<order<<" not implemented"<<std::endl;
+    std::cerr<<"CudaPMERecip::spread_charge: order "<<order<<" not implemented"<<std::endl;
     exit(1);
   }
   cudaCheck(cudaGetLastError());
@@ -2914,7 +2942,7 @@ void Grid<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, cons
 // Perform scalar sum
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
+void CudaPMERecip<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
 				   const bool calc_energy, const bool calc_virial) {
 
   bool calc_energy_virial = (calc_energy || calc_virial);
@@ -2948,9 +2976,9 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
   int shmem_size = sizeof(CT)*(nfftx + nffty + nfftz);
   if (calc_energy_virial) {
     if (get_cuda_arch() < 300) {
-      shmem_size = max(shmem_size, (int)(nthread*sizeof(RecipEnergyVirial_t)));
+      shmem_size = max(shmem_size, (int)(nthread*sizeof(RecipVirial_t)));
     } else {
-      shmem_size = max(shmem_size, (int)((nthread/warpsize)*sizeof(RecipEnergyVirial_t)));
+      shmem_size = max(shmem_size, (int)((nthread/warpsize)*sizeof(RecipVirial_t)));
     }
   }
 
@@ -3012,7 +3040,9 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
 	 nf1, nf2, nf3,
 	 recip1, recip2, recip3,
 	 prefac1, prefac2, prefac3,
-	 fac, piv_inv, global_base, datap, d_energy_virial);
+	 fac, piv_inv, global_base, datap,
+	 energyVirial.getEnergyPointer(strRecip),
+	 energyVirial.getVirialPointer());
       cudaCheck(cudaGetLastError());
     } else {
       scalar_sum_ortho_kernel<CT, CT2, false>
@@ -3022,11 +3052,11 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
 	 nf1, nf2, nf3,
 	 recip1, recip2, recip3,
 	 prefac1, prefac2, prefac3,
-	 fac, piv_inv, global_base, datap, d_energy_virial);
+	 fac, piv_inv, global_base, datap, NULL, NULL);
       cudaCheck(cudaGetLastError());
     }
   } else {
-    std::cerr<<"Grid::scalar_sum: only orthorombic boxes are currently supported"<<std::endl;
+    std::cerr<<"CudaPMERecip::scalar_sum: only orthorombic boxes are currently supported"<<std::endl;
     exit(1);
   }
 
@@ -3036,11 +3066,13 @@ void Grid<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
 // Calculates self energy
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::calc_self_energy(const float4 *xyzq, const int ncoord) {
+void CudaPMERecip<AT, CT, CT2>::calc_self_energy(const float4 *xyzq, const int ncoord, const double kappa) {
   int nthread = 256;
   int nblock = (ncoord-1)/nthread+1;
   int shmem_size = nthread*sizeof(double);
-  calc_self_energy_kernel<<< nblock, nthread, shmem_size, stream >>>(ncoord, xyzq, d_energy_virial);
+  double kappa_ccelec_sqrtpi = kappa*ccelec/sqrt(pi);
+  calc_self_energy_kernel<<< nblock, nthread, shmem_size, stream >>>
+    (ncoord, xyzq, kappa_ccelec_sqrtpi, energyVirial.getEnergyPointer(strSelf));
   cudaCheck(cudaGetLastError());
 }
 
@@ -3048,7 +3080,7 @@ void Grid<AT, CT, CT2>::calc_self_energy(const float4 *xyzq, const int ncoord) {
 // Gathers forces from the grid
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::gather_force(const int ncoord, const double* recip,
+void CudaPMERecip<AT, CT, CT2>::gather_force(const int ncoord, const double* recip,
 				     const Bspline<CT> &bspline,
 				     const int stride, CT* force) {
 
@@ -3090,11 +3122,11 @@ void Grid<AT, CT, CT2>::gather_force(const int ncoord, const double* recip,
       break;
 
     default:
-      std::cerr<<"Grid::gather_force: order "<<order<<" not implemented"<<std::endl;
+      std::cerr<<"CudaPMERecip::gather_force: order "<<order<<" not implemented"<<std::endl;
       exit(1);
     }
   } else {
-      std::cerr<<"Grid::gather_force: only orthorombic boxes are currently supported"<<std::endl;
+      std::cerr<<"CudaPMERecip::gather_force: only orthorombic boxes are currently supported"<<std::endl;
       std::cerr<<recip[1]<<std::endl;
       std::cerr<<recip[2]<<std::endl;
       std::cerr<<recip[3]<<std::endl;
@@ -3112,7 +3144,7 @@ void Grid<AT, CT, CT2>::gather_force(const int ncoord, const double* recip,
 //
 template <typename AT, typename CT, typename CT2>
 template <typename FT>
-void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const double* recip,
+void CudaPMERecip<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const double* recip,
 				     const int stride, FT* force) {
 
   dim3 nthread(32, 2, 1);
@@ -3171,11 +3203,11 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
       break;
 
     default:
-      std::cerr<<"Grid::gather_force: order "<<order<<" not implemented"<<std::endl;
+      std::cerr<<"CudaPMERecip::gather_force: order "<<order<<" not implemented"<<std::endl;
       exit(1);
     }
   } else {
-      std::cerr<<"Grid::gather_force: only orthorombic boxes are currently supported"<<std::endl;
+      std::cerr<<"CudaPMERecip::gather_force: only orthorombic boxes are currently supported"<<std::endl;
       std::cerr<<recip[1]<<std::endl;
       std::cerr<<recip[2]<<std::endl;
       std::cerr<<recip[3]<<std::endl;
@@ -3188,6 +3220,7 @@ void Grid<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoord, const
   cudaCheck(cudaGetLastError());
 }
 
+/*
 //
 // Sets Energies and virials to zero
 //
@@ -3231,20 +3264,20 @@ void Grid<AT, CT, CT2>::get_energy_virial(const double kappa,
   virial[7] = -h_energy_virial->virial[4]*cfact;
   virial[8] = -h_energy_virial->virial[5]*cfact;
 }
-
+*/
 
 //
 // FFT x coordinate Real -> Complex
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::x_fft_r2c(CT2 *data) {
+void CudaPMERecip<AT, CT, CT2>::x_fft_r2c(CT2 *data) {
 
   if (fft_type == COLUMN) {
     cufftCheck(cufftExecR2C(x_r2c_plan,
 			    (cufftReal *)data,
 			    (cufftComplex *)data));
   } else {
-    std::cerr << "Grid::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
+    std::cerr << "CudaPMERecip::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
     exit(1);
   }
 
@@ -3254,14 +3287,14 @@ void Grid<AT, CT, CT2>::x_fft_r2c(CT2 *data) {
 // FFT x coordinate Complex -> Real
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::x_fft_c2r(CT2 *data) {
+void CudaPMERecip<AT, CT, CT2>::x_fft_c2r(CT2 *data) {
 
   if (fft_type == COLUMN) {
     cufftCheck(cufftExecC2R(x_c2r_plan,
 			    (cufftComplex *)data,
 			    (cufftReal *)data));
   } else {
-    std::cerr << "Grid::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
+    std::cerr << "CudaPMERecip::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
     exit(1);
   }
 
@@ -3271,7 +3304,7 @@ void Grid<AT, CT, CT2>::x_fft_c2r(CT2 *data) {
 // FFT y coordinate Complex -> Complex
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::y_fft_c2c(CT2 *data, const int direction) {
+void CudaPMERecip<AT, CT, CT2>::y_fft_c2c(CT2 *data, const int direction) {
 
   if (fft_type == COLUMN) {
     cufftCheck(cufftExecC2C(y_c2c_plan,
@@ -3279,7 +3312,7 @@ void Grid<AT, CT, CT2>::y_fft_c2c(CT2 *data, const int direction) {
 			    (cufftComplex *)data,
 			    direction));
   } else {
-    std::cerr << "Grid::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
+    std::cerr << "CudaPMERecip::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
     exit(1);
   }
 
@@ -3289,7 +3322,7 @@ void Grid<AT, CT, CT2>::y_fft_c2c(CT2 *data, const int direction) {
 // FFT z coordinate Complex -> Complex
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::z_fft_c2c(CT2 *data, const int direction) {
+void CudaPMERecip<AT, CT, CT2>::z_fft_c2c(CT2 *data, const int direction) {
 
   if (fft_type == COLUMN) {
     cufftCheck(cufftExecC2C(z_c2c_plan,
@@ -3297,7 +3330,7 @@ void Grid<AT, CT, CT2>::z_fft_c2c(CT2 *data, const int direction) {
 			    (cufftComplex *)data,
 			    direction));
   } else {
-    std::cerr << "Grid::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
+    std::cerr << "CudaPMERecip::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
     exit(1);
   }
 
@@ -3307,7 +3340,7 @@ void Grid<AT, CT, CT2>::z_fft_c2c(CT2 *data, const int direction) {
 // 3D FFT Real -> Complex
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::r2c_fft() {
+void CudaPMERecip<AT, CT, CT2>::r2c_fft() {
 
   if (fft_type == COLUMN) {
     // data2(x, y, z)
@@ -3373,7 +3406,7 @@ void Grid<AT, CT, CT2>::r2c_fft() {
 // 3D FFT Complex -> Real
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::c2r_fft() {
+void CudaPMERecip<AT, CT, CT2>::c2r_fft() {
 
   if (fft_type == COLUMN) {
     // data2(z, x, y)
@@ -3406,7 +3439,7 @@ void Grid<AT, CT, CT2>::c2r_fft() {
 // Sets Bspline order
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::set_order(int order) {
+void CudaPMERecip<AT, CT, CT2>::set_order(int order) {
   this->order = order;
   calc_prefac();
 }
@@ -3474,7 +3507,7 @@ void fill_bspline_host(const int order, const double w, double *array, double *d
 // NOTE: This calculation is done on the CPU since it is only done infrequently
 //
 template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::calc_prefac() {
+void CudaPMERecip<AT, CT, CT2>::calc_prefac() {
   
   int max_nfft = max(nfftx, max(nffty, nfftz));
   double *bsp_arr = new double[max_nfft];
@@ -3512,17 +3545,17 @@ void Grid<AT, CT, CT2>::calc_prefac() {
 }
 
 //
-// Explicit instances of Grid
+// Explicit instances of CudaPMERecip
 //
-template class Grid<long long int, float, float2>;
-template class Grid<int, float, float2>;
-template void Grid<int, float, float2>::gather_force<float>(const float4 *xyzq, const int ncoord,
-							    const double* recip,
-							    const int stride, float* force);
-template void Grid<int, float, float2>::gather_force<long long int>(const float4 *xyzq, const int ncoord,
+template class CudaPMERecip<long long int, float, float2>;
+template class CudaPMERecip<int, float, float2>;
+template void CudaPMERecip<int, float, float2>::gather_force<float>(const float4 *xyzq, const int ncoord,
 								    const double* recip,
-								    const int stride, long long int* force);
-template void Grid<int, float, float2>::gather_force<float3>(const float4 *xyzq, const int ncoord,
-							     const double* recip,
-							     const int stride, float3* force);
+								    const int stride, float* force);
+template void CudaPMERecip<int, float, float2>::gather_force<long long int>(const float4 *xyzq, const int ncoord,
+									    const double* recip,
+									    const int stride, long long int* force);
+template void CudaPMERecip<int, float, float2>::gather_force<float3>(const float4 *xyzq, const int ncoord,
+								     const double* recip,
+								     const int stride, float3* force);
 

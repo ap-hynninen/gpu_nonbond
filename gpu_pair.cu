@@ -5,7 +5,7 @@
 #include <iostream>
 #include "XYZQ.h"
 #include "Force.h"
-#include "Grid.h"
+#include "CudaPMERecip.h"
 
 template <typename T, typename T2>
 void calcPair(const double L, const double kappa, const int nfft, const int order);
@@ -79,8 +79,11 @@ void calcPair(const double L, const double kappa, const int nfft, const int orde
   recip[4] = 1.0/L;
   recip[8] = 1.0/L;
 
+  CudaEnergyVirial energyVirial;
+  
   XYZQ xyzq(2);
-  Grid<int, T, T2> grid(nfft, nfft, nfft, order, fft_type, 1, 0);
+  CudaPMERecip<int, T, T2> grid(nfft, nfft, nfft, order, fft_type, 1, 0,
+			energyVirial, "recip", "self");
   Force<T> force(2);
 
   // r = Distance along diagonal
@@ -106,6 +109,8 @@ void calcPair(const double L, const double kappa, const int nfft, const int orde
   h_xyzq[1].w = 1.0;
   
   xyzq.set_xyzq(2, h_xyzq);
+
+  energyVirial.clear();
   
   grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
   grid.r2c_fft();
@@ -115,7 +120,12 @@ void calcPair(const double L, const double kappa, const int nfft, const int orde
   force.getXYZ(fx, fy, fz);
   
   double energy, energy_self, virial[9];
-  grid.get_energy_virial(kappa, true, true, energy, energy_self, virial);
+  //grid.get_energy_virial(kappa, true, true, energy, energy_self, virial);
+  energyVirial.copyToHost();
+  energy = energyVirial.getEnergy("recip");
+  energy_self = energyVirial.getEnergy("self");
+  energyVirial.getVirial(virial);
+
   printf("%lf %e %e %e %e %e %e %e %e\n",r,energy,energy_self,fx[0],fy[0],fz[0],fx[1],fy[1],fz[1]);
   
 }

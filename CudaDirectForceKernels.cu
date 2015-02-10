@@ -5,9 +5,10 @@
 #include "CudaDirectForceTypes.h"
 #include "CudaBlock.h"
 #include "gpu_utils.h"
+#include "CudaEnergyVirial.h"
 
 #define USE_TEXTURES true
-#undef USE_TEXTURE_OBJECTS
+//#undef USE_TEXTURE_OBJECTS
 
 // Settings for direct computation in device memory
 __constant__ DirectSettings_t d_setup;
@@ -37,13 +38,13 @@ void setBlockParamTexRefBound(const bool val) {blockParamTexRefBound=val;}
 static __constant__ const float ccelec = 332.0716f;
 const int tilesize = 32;
 
+/*
 //
 // Nonbonded virial
 //
-template <typename AT, typename CT>
 __global__ void calc_virial_kernel(const int ncoord, const float4* __restrict__ xyzq,
 				   const int stride, DirectEnergyVirial_t* __restrict__ energy_virial,
-				   const AT* __restrict__ force) {
+				   const double* __restrict__ force) {
   // Shared memory:
   // Required memory
   // blockDim.x*9*sizeof(double) for __CUDA_ARCH__ < 300
@@ -51,7 +52,7 @@ __global__ void calc_virial_kernel(const int ncoord, const float4* __restrict__ 
   extern __shared__ volatile double sh_vir[];
 
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
-  const int ish = i - ncoord;
+  int ish = (i - ncoord)*3 + 1;
 
   double vir[9];
   if (i < ncoord) {
@@ -59,9 +60,9 @@ __global__ void calc_virial_kernel(const int ncoord, const float4* __restrict__ 
     double x = (double)xyzqi.x;
     double y = (double)xyzqi.y;
     double z = (double)xyzqi.z;
-    double fx = ((double)force[i])*INV_FORCE_SCALE;
-    double fy = ((double)force[i+stride])*INV_FORCE_SCALE;
-    double fz = ((double)force[i+stride*2])*INV_FORCE_SCALE;
+    double fx = (double)force[i];
+    double fy = (double)force[i+stride];
+    double fz = (double)force[i+stride*2];
     vir[0] = x*fx;
     vir[1] = x*fy;
     vir[2] = x*fz;
@@ -71,16 +72,12 @@ __global__ void calc_virial_kernel(const int ncoord, const float4* __restrict__ 
     vir[6] = z*fx;
     vir[7] = z*fy;
     vir[8] = z*fz;
-  } else if (ish >= 0 && ish <= 26) {
-    double sforcex = energy_virial->sforcex[ish];
-    double sforcey = energy_virial->sforcey[ish];
-    double sforcez = energy_virial->sforcez[ish];
-    int ish_tmp = ish;
-    double shz = (double)((ish_tmp/9 - 1)*d_setup.boxz);
-    ish_tmp -= (ish_tmp/9)*9;
-    double shy = (double)((ish_tmp/3 - 1)*d_setup.boxy);
-    ish_tmp -= (ish_tmp/3)*3;
-    double shx = (double)((ish_tmp - 1)*d_setup.boxx);
+  } else if (ish >= 1 && ish <= 26*3+1) {
+    double sforcex = energy_virial->sforce[ish-1] + ((double)energy_virial->sforce_fp[ish-1])*INV_FORCE_SCALE_VIR_CPU;
+    double sforcey = energy_virial->sforce[ish]   + ((double)energy_virial->sforce_fp[ish])*INV_FORCE_SCALE_VIR_CPU;
+    double sforcez = energy_virial->sforce[ish+1] + ((double)energy_virial->sforce_fp[ish+1])*INV_FORCE_SCALE_VIR_CPU;
+    double shx, shy, shz;
+    calc_box_shift<double>(ish, (double)d_setup.boxx, (double)d_setup.boxy, (double)d_setup.boxz, shx, shy, shz);
     vir[0] = shx*sforcex;
     vir[1] = shx*sforcey;
     vir[2] = shx*sforcez;
@@ -168,6 +165,7 @@ __global__ void calc_virial_kernel(const int ncoord, const float4* __restrict__ 
   }
 
 }
+*/
 
 //
 // Calculates VdW pair force & energy
@@ -401,13 +399,8 @@ float pair_elec_force(const float r2, const float r, const float rinv,
     float r5 = r3*r2;
     fij_elec = (r <= d_setup.ron) ? -qq*rinv : -qq*(d_setup.Aconst*rinv + d_setup.Bconst*r + 3.0f*d_setup.Cconst*r3 + 5.0f*d_setup.Dconst*r5);
     if (calc_energy) {
-      //pot_elec = (r <= d_setup.ron) ? qq*(rinv + d_setup.dvc) : qq*(d_setup.Aconst*(rinv - d_setup.roffinv) + d_setup.Bconst*(d_setup.roff - r) + 
-      //								    d_setup.Cconst*(d_setup.roff3 - r3) + d_setup.Dconst*(d_setup.roff5 - r5));
-      double tmp = (r <= d_setup.ron) ?
-	(double)qq*((double)rinv + (double)d_setup.dvc) :
-	(double)qq*((double)d_setup.Aconst*(rinv - d_setup.roffinv) + (double)d_setup.Bconst*(d_setup.roff - r) + 
-		    (double)d_setup.Cconst*(d_setup.roff3 - r3) + (double)d_setup.Dconst*(d_setup.roff5 - r5));
-      pot_elec = (float)tmp;
+      pot_elec = (r <= d_setup.ron) ? qq*(rinv + d_setup.dvc) : qq*(d_setup.Aconst*(rinv - d_setup.roffinv) + d_setup.Bconst*(d_setup.roff - r) + 
+      								    d_setup.Cconst*(d_setup.roff3 - r3) + d_setup.Dconst*(d_setup.roff5 - r5));
     }
   } else if (elec_model == CSHFT) {
     // Shift 1/r energy
@@ -448,9 +441,11 @@ float pair_elec_force(const float r2, const float r, const float rinv,
   } else if (elec_model == RFSWIT) {
     // Switch 1/r^2 force
     float rinv2 = rinv*rinv;
-    fij_elec = (r <= d_setup.ron) ? -2.0f*qq*rinv2 : -2.0f*qq*(d_setup.Acoef*rinv2 + d_setup.Bcoef + d_setup.Ccoef*r2 + 2.0f*d_setup.Denom*r2*r2);
+    fij_elec = (r <= d_setup.ron) ? -2.0f*qq*rinv2 :
+      -2.0f*qq*(d_setup.Acoef*rinv2 + d_setup.Bcoef + d_setup.Ccoef*r2 + 2.0f*d_setup.Denom*r2*r2);
     if (calc_energy) {
-      pot_elec = (r <= d_setup.ron) ? qq*(rinv2 + d_setup.Eaddr) : qq*(d_setup.Acoef*rinv2 - 2.0f*d_setup.Bcoef*logf(r) - r2*(d_setup.Ccoef + r2*d_setup.Denom) + d_setup.Constr);
+      pot_elec = (r <= d_setup.ron) ? qq*(rinv2 + d_setup.Eaddr) :
+	qq*(d_setup.Acoef*rinv2 - 2.0f*d_setup.Bcoef*logf(r) - r2*(d_setup.Ccoef + r2*d_setup.Denom) + d_setup.Constr);
     }
   } else if (elec_model == GSHFT) {
     // GROMACS style shift 1/r^2 force
@@ -511,19 +506,21 @@ float pair_elec_force_14(const float r2, const float r, const float rinv,
 template <typename AT, typename CT, int elec_model, bool calc_energy, bool calc_virial>
 __device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list,
 				       const float4* xyzq, const int stride, AT *force,
-				       double &elec_pot) {
+				       double &elec_pot,
+				       Virial_t* __restrict__ virial) {
 
   int i = ex14list[pos].i;
   int j = ex14list[pos].j;
   int ish = ex14list[pos].ishift;
-  float3 sh_xyz = calc_box_shift(ish, d_setup.boxx, d_setup.boxy, d_setup.boxz);
+  float shx, shy, shz;
+  calc_box_shift<float>(ish, d_setup.boxx, d_setup.boxy, d_setup.boxz, shx, shy, shz);
   // Load atom coordinates
   float4 xyzqi = xyzq[i];
   float4 xyzqj = xyzq[j];
   // Calculate distance
-  CT dx = xyzqi.x - xyzqj.x + sh_xyz.x;
-  CT dy = xyzqi.y - xyzqj.y + sh_xyz.y;
-  CT dz = xyzqi.z - xyzqj.z + sh_xyz.z;
+  CT dx = xyzqi.x - xyzqj.x + shx;
+  CT dy = xyzqi.y - xyzqj.y + shy;
+  CT dz = xyzqi.z - xyzqj.z + shz;
   CT r2 = dx*dx + dy*dy + dz*dz;
   CT qq = ccelec*xyzqi.w*xyzqj.w;
   // Calculate the interaction
@@ -533,8 +530,6 @@ __device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list
   float dpot_elec;
 
   CT fij_elec = pair_elec_force<elec_model, calc_energy, true>(r2, r, rinv, qq, 0.0f, dpot_elec);
-  //CT fij_elec = pair_elec_force_14<elec_model, calc_energy>(r2, r, rinv, qq,
-  //							    0.0f, dpot_elec);
   
   if (calc_energy) elec_pot += (double)dpot_elec;
   CT fij = fij_elec*rinv2;
@@ -547,6 +542,17 @@ __device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list
   write_force<AT>(-fxij, -fyij, -fzij, j, stride, force);
   // Store shifted forces
   if (calc_virial) {
+    if (ish != 40) {
+      atomicAdd(&virial->sforce_dp[ish-1], (double)(fij*dx));
+      atomicAdd(&virial->sforce_dp[ish],   (double)(fij*dy));
+      atomicAdd(&virial->sforce_dp[ish+1], (double)(fij*dz));
+      fxij /= CONVERT_TO_VIR;
+      fyij /= CONVERT_TO_VIR;
+      fzij /= CONVERT_TO_VIR;
+      //atomicAdd((unsigned long long int *)&energy_virial->sforce_fp[ish-1], llitoulli(fxij));
+      //atomicAdd((unsigned long long int *)&energy_virial->sforce_fp[ish],   llitoulli(fyij));
+      //atomicAdd((unsigned long long int *)&energy_virial->sforce_fp[ish+1], llitoulli(fzij));
+    }
     //sforce(is)   = sforce(is)   + fijx
     //sforce(is+1) = sforce(is+1) + fijy
     //sforce(is+2) = sforce(is+2) + fijz
@@ -561,24 +567,26 @@ template <typename AT, typename CT, int vdw_model, int elec_model,
 	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
 __device__ void calc_in14_force_device(
 #ifdef USE_TEXTURE_OBJECTS
-				       const cudaTextureObject_t tex,
+				       const cudaTextureObject_t vdwParam14TexObj,
 #endif
 				       const int pos, const xx14list_t* in14list,
 				       const int* vdwtype, const float* vdwparam14,
 				       const float4* xyzq, const int stride, AT *force,
-				       double &vdw_pot, double &elec_pot) {
+				       double &vdw_pot, double &elec_pot,
+				       Virial_t* __restrict__ virial) {
 
   int i = in14list[pos].i;
   int j = in14list[pos].j;
   int ish = in14list[pos].ishift;
-  float3 sh_xyz = calc_box_shift(ish, d_setup.boxx, d_setup.boxy, d_setup.boxz);
+  float shx, shy, shz;
+  calc_box_shift<float>(ish, d_setup.boxx, d_setup.boxy, d_setup.boxz, shx, shy, shz);
   // Load atom coordinates
   float4 xyzqi = xyzq[i];
   float4 xyzqj = xyzq[j];
   // Calculate distance
-  CT dx = xyzqi.x - xyzqj.x + sh_xyz.x;
-  CT dy = xyzqi.y - xyzqj.y + sh_xyz.y;
-  CT dz = xyzqi.z - xyzqj.z + sh_xyz.z;
+  CT dx = xyzqi.x - xyzqj.x + shx;
+  CT dy = xyzqi.y - xyzqj.y + shy;
+  CT dz = xyzqi.z - xyzqj.z + shz;
   CT r2 = dx*dx + dy*dy + dz*dz;
   CT qq = ccelec*xyzqi.w*xyzqj.w;
   // Calculate the interaction
@@ -595,7 +603,7 @@ __device__ void calc_in14_force_device(
     //c6 = __ldg(&vdwparam14[ivdw]);
     //c12 = __ldg(&vdwparam14[ivdw+1]);
 #ifdef USE_TEXTURE_OBJECTS
-    float2 c6c12 = tex1Dfetch<float2>(tex, ivdw);
+    float2 c6c12 = tex1Dfetch<float2>(vdwParam14TexObj, ivdw);
 #else
     float2 c6c12 = tex1Dfetch(vdwparam14_texref, ivdw);
 #endif
@@ -630,28 +638,22 @@ __device__ void calc_in14_force_device(
   
   // Store shifted forces
   if (calc_virial) {
-    //sforce(is)   = sforce(is)   + fijx
-    //sforce(is+1) = sforce(is+1) + fijy
-    //sforce(is+2) = sforce(is+2) + fijz
+    if (ish != 40) {
+      atomicAdd(&virial->sforce_dp[ish-1], (double)(fij*dx));
+      atomicAdd(&virial->sforce_dp[ish],   (double)(fij*dy));
+      atomicAdd(&virial->sforce_dp[ish+1], (double)(fij*dz));
+      fxij /= CONVERT_TO_VIR;
+      fyij /= CONVERT_TO_VIR;
+      fzij /= CONVERT_TO_VIR;
+      //atomicAdd((unsigned long long int *)&energy_virial->sforce_fp[ish-1], llitoulli(fxij));
+      //atomicAdd((unsigned long long int *)&energy_virial->sforce_fp[ish],   llitoulli(fyij));
+      //atomicAdd((unsigned long long int *)&energy_virial->sforce_fp[ish+1], llitoulli(fzij));
+      //sforce(is)   = sforce(is)   + fijx
+      //sforce(is+1) = sforce(is+1) + fijy
+      //sforce(is+2) = sforce(is+2) + fijz
+    }
   }
 
-}
-
-//
-// Evaluates a single pair force and energy for c6=c12=qq=1.0f
-//
-template <int vdw_model, int elec_model>
-__global__ void evalForceKernel(const float r, double *force_val, double *energy_val) {
-  if (threadIdx.x + blockIdx.x*blockDim.x == 0) {
-    float r2 = r*r;
-    float rinv = 1.0f/r;
-    float rinv2 = rinv*rinv;
-    float energy_vdw, energy_elec;
-    float force_vdw = pair_vdw_force<vdw_model, true>(r2, r, rinv, rinv2, 1.0f, 1.0f, energy_vdw);
-    float force_elec = pair_elec_force<elec_model, true, false>(r2, r, rinv, 1.0f, d_setup.e14fac, energy_elec);
-    *force_val = (double)force_vdw + (double)force_elec;
-    *energy_val = (double)energy_vdw + (double)energy_elec;
-  }
 }
 
 //
@@ -661,15 +663,17 @@ template <typename AT, typename CT, int vdw_model, int elec_model,
 	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
 __global__ void calc_14_force_kernel(
 #ifdef USE_TEXTURE_OBJECTS
-				     const cudaTextureObject_t tex,
+				     const cudaTextureObject_t vdwParam14TexObj,
 #endif
 				     const int nin14list, const int nex14list,
 				     const int nin14block,
 				     const xx14list_t* in14list, const xx14list_t* ex14list,
 				     const int* vdwtype, const float* vdwparam14,
-				     const float4* xyzq, const int stride,
-				     DirectEnergyVirial_t* __restrict__ energy_virial,
-				     AT *force) {
+				     const float4* xyzq, const int stride, AT *force,
+				     Virial_t* __restrict__ virial,
+				     double* __restrict__ energy_vdw,
+				     double* __restrict__ energy_elec,
+				     double* __restrict__ energy_excl) {
   // Amount of shared memory required:
   // blockDim.x*sizeof(double2)
   extern __shared__ double2 shpot[];
@@ -686,9 +690,9 @@ __global__ void calc_14_force_kernel(
       calc_in14_force_device<AT, CT, vdw_model, elec_model, calc_energy, calc_virial, tex_vdwparam>
 	(
 #ifdef USE_TEXTURE_OBJECTS
-	 tex,
+	 vdwParam14TexObj,
 #endif
-	 pos, in14list, vdwtype, vdwparam14, xyzq, stride, force, vdw_pot, elec_pot);
+	 pos, in14list, vdwtype, vdwparam14, xyzq, stride, force, vdw_pot, elec_pot, virial);
     }
 
     if (calc_energy) {
@@ -705,8 +709,8 @@ __global__ void calc_14_force_kernel(
 	__syncthreads();
       }
       if (threadIdx.x == 0) {
-	atomicAdd(&energy_virial->energy_vdw,  shpot[0].x);
-	atomicAdd(&energy_virial->energy_elec, shpot[0].y);
+	atomicAdd(energy_vdw,  shpot[0].x);
+	atomicAdd(energy_elec, shpot[0].y);
       }
     }
 
@@ -718,7 +722,7 @@ __global__ void calc_14_force_kernel(
     int pos = threadIdx.x + (blockIdx.x-nin14block)*blockDim.x;
     if (pos < nex14list) {
       calc_ex14_force_device<AT, CT, elec_model, calc_energy, calc_virial>
-	(pos, ex14list, xyzq, stride, force, excl_pot);
+	(pos, ex14list, xyzq, stride, force, excl_pot, virial);
     }
 
     if (calc_energy) {
@@ -732,20 +736,13 @@ __global__ void calc_14_force_kernel(
 	__syncthreads();
       }
       if (threadIdx.x == 0) {
-	atomicAdd(&energy_virial->energy_excl,  shpot[0].x);
+	atomicAdd(energy_excl,  shpot[0].x);
       }
     }
 
   }
 
 }
-
-#define CREATE_EVAL_KERNEL(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, ...)	\
-  {									\
-    KERNEL_NAME <VDW_MODEL, ELEC_MODEL>					\
-    <<< 1, 1, 0, 0 >>>							\
-    (__VA_ARGS__);							\
-  }
 
 #define CREATE_KERNEL(KERNEL_NAME, VDW_MODEL, ELEC_MODEL, CALC_ENERGY, CALC_VIRIAL, TEX_VDWPARAM, ...) \
   {									\
@@ -858,23 +855,15 @@ __global__ void calc_14_force_kernel(
 //------------------------------------------------------------
 
 template <typename AT, typename CT>
-void evalForceKernelChoice(const int vdw_model, const int elec_model, const float r, double &force_val, double &energy_val) {
-  double h_result[2];
-  double *d_result;
-  allocate<double>(&d_result, 2);
-  CREATE_KERNELS(EXPAND_ENERGY_VIRIAL_NONE, CREATE_EVAL_KERNEL, evalForceKernel, r, &d_result[0], &d_result[1]);
-  copy_DtoH_sync<double>(d_result, h_result, 2);
-  deallocate<double>(&d_result);
-  force_val  = h_result[0];
-  energy_val = h_result[1];
-}
-
-template <typename AT, typename CT>
 void calcForceKernelChoice(const int nblock_tot_in, const int nthread, const int shmem_size, cudaStream_t stream,
 			   const int vdw_model, const int elec_model, const bool calc_energy, const bool calc_virial,
 			   const CudaNeighborListBuild<32>& nlist,
-			   const int stride, const float* vdwparam, const int nvdwparam, const float4* xyzq,
-			   const int* vdwtype, DirectEnergyVirial_t* d_energy_virial, AT* force,
+			   const float* vdwparam, const int nvdwparam, const int* vdwtype,
+#ifdef USE_TEXTURE_OBJECTS
+			   cudaTextureObject_t& vdwParamTexObj,
+#endif
+			   const float4* xyzq, const int stride, AT* force,
+			   Virial_t *virial, double *energy_vdw, double *energy_elec,
 			   CudaBlock* cudaBlock, AT* biflam, AT* biflam2) {
 
   int nblock_tot = nblock_tot_in;
@@ -888,38 +877,32 @@ void calcForceKernelChoice(const int nblock_tot_in, const int nthread, const int
     nblock_tot -= nblock;
 
     if (cudaBlock == NULL) {
-      /*
-      fprintf(stderr,"shmem_size = %d\n",shmem_size);
-      calcForceKernel<AT, CT, tilesize, VDW_VSH, EWALD, false, false, true>
-	<<< nblock, nthread, shmem_size, stream >>>
-	(base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
-	 nlist.get_tile_excl(), stride, vdwparam, nvdwparam, xyzq, vdwtype,
-	 d_energy_virial, force);
-      */
 #ifdef USE_TEXTURE_OBJECTS
-      CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL, calcForceKernel, vdwparam_tex,
+      CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL, calcForceKernel, vdwParamTexObj,
 		     base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
 		     nlist.get_tile_excl(), stride, vdwparam, nvdwparam, xyzq, vdwtype,
-		     d_energy_virial, force);
+		     force, virial, energy_vdw, energy_elec);
 #else
       CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL, calcForceKernel,
 		     base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
 		     nlist.get_tile_excl(), stride, vdwparam, nvdwparam, xyzq, vdwtype,
-		     d_energy_virial, force);
+		     force, virial, energy_vdw, energy_elec);
 #endif
     } else {
 #ifdef USE_TEXTURE_OBJECTS
-      CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL, calcForceBlockKernel, vdwparam_tex,
+      CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL, calcForceBlockKernel, vdwParamTexObj,
 		     base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
 		     nlist.get_tile_excl(), stride, vdwparam, nvdwparam, xyzq, vdwtype,
 		     cudaBlock->getNumBlock(), cudaBlock->getBixlam(), cudaBlock->getBlockType(),
-		     biflam, biflam2, cudaBlock->getBlockParamTexObj(), d_energy_virial, force);
+		     biflam, biflam2, *(cudaBlock->getBlockParamTexObj()),
+		     force, virial, energy_vdw, energy_elec);
 #else
       CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL, calcForceBlockKernel,
 		     base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
 		     nlist.get_tile_excl(), stride, vdwparam, nvdwparam, xyzq, vdwtype,
 		     cudaBlock->getNumBlock(), cudaBlock->getBixlam(), cudaBlock->getBlockType(),
-		     biflam, biflam2, d_energy_virial, force);
+		     biflam, biflam2,
+		     force, virial, energy_vdw, energy_elec);
 #endif
     }
     
@@ -933,26 +916,30 @@ template <typename AT, typename CT>
 void calcForce14KernelChoice(const int nblock, const int nthread, const int shmem_size, cudaStream_t stream,
 			     const int vdw_model, const int elec_model, const bool calc_energy, const bool calc_virial,
 			     const int nin14list, const xx14list_t* in14list, const int nex14list, const xx14list_t* ex14list,
-			     const int nin14block, const int* vdwtype, const float* vdwparam14, const float4* xyzq,
-			     const int stride, DirectEnergyVirial_t* d_energy_virial, AT* force) {
+			     const int nin14block, const int* vdwtype, const float* vdwparam14,
+#ifdef USE_TEXTURE_OBJECTS
+			     cudaTextureObject_t& vdwParam14TexObj,
+#endif
+			     const float4* xyzq, const int stride, AT* force,
+			     Virial_t *virial, double *energy_vdw, double *energy_elec, double *energy_excl) {
   
 #ifdef USE_TEXTURE_OBJECTS
-  CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL14, calc_14_force_kernel, vdwparam14_tex,
+  CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL14, calc_14_force_kernel, vdwParam14TexObj,
 		 nin14list, nex14list, nin14block, in14list, ex14list,
-		 vdwtype, vdwparam14, xyzq, stride, d_energy_virial, force);
+		 vdwtype, vdwparam14, xyzq, stride, force, virial, energy_vdw, energy_elec, energy_excl);
 #else
   CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL14, calc_14_force_kernel,
 		 nin14list, nex14list, nin14block, in14list, ex14list,
-		 vdwtype, vdwparam14, xyzq, stride, d_energy_virial, force);
+		 vdwtype, vdwparam14, xyzq, stride, force, virial, energy_vdw, energy_elec, energy_excl);
 #endif
 
   cudaCheck(cudaGetLastError());
 }
 
-template <typename AT, typename CT>
+/*
 void calcVirial(const int ncoord, const float4 *xyzq,
-		DirectEnergyVirial_t* d_energy_virial,
-		const int stride, AT *force,
+		DirectEnergyVirial_t* energy_virial,
+		const int stride, double *force,
 		cudaStream_t stream) {
 
   int nthread, nblock, shmem_size;
@@ -960,36 +947,42 @@ void calcVirial(const int ncoord, const float4 *xyzq,
   nblock = (ncoord+27-1)/nthread + 1;
   shmem_size = nthread*3*sizeof(double);
 
-  calc_virial_kernel <AT, CT>
-    <<< nblock, nthread, shmem_size, stream>>>
-    (ncoord, xyzq, stride, d_energy_virial, force);
+  calc_virial_kernel<<< nblock, nthread, shmem_size, stream>>>
+    (ncoord, xyzq, stride, energy_virial, force);
 
   cudaCheck(cudaGetLastError());
 }
+*/
 
 void updateDirectForceSetup(const DirectSettings_t* h_setup) {
  cudaCheck(cudaMemcpyToSymbol(d_setup, h_setup, sizeof(DirectSettings_t)));
 }
 
-template void evalForceKernelChoice<long long int, float>(const int vdw_model, const int elec_model, const float r, double &force_val, double &energy_val);
-
+// Explicit instances of templates:
 template void calcForceKernelChoice<long long int, float>
 (const int nblock_tot_in, const int nthread, const int shmem_size, cudaStream_t stream,
  const int vdw_model, const int elec_model, const bool calc_energy, const bool calc_virial,
  const CudaNeighborListBuild<32>& nlist,
- const int stride, const float* vdwparam, const int nvdwparam, const float4* xyzq,
- const int* vdwtype, DirectEnergyVirial_t* d_energy_virial, long long int* force,
+ const float* vdwparam, const int nvdwparam, const int* vdwtype,
+#ifdef USE_TEXTURE_OBJECTS
+ cudaTextureObject_t& vdwParamTexObj,
+#endif
+ const float4* xyzq, const int stride, long long int* force,
+ Virial_t *virial, double *energy_vdw, double *energy_elec,
  CudaBlock* cudaBlock, long long int* biflam, long long int* biflam2);
 
 template void calcForce14KernelChoice<long long int, float>
 (const int nblock, const int nthread, const int shmem_size, cudaStream_t stream,
  const int vdw_model, const int elec_model, const bool calc_energy, const bool calc_virial,
  const int nin14list, const xx14list_t* in14list, const int nex14list, const xx14list_t* ex14list,
- const int nin14block, const int* vdwtype, const float* vdwparam14, const float4* xyzq,
- const int stride, DirectEnergyVirial_t* d_energy_virial, long long int* force);
+ const int nin14block, const int* vdwtype, const float* vdwparam14,
+#ifdef USE_TEXTURE_OBJECTS
+ cudaTextureObject_t& vdwParam14TexObj,
+#endif
+ const float4* xyzq, const int stride, long long int* force,
+ Virial_t *virial, double *energy_vdw, double *energy_elec, double *energy_excl);
 
-template void calcVirial<long long int, float>
-(const int ncoord, const float4 *xyzq,
- DirectEnergyVirial_t* d_energy_virial,
- const int stride, long long int* force,
- cudaStream_t stream);
+//void calcVirial(const int ncoord, const float4 *xyzq,
+//		DirectEnergyVirial_t* energy_virial,
+//		const int stride, double* force,
+//		cudaStream_t stream);

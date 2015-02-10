@@ -73,8 +73,11 @@ CudaPMEForcefield::CudaPMEForcefield(CudaDomdec& domdec, CudaDomdecGroups& domde
 				     const int nvdwparam, const float *h_vdwparam,
 				     const float *h_vdwparam14,
 				     const int *h_glo_vdwtype, const float *h_glo_q,
+				     CudaEnergyVirial& energyVirial,
 				     CudaDomdecRecip* recip, CudaDomdecRecipComm& recipComm) : 
-  domdec(domdec), recip(recip), domdecGroups(domdecGroups), 
+  domdec(domdec), recip(recip), domdecGroups(domdecGroups), energyVirial(energyVirial),
+  dir(energyVirial, "vdw", "elec", "excl"),
+  bonded(energyVirial, "bond", "ureyb", "angle", "dihe", "imdihe", NULL),
   nlist(topExcl, domdec.get_nx(), domdec.get_ny(), domdec.get_nz()),
   recipComm(recipComm), kappa(kappa), recip_force_len(0), recip_force(NULL) {
 
@@ -228,7 +231,8 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial,
     // Clear energy and virial variables
     // NOTE: done_force_clear_event also waits for the energy & virial to clear
     if (calc_energy || calc_virial) {
-      dir.clear_energy_virial(direct_stream[0]);
+      //dir.clear_energy_virial(direct_stream[0]);
+      energyVirial.clear(direct_stream[0]);
     }
 
     // Clear forces
@@ -341,7 +345,8 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial,
     // Clear energy and virial variables
     // NOTE: done_force_clear_event also waits for the energy & virial to clear
     if (calc_energy || calc_virial) {
-      dir.clear_energy_virial(direct_stream[0]);
+      //dir.clear_energy_virial(direct_stream[0]);
+      energyVirial.clear(direct_stream[0]);
     }
 
     // Clear forces
@@ -423,8 +428,8 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial,
 
   // Clear energy and virial variables
   if (calc_energy || calc_virial) {
-    bonded.clear_energy_virial(bonded_stream);
-    if (recipComm.get_isRecip()) recip->clear_energy_virial();
+    //bonded.clear_energy_virial(bonded_stream);
+    //if (recipComm.get_isRecip()) recip->clear_energy_virial();
   }
 
   // Wait for xyzq coordinates to be ready
@@ -515,8 +520,24 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial,
     if (recipComm.get_isRecip()) cudaCheck(cudaEventSynchronize(done_recip_event));
     cudaCheck(cudaEventSynchronize(done_direct_event[0]));
     cudaCheck(cudaEventSynchronize(done_direct_event[1]));
+    // Copy energy and virial values to host
+    energyVirial.copyToHost();
   }
 
+  energy_bond = energyVirial.getEnergy("bond");
+  energy_ureyb = energyVirial.getEnergy("ureyb");
+  energy_angle = energyVirial.getEnergy("angle");
+  energy_dihe = energyVirial.getEnergy("dihe");
+  energy_imdihe = energyVirial.getEnergy("imdihe");
+  energy_vdw = energyVirial.getEnergy("vdw");
+  energy_elec = energyVirial.getEnergy("elec");
+  energy_excl = energyVirial.getEnergy("excl");
+  if (recipComm.get_isRecip()) {
+    energy_ewksum = energyVirial.getEnergy("recip");
+    energy_ewself = energyVirial.getEnergy("self");
+  }
+  
+  /*
   bonded.get_energy_virial(calc_energy, calc_virial,
 			   &energy_bond, &energy_ureyb,
 			   &energy_angle,
@@ -531,6 +552,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial,
   if (recipComm.get_isRecip()) {
     recip->get_energy_virial(calc_energy, calc_virial, energy_ewksum, energy_ewself, vir);
   }
+  */
 
   // Communicate Direct-Direct
   // NOTE: Synchronization on stream is done in comm_force

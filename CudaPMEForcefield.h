@@ -5,13 +5,14 @@
 #include "hostXYZ.h"
 #include "XYZQ.h"
 #include "CudaPMEDirectForce.h"
-#include "BondedForce.h"
-#include "Grid.h"
+#include "CudaBondedForce.h"
+#include "CudaPMERecip.h"
 #include "CudaDomdec.h"
 #include "CudaDomdecGroups.h"
 #include "CudaDomdecRecip.h"
 #include "CudaDomdecRecipComm.h"
 #include "CudaNeighborList.h"
+#include "CudaEnergyVirial.h"
 
 class CudaPMEForcefield : public CudaForcefield {
 
@@ -56,8 +57,13 @@ private:
   // Bonded force
   // -------------
   
-  BondedForce<long long int, float> bonded;
+  CudaBondedForce<long long int, float> bonded;
 
+  // -------------------------------
+  // Energy and virial
+  // -------------------------------
+  CudaEnergyVirial& energyVirial;
+  
   // -----------------
   // Reciprocal force
   // -----------------
@@ -155,6 +161,7 @@ public:
 		    const int nvdwparam, const float *h_vdwparam,
 		    const float *h_vdwparam14,
 		    const int* h_glo_vdwtype, const float *h_glo_q,
+		    CudaEnergyVirial& energyVirial,
 		    CudaDomdecRecip* recip, CudaDomdecRecipComm& recipComm);
   ~CudaPMEForcefield();
 

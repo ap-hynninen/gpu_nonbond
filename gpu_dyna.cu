@@ -450,13 +450,16 @@ void test(const int nstep, const bool use_holoconst, const bool cudaAware, const
   MPICheck(MPI_Comm_create(MPI_COMM_WORLD, group_recip, &comm_recip));
   //}
 
+  // Energy and virial terms
+  CudaEnergyVirial energyVirial;
+  
   CudaDomdecRecip *recip = NULL;
   CudaDomdecRecipComm recipComm(comm_recip, comm_direct_recip,
 				mynode, direct_nodes, recip_nodes, cudaAware);
   
   // Create reciprocal calculator
   if (isRecip) {
-    recip = new CudaDomdecRecip(nfftx, nffty, nfftz, forder, kappa);
+    recip = new CudaDomdecRecip(nfftx, nffty, nfftz, forder, kappa, energyVirial);
   }
 
   if (isDirect) {
@@ -619,7 +622,7 @@ void test(const int nstep, const bool use_holoconst, const bool cudaAware, const
     domdecGroups.finishGroups();
 
     CudaLeapfrogIntegrator leapfrog(holoconst);
-
+    
     // Charges
     float *h_q = new float[ncoord];
     load_vec<float>(1, "test_data/q.txt", ncoord, h_q);
@@ -635,6 +638,8 @@ void test(const int nstep, const bool use_holoconst, const bool cudaAware, const
 				 // Direct non-bonded
 				 roff, ron, kappa, e14fac, VDW_VSH, EWALD,
 				 nvdwparam, h_vdwparam, h_vdwparam14, h_vdwtype, h_q,
+				 // Energy and virial terms
+				 energyVirial,
 				 // Recip non-bonded
 				 recip, recipComm);
 

@@ -1,6 +1,8 @@
-#ifndef BONDEDFORCE_H
-#define BONDEDFORCE_H
+#ifndef CUDABONDEDFORCE_H
+#define CUDABONDEDFORCE_H
 
+#include <string>
+#include "CudaEnergyVirial.h"
 #include "Bonded_struct.h"
 
 //
@@ -12,63 +14,9 @@
 // CT = calculation type
 //
 
-/*
-// Data structure for settings
-struct BondedSettings_t {
-  // ------
-  // Bonds
-  // ------
-  int nbondlist;
-  bondlist_t *bondlist;
-  float2 *bondcoef;
-
-  // -------------
-  // Urey-Bradley
-  // -------------
-  int nureyblist;
-  bondlist_t *ureyblist;
-  float2 *ureybcoef;
-
-  // -------
-  // Angles
-  // -------
-  int nanglelist;
-  anglelist_t *anglelist;
-  float2 *anglecoef;
-
-  // ----------
-  // Dihedrals
-  // ----------
-  int ndihelist;
-  dihelist_t *dihelist;
-  float4 *dihecoef;
-
-  // -------------------
-  // Improper Dihedrals
-  // -------------------
-  int nimdihelist;
-  dihelist_t *imdihelist;
-  float4 *imdihecoef;
-
-  // ------
-  // CMAPs
-  // ------
-  int ncmaplist;
-  cmaplist_t *cmaplist;
-  float2 *cmapcoef;
-
-  // Other stuff
-  const float4 *xyzq;
-  int stride;
-  float boxx;
-  float boxy;
-  float boxz;
-  void *force;
-};
-*/
-
 //#define USE_DP_SFORCE
 
+/*
 // Data structure for saving energies and virials
 struct BondedEnergyVirial_t {
   // Energies
@@ -86,16 +34,26 @@ struct BondedEnergyVirial_t {
   long long int sforce[27*3];
 #endif
 };
-
+*/
 
 template <typename AT, typename CT>
-class BondedForce {
+class CudaBondedForce {
 
 private:
 
   //BondedSettings_t *h_setup;
   
-  BondedEnergyVirial_t *h_energy_virial;
+  //BondedEnergyVirial_t *h_energy_virial;
+
+  CudaEnergyVirial& energyVirial;
+  
+  // Energy term names
+  std::string strBond;
+  std::string strUreyb;
+  std::string strAngle;
+  std::string strDihe;
+  std::string strImdihe;
+  std::string strCmap;
 
   // ------
   // Bonds
@@ -171,8 +129,10 @@ private:
   float2 *cmapcoef;
 
 public:
-  BondedForce();
-  ~BondedForce();
+  CudaBondedForce(CudaEnergyVirial &energyVirial,
+		  const char *nameBond, const char *nameUreyb, const char *nameAngle,
+		  const char *nameDihe, const char *nameImdihe, const char *nameCmap);
+  ~CudaBondedForce();
 
   void setup_coef(const int nbondcoef, const float2 *h_bondcoef,
 		  const int nureybcoef, const float2 *h_ureybcoef,
@@ -189,7 +149,7 @@ public:
 		  const int ncmaplist, const cmaplist_t *h_cmaplist);
 
   void setup_list(const float4 *xyzq,
-		  const float boxx, const float boxy, const float boxz,
+		  const CT boxx, const CT boxy, const CT boxz,
 		  const int *glo2loc_ind,
 		  const int nbond_tbl, const int *bond_tbl, const bond_t *bond, 
 		  const int nureyb_tbl, const int *ureyb_tbl, const bond_t *ureyb,
@@ -200,7 +160,7 @@ public:
 		  cudaStream_t stream=0);
 
   void calc_force(const float4 *xyzq,
-		  const float boxx, const float boxy, const float boxz,
+		  const CT boxx, const CT boxy, const CT boxz,
 		  const bool calc_energy,
 		  const bool calc_virial,
 		  const int stride, AT *force,
@@ -210,15 +170,15 @@ public:
 		  cudaStream_t stream=0);
 
 
-  void clear_energy_virial(cudaStream_t stream=0);
-  void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
-			 double *energy_bond,  double *energy_ureyb, 
-			 double *energy_angle,
-			 double *energy_dihe, double *energy_imdihe,
-			 double *energy_cmap,
-			 double *sforce);
+  //void clear_energy_virial(cudaStream_t stream=0);
+  //void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
+  //			 double *energy_bond,  double *energy_ureyb, 
+  //			 double *energy_angle,
+  //			 double *energy_dihe, double *energy_imdihe,
+  //			 double *energy_cmap,
+  //			 double *sforce);
 
   void print();
 };
 
-#endif // BONDEDFORCE_H
+#endif // CUDABONDEDFORCE_H

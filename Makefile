@@ -64,25 +64,28 @@ endif
 
 endif  # MPI_FOUND
 
-OBJS_RECIP = Grid.o Bspline.o XYZQ.o Matrix3d.o Force.o reduce.o cuda_utils.o gpu_recip.o
+DEFS += -D USE_TEXTURE_OBJECTS
+
+OBJS_RECIP = CudaPMERecip.o Bspline.o XYZQ.o Matrix3d.o Force.o reduce.o cuda_utils.o gpu_recip.o \
+	EnergyVirial.o CudaEnergyVirial.o
 
 OBJS_DIRECT = XYZQ.o Force.o reduce.o cuda_utils.o CudaPMEDirectForce.o \
 	CudaNeighborList.o CudaNeighborListSort.o CudaNeighborListBuild.o \
-	CudaTopExcl.o BondedForce.o gpu_direct.o CudaPMEDirectForceBlock.o CudaBlock.o \
-	CudaDirectForceKernels.o
+	CudaTopExcl.o gpu_direct.o CudaPMEDirectForceBlock.o CudaBlock.o \
+	CudaDirectForceKernels.o EnergyVirial.o CudaEnergyVirial.o
 
-OBJS_BONDED = XYZQ.o Force.o reduce.o cuda_utils.o BondedForce.o gpu_bonded.o
+OBJS_BONDED = XYZQ.o Force.o reduce.o cuda_utils.o CudaBondedForce.o gpu_bonded.o EnergyVirial.o CudaEnergyVirial.o
 
 OBJS_CONST = cuda_utils.o gpu_const.o HoloConst.o
 
 OBJS_DYNA = cuda_utils.o gpu_dyna.o Force.o reduce.o CudaLeapfrogIntegrator.o CudaPMEForcefield.o \
 	CudaNeighborList.o CudaNeighborListSort.o CudaNeighborListBuild.o CudaTopExcl.o \
-	CudaPMEDirectForce.o BondedForce.o Grid.o Matrix3d.o XYZQ.o CudaDomdec.o \
+	CudaPMEDirectForce.o CudaBondedForce.o CudaPMERecip.o Matrix3d.o XYZQ.o CudaDomdec.o \
 	CudaDomdecGroups.o HoloConst.o CudaDomdecHomezone.o CudaMPI.o mpi_utils.o CudaDomdecD2DComm.o \
 	DomdecD2DComm.o DomdecRecipComm.o CudaDomdecRecipComm.o CudaDomdecRecipLooper.o Domdec.o \
-	CudaDomdecConstComm.o CudaDirectForceKernels.o
+	CudaDomdecConstComm.o CudaDirectForceKernels.o EnergyVirial.o CudaEnergyVirial.o
 
-OBJS_PAIR = gpu_pair.o Grid.o Force.o XYZQ.o cuda_utils.o reduce.o Matrix3d.o
+OBJS_PAIR = gpu_pair.o CudaPMERecip.o Force.o XYZQ.o cuda_utils.o reduce.o Matrix3d.o EnergyVirial.o CudaEnergyVirial.o
 
 OBJS_TRANSPOSE = cpu_transpose.o mpi_utils.o CpuMultiNodeMatrix3d.o CpuMatrix3d.o
 

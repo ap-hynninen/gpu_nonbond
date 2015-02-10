@@ -45,7 +45,7 @@ public:
   double *getBiflam2() {return biflam2;}
   void getBiflam(double *h_biflam, double *h_biflam2);
 #ifdef USE_TEXTURE_OBJECTS
-  cudaTextureObject_t *getBlockParamTexObj() {return blockParamTexObj;}
+  cudaTextureObject_t *getBlockParamTexObj() {return &blockParamTexObj;}
 #endif
   
 };

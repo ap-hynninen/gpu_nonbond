@@ -308,19 +308,17 @@ void write_force <long long int> (const long long int fx,
 //
 // where is(1:3) = {-1, 0, 1}
 //
-__forceinline__ __device__
-float3 calc_box_shift(int ish,
-		      const float boxx,
-		      const float boxy,
-		      const float boxz) {
-  float3 sh;
+template <typename T>
+__forceinline__ __device__ __host__
+void calc_box_shift(int ish,
+		    const T boxx, const T boxy, const T boxz,
+		    T &shx, T &shy, T &shz) {
   ish = (ish+2)/3 - 1;
-  sh.z = (ish/9 - 1)*boxz;
+  shz = (ish/9 - 1)*boxz;
   ish -= (ish/9)*9;
-  sh.y = (ish/3 - 1)*boxy;
+  shy = (ish/3 - 1)*boxy;
   ish -= (ish/3)*3;
-  sh.x = (ish - 1)*boxx;
-  return sh;
+  shx = (ish - 1)*boxx;
 }
 
 // ----------------------------------------------------------------------------------------------

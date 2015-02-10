@@ -28,7 +28,9 @@ template <typename AT, typename CT>
   
  public:
 
-  CudaPMEDirectForceBlock(CudaBlock &cudaBlock);
+  CudaPMEDirectForceBlock(CudaEnergyVirial &energyVirial,
+			  const char *nameVdw, const char *nameElec, const char *nameExcl,
+			  CudaBlock &cudaBlock);
   ~CudaPMEDirectForceBlock();
 
   //void calc_14_force(const float4 *xyzq,

@@ -427,16 +427,11 @@ __device__ int get_dist_excl_mask(const int wid,
   int q_samecell = (istart == jstart);
 
   // Calculate shift
-  int ish_t = ish;
-  float zsh = (ish_t/9 - 1)*boxz;
-  ish_t -= (ish_t/9)*9;
-  float ysh = (ish_t/3 - 1)*boxy;
-  ish_t -= (ish_t/3)*3;
-  float xsh = (ish_t - 1)*boxx;
-
-  xj -= xsh;
-  yj -= ysh;
-  zj -= zsh;
+  float shx, shy, shz;
+  calc_box_shift<float>(ish, boxx, boxy, boxz, shx, shy, shz);
+  xj -= shx;
+  yj -= shy;
+  zj -= shz;
   
   unsigned int excl = 0;
   int t;
@@ -917,7 +912,7 @@ void build_kernel(const int maxNumExcl, const int cellStart,
 
       for (int imz=d_NlistParam->imz_lo;imz <= d_NlistParam->imz_hi;imz++) {
 	float imbbz0 = ibb.z + imz*boxz;
-	int ish = imx+1 + 3*(imy+1 + 3*(imz+1));
+	int ish = (imx+1 + 3*(imy+1 + 3*(imz+1)))*3 + 1;
 
 	float imxi = xi + imx*boxx;
 	float imyi = yi + imy*boxy;
@@ -1173,15 +1168,11 @@ __global__ void build_excl_kernel(const unsigned int base_tid, const int n_ijlis
   }
 
   // Calculate shift
-  float zsh = (ish/9 - 1)*boxz;
-  ish -= (ish/9)*9;
-  float ysh = (ish/3 - 1)*boxy;
-  ish -= (ish/3)*3;
-  float xsh = (ish - 1)*boxx;
-
-  xj -= xsh;
-  yj -= ysh;
-  zj -= zsh;
+  float shx, shy, shz;
+  calc_box_shift<float>(ish, boxx, boxy, boxz, shx, shy, shz);
+  xj -= shx;
+  yj -= shy;
+  zj -= shz;
   
   // Make sure shared memory has been written
   // NOTE: since we're only operating within the warp, this __syncthreads() is just to make sure
@@ -2019,12 +2010,9 @@ void CudaNeighborListBuild<tilesize>::test_build(const int* zone_patom, const in
 	      jstart0 = h_tile_indj[jtile];
 	
 	      int ish     = h_ientry[ind].ish;
-	      int ish_tmp = ish;
-	      double shz = (ish_tmp/9 - 1)*boxz;
-	      ish_tmp -= (ish_tmp/9)*9;
-	      double shy = (ish_tmp/3 - 1)*boxy;
-	      ish_tmp -= (ish_tmp/3)*3;
-	      double shx = (ish_tmp - 1)*boxx;
+	      // Calculate shift
+	      double shx, shy, shz;
+	      calc_box_shift<double>(ish, boxx, boxy, boxz, shx, shy, shz);
 
 	      int npair_tile2 = 0;
 	      for (int i=istart0;i < istart0+tilesize;i++) {
@@ -2201,12 +2189,8 @@ int CudaNeighborListBuild<tilesize>::calc_gpu_pairlist(const int n_ientry, const
     int startj = ientry[ind].startj;
     int endj   = ientry[ind].endj;
 
-    int ish_tmp = ish;
-    T shz = (ish_tmp/9 - 1)*boxzT;
-    ish_tmp -= (ish_tmp/9)*9;
-    T shy = (ish_tmp/3 - 1)*boxyT;
-    ish_tmp -= (ish_tmp/3)*3;
-    T shx = (ish_tmp - 1)*boxxT;
+    T shx, shy, shz;
+    calc_box_shift<T>(ish, boxxT, boxyT, boxzT, shx, shy, shz);
 
     for (int jtile=startj;jtile <= endj;jtile++) {
       for (int i=istart;i < istart+tilesize;i++) {
@@ -2314,121 +2298,6 @@ int CudaNeighborListBuild<tilesize>::calc_cpu_pairlist(const int* zone_patom, co
 
   return npair;
 }
-
-/*
-void test_excl_dist_index(const int n_ijlist, const int3 *d_ijlist,
-			  const int *d_cell_patom, const float4 *d_xyzq,
-			  int *d_tile_indj,
-			  tile_excl_t *d_tile_excl,
-			  const float boxx, const float boxy, const float boxz,
-			  const float rcut2) {
-
-  int3 *h_ijlist;
-  int *h_cell_patom;
-  float4 *h_xyzq;
-  int *h_tile_indj;
-  tile_excl_t *h_tile_excl;
-
-  h_ijlist = (int3 *)malloc(n_ijlist*sizeof(int3));
-  h_cell_patom = (int *)malloc(mdsim.ncell*sizeof(int));
-  h_xyzq = (float4 *)malloc(mdsim.ncoord*sizeof(float4));
-  h_tile_indj = (int *)malloc(n_ijlist*sizeof(int));
-  h_tile_excl = (tile_excl_t *)malloc(n_ijlist*sizeof(tile_excl_t));
-
-  cudaCheck(cudaMemcpy(h_ijlist, d_ijlist, sizeof(int3)*n_ijlist,
-		       cudaMemcpyDeviceToHost));
-
-  cudaCheck(cudaMemcpy(h_cell_patom, d_cell_patom, sizeof(int)*mdsim.ncell,
-		       cudaMemcpyDeviceToHost));
-
-  cudaCheck(cudaMemcpy(h_xyzq, d_xyzq, sizeof(float4)*mdsim.ncoord,
-		       cudaMemcpyDeviceToHost));
-
-  cudaCheck(cudaMemcpy(h_tile_indj, d_tile_indj, sizeof(int)*n_ijlist,
-		       cudaMemcpyDeviceToHost));
-
-  cudaCheck(cudaMemcpy(h_tile_excl, d_tile_excl, sizeof(tile_excl_t)*n_ijlist,
-		       cudaMemcpyDeviceToHost));
-
-  for (int wid=0;wid < n_ijlist;wid++) {
-
-    int3 ijlist_val = h_ijlist[wid];
-    int icell = ijlist_val.x - 1;
-    int ish   = ijlist_val.y;
-    int jcell = ijlist_val.z - 1;
-
-    int istart = h_cell_patom[icell] - 1;
-    int iend   = h_cell_patom[icell+1] - 2;
-
-    int jstart = h_cell_patom[jcell] - 1;
-    int jend   = h_cell_patom[jcell+1] - 2;
-
-    int q_samecell = (icell == jcell);
-
-    // Calculate shift
-    float zsh = (ish/9 - 1)*boxz;
-    ish -= (ish/9)*9;
-    float ysh = (ish/3 - 1)*boxy;
-    ish -= (ish/3)*3;
-    float xsh = (ish - 1)*boxx;
-    
-    int i,j,ii,jj;
-
-    for (ii=istart,i=0;ii <= iend;ii++,i++) {
-      float4 xyzq_i = h_xyzq[ii];
-      float xi = xyzq_i.x;
-      float yi = xyzq_i.y;
-      float zi = xyzq_i.z;
-      for (jj=jstart,j=0;jj <= jend;jj++,j++) {
-	float4 xyzq_j = h_xyzq[jj];
-	float xj = xyzq_j.x - xsh;
-	float yj = xyzq_j.y - ysh;
-	float zj = xyzq_j.z - zsh;
-	float dx = xi - xj;
-	float dy = yi - yj;
-	float dz = zi - zj;
-	float r2 = dx*dx + dy*dy + dz*dz;
-#if (TILESIZE == 16)
-	int ttid = ((i+j) % 2)*16 + j;
-	int iexcl = ttid/4;
-	int tmp = i + 1 + j*15;
-	int shbit = ((tmp/2) % 8) + (j % 4)*8;
-#else
-	int ij = i + j*TILESIZE - j;
-	int iexcl = j;
-	int shbit = (ij % TILESIZE);
-#endif
-	unsigned int ibit = 1 << shbit;
-	unsigned int excl = ((r2 >= rcut2) | (q_samecell && (j <= i)) ) << shbit;
-	unsigned int excl_gpu = h_tile_excl[wid].excl[iexcl];
-	if ( ((excl_gpu & ibit) ^ excl) != 0 && fabsf(r2-rcut2) > 7.0e-5) {
-	  printf("Error found in test_excl_dist_index:\n");
-	  printf("wid = %d i = %d j = %d iexcl = %d shbit = %d\n",wid,i,j,iexcl,shbit);
-	  printf("ii = %d jj = %d %d %d %d %d\n",ii,jj,r2 >= rcut2,
-		 (q_samecell && (j <= i)),icell,jcell);
-	  printf("%x ^ %x = %x \n",excl_gpu & ibit, excl, (excl_gpu & ibit) ^ excl);
-	  printf("i:  %f %f %f\n",xi,yi,zi);
-	  printf("j:  %f %f %f\n",xj,yj,zj);
-	  printf("jo: %f %f %f\n",xyzq_j.x,xyzq_j.y,xyzq_j.z);
-	  printf("sh: %f %f %f\n",xsh,ysh,zsh);
-	  printf("dx: %1.8f %1.8f %1.8f\n",dx,dy,dz);
-	  printf("r2: %f %e\n",r2,fabsf(r2-rcut2));
-	  exit(1);
-	}
-      }
-    }
-
-  }
-
-  free(h_ijlist);
-  free(h_cell_patom);
-  free(h_xyzq);
-  free(h_tile_indj);
-  free(h_tile_excl);
-
-  printf("test_excl_dist_index OK\n");
-}
-*/
 
 //
 // Host wrapper for build_tilex_kernel
@@ -2777,6 +2646,8 @@ void CudaNeighborListBuild<tilesize>::load(const char *filename) {
     for (int i=0;i < n_ientry;i++) {
       file >> std::dec >> h_ientry[i].indi >> h_ientry[i].ish >> 
 	h_ientry[i].startj >> h_ientry[i].endj;
+      // Convert from 0...26 to 1...26*3+1
+      h_ientry[i].ish = h_ientry[i].ish*3 + 1;
       for (int j=h_ientry[i].startj;j <= h_ientry[i].endj;j++) {
 	file >> std::dec >> h_tile_indj[j];
 	for (int k=0;k < (num_excl<tilesize>::val);k++) {

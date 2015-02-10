@@ -59,16 +59,33 @@ __global__ void set_14_list_kernel(const int nin14_tbl, const int* __restrict__ 
 // Class creator
 //
 template <typename AT, typename CT>
-CudaPMEDirectForce<AT, CT>::CudaPMEDirectForce() : 
-  use_tex_vdwparam(true), use_tex_vdwparam14(true) {
+CudaPMEDirectForce<AT, CT>::CudaPMEDirectForce(CudaEnergyVirial &energyVirial,
+					       const char *nameVdw, const char *nameElec, const char *nameExcl) : 
+  use_tex_vdwparam(true), use_tex_vdwparam14(true), energyVirial(energyVirial) {
 
+  assert(nameVdw != NULL);
+  assert(nameElec != NULL);
+  assert(nameExcl != NULL);
+  
+  // Insert energy terms
+  energyVirial.insert(nameVdw);
+  strVdw = nameVdw;
+
+  energyVirial.insert(nameElec);
+  strElec = nameElec;
+
+  energyVirial.insert(nameExcl);
+  strExcl = nameExcl;
+  
 #ifdef USE_TEXTURE_OBJECTS
-  vdwparam_tex = 0;
-  vdwparam14_tex = 0;
+  vdwParamTexObjActive = false;
+  vdwParam14TexObjActive = false;
 #else
   // Assert that texture references must be unbound
   assert(!get_vdwparam_texref_bound());
   assert(!get_vdwparam14_texref_bound());
+#endif 
+
   vdwparam = NULL;
   nvdwparam = 0;
   vdwparam_len = 0;
@@ -76,7 +93,6 @@ CudaPMEDirectForce<AT, CT>::CudaPMEDirectForce() :
   vdwparam14 = NULL;
   nvdwparam14 = 0;
   vdwparam14_len = 0;
-#endif 
 
   nin14list = 0;
   in14list_len = 0;
@@ -95,12 +111,12 @@ CudaPMEDirectForce<AT, CT>::CudaPMEDirectForce() :
   set_calc_vdw(true);
   set_calc_elec(true);
 
-  allocate<DirectEnergyVirial_t>(&d_energy_virial, 1);
-
-  allocate_host<DirectEnergyVirial_t>(&h_energy_virial, 1);
+  //allocate<DirectEnergyVirial_t>(&d_energy_virial, 1);
+  //allocate_host<DirectEnergyVirial_t>(&h_energy_virial, 1);
+  
   allocate_host<DirectSettings_t>(&h_setup, 1);
 
-  clear_energy_virial();
+  //clear_energy_virial();
 }
 
 //
@@ -115,8 +131,8 @@ CudaPMEDirectForce<AT, CT>::~CudaPMEDirectForce() {
   if (ex14list != NULL) deallocate<xx14list_t>(&ex14list);
   if (vdwtype != NULL) deallocate<int>(&vdwtype);
   if (ewald_force != NULL) deallocate<CT>(&ewald_force);
-  if (d_energy_virial != NULL) deallocate<DirectEnergyVirial_t>(&d_energy_virial);
-  if (h_energy_virial != NULL) deallocate_host<DirectEnergyVirial_t>(&h_energy_virial);
+  //if (d_energy_virial != NULL) deallocate<DirectEnergyVirial_t>(&d_energy_virial);
+  //if (h_energy_virial != NULL) deallocate_host<DirectEnergyVirial_t>(&h_energy_virial);
   if (h_setup != NULL) deallocate_host<DirectSettings_t>(&h_setup);
 }
 
@@ -319,13 +335,13 @@ bool CudaPMEDirectForce<AT, CT>::get_calc_elec() {
 template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::clearTextures() {
 #ifdef USE_TEXTURE_OBJECTS
-  if (vdwparam_tex != 0) {
-    cudaCheck(cudaDestroyTextureObject(vdwparam_tex));
-    vdwparam_tex = 0;
+  if (vdwParamTexObjActive) {
+    cudaCheck(cudaDestroyTextureObject(vdwParamTexObjActive));
+    vdwParamTexObjActive = false;
   }
-  if (vdwparam14_tex != 0) {
-    cudaCheck(cudaDestroyTextureObject(vdwparam14_tex));
-    vdwparam14_tex = 0;
+  if (vdwParam14TexObjActive) {
+    cudaCheck(cudaDestroyTextureObject(vdwParam14TexObjActive));
+    vdwParam14TexObjActive = false;
   }
 #else
   if (get_vdwparam_texref_bound()) {
@@ -380,7 +396,8 @@ void CudaPMEDirectForce<AT, CT>::setup_vdwparam(const int type, const int h_nvdw
 
   const bool *use_tex_vdwparam_loc = (type == VDW_MAIN) ? &this->use_tex_vdwparam : &this->use_tex_vdwparam14;
 #ifdef USE_TEXTURE_OBJECTS
-  cudaTextureObject_t *tex = (type == VDW_MAIN) ? &vdwparam_tex : &vdwparam14_tex;
+  bool *texActive = (type == VDW_MAIN) ? &vdwParamTexObjActive : &vdwParam14TexObjActive;
+  cudaTextureObject_t *tex = (type == VDW_MAIN) ? &vdwParamTexObj : &vdwParam14TexObj;
 #else
   //bool* vdwparam_texref_bound_loc =
   //  (type == VDW_MAIN) ? get_vdwparam_texref_bound() : get_vdwparam14_texref_bound();
@@ -390,9 +407,9 @@ void CudaPMEDirectForce<AT, CT>::setup_vdwparam(const int type, const int h_nvdw
 
   if (*use_tex_vdwparam_loc && vdwparam_reallocated) {
 #ifdef USE_TEXTURE_OBJECTS
-    if (*tex != 0) {
+    if (*texActive) {
       cudaDestroyTextureObject(*tex);
-      *tex = 0;
+      *texActive = false;
     }
     cudaResourceDesc resDesc;
     memset(&resDesc, 0, sizeof(resDesc));
@@ -407,6 +424,7 @@ void CudaPMEDirectForce<AT, CT>::setup_vdwparam(const int type, const int h_nvdw
     memset(&texDesc, 0, sizeof(texDesc));
     texDesc.readMode = cudaReadModeElementType;
     cudaCheck(cudaCreateTextureObject(tex, &resDesc, &texDesc, NULL));
+    *texActive = true;
 #else
     // Unbind texture
     if ((type == VDW_MAIN) ? get_vdwparam_texref_bound() : get_vdwparam14_texref_bound()) {
@@ -654,8 +672,8 @@ void CudaPMEDirectForce<AT, CT>::calc_14_force(const float4 *xyzq,
 					       const int stride, AT *force, cudaStream_t stream) {
   if (use_tex_vdwparam14) {
 #ifdef USE_TEXTURE_OBJECTS
-    if (vdwparam14_tex == 0) {
-      std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwparam14_tex must be created" << std::endl;
+    if (!vdwParam14TexObjActive) {
+      std::cerr << "CudaPMEDirectForce<AT, CT>::calc_14_force, vdwParam14TexObj must be created" << std::endl;
       exit(1);
     }
 #else
@@ -682,9 +700,14 @@ void CudaPMEDirectForce<AT, CT>::calc_14_force(const float4 *xyzq,
   calcForce14KernelChoice<AT,CT>(nblock, nthread, shmem_size, stream,
 				 vdw_model_loc, elec_model_loc, calc_energy, calc_virial,
 				 this->nin14list, this->in14list, this->nex14list, this->ex14list,
-				 nin14block, this->vdwtype, this->vdwparam14, xyzq,
-				 stride, d_energy_virial, force);
-
+				 nin14block, this->vdwtype, this->vdwparam14,
+#ifdef USE_TEXTURE_OBJECTS
+				 this->vdwParam14TexObj,
+#endif
+				 xyzq, stride, force, energyVirial.getVirialPointer(),
+				 energyVirial.getEnergyPointer(strVdw),
+				 energyVirial.getEnergyPointer(strElec),
+				 energyVirial.getEnergyPointer(strExcl));
 }
 
 //
@@ -699,8 +722,8 @@ void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
 
   if (use_tex_vdwparam) {
 #ifdef USE_TEXTURE_OBJECTS
-    if (vdwparam_tex == 0) {
-      std::cerr << "CudaPMEDirectForce<AT, CT>::calc_force, vdwparam_tex must be created" << std::endl;
+    if (!vdwParamTexObjActive) {
+      std::cerr << "CudaPMEDirectForce<AT, CT>::calc_force, vdwParamTexObj must be created" << std::endl;
       exit(1);
     }
 #else
@@ -739,28 +762,29 @@ void CudaPMEDirectForce<AT, CT>::calc_force(const float4 *xyzq,
 
   calcForceKernelChoice<AT,CT>(nblock_tot, nthread, shmem_size, stream,
 			       vdw_model_loc, elec_model_loc, calc_energy, calc_virial,
-			       nlist, stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
-			       this->d_energy_virial, force);
+			       nlist, this->vdwparam, this->nvdwparam, this->vdwtype,
+#ifdef USE_TEXTURE_OBJECTS
+			       this->vdwParamTexObj,
+#endif
+			       xyzq, stride, force,
+			       energyVirial.getVirialPointer(),
+			       energyVirial.getEnergyPointer(strVdw),
+			       energyVirial.getEnergyPointer(strElec));
 }
 
-//
-// Evaluates force and energy for a single distance. Used for unit testing
-//
-template <typename AT, typename CT>
-void CudaPMEDirectForce<AT, CT>::evalPairForce(const float r, double& force_val, double& energy_val) {
-  evalForceKernelChoice<AT,CT>(vdw_model, elec_model, r, force_val, energy_val);
-}
-
+/*
 //
 // Calculates virial
 //
 template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::calc_virial(const int ncoord, const float4 *xyzq,
-					     const int stride, AT *force,
+					     const int stride, double *force,
 					     cudaStream_t stream) {
-  calcVirial<AT,CT>(ncoord, xyzq, this->d_energy_virial, stride, force, stream);
+  calcVirial(ncoord, xyzq, this->d_energy_virial, stride, force, stream);
 }
+*/
 
+/*
 //
 // Sets Energies and virials to zero
 //
@@ -771,14 +795,15 @@ void CudaPMEDirectForce<AT, CT>::clear_energy_virial(cudaStream_t stream) {
   h_energy_virial->energy_excl = 0.0;
   for (int i=0;i < 9;i++)
     h_energy_virial->vir[i] = 0.0;
-  for (int i=0;i < 27;i++) {
-    h_energy_virial->sforcex[i] = 0.0;
-    h_energy_virial->sforcey[i] = 0.0;
-    h_energy_virial->sforcez[i] = 0.0;
+  for (int i=0;i < 27*3;i++) {
+    h_energy_virial->sforce[i] = 0.0;
+    h_energy_virial->sforce_fp[i] = 0ll;
   }
   copy_HtoD<DirectEnergyVirial_t>(h_energy_virial, d_energy_virial, 1, stream);
 }
+*/
 
+/*
 //
 // Read Energies and virials
 // prev_calc_energy = true, if energy was calculated when the force kernel was last called
@@ -814,6 +839,7 @@ void CudaPMEDirectForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool p
   }
 
 }
+*/
 
 //
 // Explicit instances of CudaPMEDirectForce

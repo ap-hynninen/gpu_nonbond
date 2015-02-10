@@ -8,7 +8,7 @@
 #include "CudaNeighborList.h"
 #include "CudaPMEDirectForce.h"
 #include "CudaPMEDirectForceBlock.h"
-#include "VirialPressure.h"
+#include "CudaEnergyVirial.h"
 
 void test();
 
@@ -73,11 +73,15 @@ void test() {
   const double ref_energy_vdw = 8198.14425;
   const double ref_energy_elec = -73396.45998;
 
-  Force<float> force_main("test_data/force_direct_main.txt");
-  Force<float> force_total("test_data/force_direct.txt");
+  // Define force arrays
+  Force<double> force_main("test_data/force_direct_main.txt");
+  Force<double> force_total("test_data/force_direct.txt");
   Force<long long int> force_fp(ncoord);
-  Force<float> force(ncoord);
+  Force<double> force(ncoord);
 
+  // Energy terms
+  CudaEnergyVirial energyVirial;
+  
   const int nin14list = 6556;
   const int nex14list = 28153;
   xx14list_t *in14list = new xx14list_t[nin14list];
@@ -86,7 +90,7 @@ void test() {
   load_ind<int>(3, "test_data/ex14list.txt", nex14list, (int *)ex14list);
 
   force_fp.clear();
-
+  
   // Load coordinates
   XYZQ xyzq("test_data/xyzq.txt", 32);
   XYZQ xyzq_unsorted("test_data/xyzq_unsorted.txt", 32);
@@ -122,15 +126,6 @@ void test() {
   std::cout << "=======================================" << std::endl;
 
   int zone_patom[9] = {0, 23558, 23558, 23558, 23558, 23558, 23558, 23558, 23558};
-  /*
-  float3 min_xyz[8], max_xyz[8];
-  min_xyz[0].x = -31.74800;
-  min_xyz[0].y = -31.77600;
-  min_xyz[0].z = -31.77900;
-  max_xyz[0].x = 31.73900;
-  max_xyz[0].y = 31.80500;
-  max_xyz[0].z = 31.80300;
-  */
 
   int *h_loc2glo = new int[ncoord];
   for (int i=0;i < ncoord;i++) h_loc2glo[i] = i;
@@ -153,7 +148,7 @@ void test() {
 
   // ------------------- Non-bonded -----------------
 
-  CudaPMEDirectForce<long long int, float> dir;
+  CudaPMEDirectForce<long long int, float> dir(energyVirial, "vdw", "elec", "excl");
   dir.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, VDW_VSH, EWALD);
   dir.set_vdwparam(1260, "test_data/vdwparam.txt");
   dir.set_vdwtype(ncoord, "test_data/vdwtype.txt");
@@ -183,17 +178,23 @@ void test() {
 
   // Check energy and virial
   force_fp.clear();
-  dir.clear_energy_virial();
+  energyVirial.clear();
   dir.calc_force(xyzq.xyzq, nlist_ref.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
+  //dir.calc_14_force(xyzq.xyzq, true, true, force_fp.stride(), force_fp.xyz());
   force_fp.convert(force);
-  dir.calc_virial(ncoord, xyzq.xyzq, force_fp.stride(), force_fp.xyz());
-
+  //dir.calc_virial(ncoord, xyzq.xyzq, force.stride(), force.xyz());
+  energyVirial.calcVirial(ncoord, xyzq.xyzq, boxx, boxy, boxz, force.stride(), force.xyz());
+  
   double energy_vdw;
   double energy_elec;
-  double energy_excl;
+  //double energy_excl;
   double virtensor[9];
-  dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
-  cudaCheck(cudaDeviceSynchronize());
+  //dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
+  energyVirial.copyToHost();
+  energy_vdw = energyVirial.getEnergy("vdw");
+  energy_elec = energyVirial.getEnergy("elec");
+  //energy_excl = energyVirial.getEnergy("excl");
+  energyVirial.getVirial(virtensor);
   tol = 7.73e-4;
   if (!force_main.compare(force, tol, max_diff)) {
     std::cout<<"Non-bonded (main) force comparison FAILED"<<std::endl;
@@ -223,9 +224,9 @@ void test() {
   }
 
   if (max_diff < 3.13) {
-    std::cout << "Nonbonded virial comparison OK" << std::endl;
+    std::cout << "(1) Nonbonded virial comparison OK" << std::endl;
   } else {
-    std::cout << "Nonbonded virial comparison FAILED" << std::endl;
+    std::cout << "(1) Nonbonded virial comparison FAILED" << std::endl;
   }
   std::cout << "max_diff(vir_tensor) = " << max_diff << std::endl;
   std::cout << "max_diff(vir) = " << fabs(vir - ref_vir) << std::endl;
@@ -242,13 +243,19 @@ void test() {
   delete [] h_glo_vdwtype;
   
   force_fp.clear();
-  dir.clear_energy_virial();
+  //dir.clear_energy_virial();
+  energyVirial.clear();
   dir.calc_force(xyzq_sorted.xyzq, nlist.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
   force_fp.convert(force);
-  dir.calc_virial(ncoord, xyzq_sorted.xyzq, force_fp.stride(), force_fp.xyz());
+  //dir.calc_virial(ncoord, xyzq_sorted.xyzq, force.stride(), force.xyz());
+  energyVirial.calcVirial(ncoord, xyzq_sorted.xyzq, boxx, boxy, boxz, force.stride(), force.xyz());
 
-  dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
-  cudaCheck(cudaDeviceSynchronize());
+  energyVirial.copyToHost();
+  energy_vdw = energyVirial.getEnergy("vdw");
+  energy_elec = energyVirial.getEnergy("elec");
+  //energy_excl = energyVirial.getEnergy("excl");
+  energyVirial.getVirial(virtensor);
+  //dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
 
   std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
   max_diff = max(fabs(energy_vdw-ref_energy_vdw), fabs(energy_elec-ref_energy_elec));
@@ -282,9 +289,9 @@ void test() {
     std::cout << std::endl;
   }
   if (max_diff < 3.13) {
-    std::cout << "Nonbonded virial comparison OK" << std::endl;
+    std::cout << "(2) Nonbonded virial comparison OK" << std::endl;
   } else {
-    std::cout << "Nonbonded virial comparison FAILED" << std::endl;
+    std::cout << "(2) Nonbonded virial comparison FAILED" << std::endl;
   }
   std::cout << "max_diff(vir_tensor) = " << max_diff << std::endl;
   std::cout << "max_diff(vir) = " << fabs(vir - ref_vir) << std::endl;
@@ -294,7 +301,7 @@ void test() {
   
   //--------------- Non-bonded with block  -----------
   CudaBlock cudaBlock(2);
-  CudaPMEDirectForceBlock<long long int, float> dirblock(cudaBlock);
+  CudaPMEDirectForceBlock<long long int, float> dirblock(energyVirial, "vdw", "elec", "excl", cudaBlock);
   //CudaPMEDirectForce<long long int, float> dirblock;
   
   // Setup blockType
@@ -318,12 +325,20 @@ void test() {
   dirblock.set_vdwtype(ncoord, glo_vdwtype, loc2glo);
     // Calculate forces, energies, and virial
   force_fp.clear();
-  dirblock.clear_energy_virial();
+  //dirblock.clear_energy_virial();
+  energyVirial.clear();
   dirblock.calc_force(xyzq_sorted.xyzq, nlist.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
   force_fp.convert(force);
-  dirblock.calc_virial(ncoord, xyzq_sorted.xyzq, force_fp.stride(), force_fp.xyz());
-  dirblock.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
-  cudaCheck(cudaDeviceSynchronize());
+  //dirblock.calc_virial(ncoord, xyzq_sorted.xyzq, force.stride(), force.xyz());
+  energyVirial.calcVirial(ncoord, xyzq.xyzq, boxx, boxy, boxz, force.stride(), force.xyz());
+
+  //dirblock.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
+  //cudaCheck(cudaDeviceSynchronize());
+  energyVirial.copyToHost();
+  energy_vdw = energyVirial.getEnergy("vdw");
+  energy_elec = energyVirial.getEnergy("elec");
+  //energy_excl = energyVirial.getEnergy("excl");
+  energyVirial.getVirial(virtensor);
 
   std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
   
@@ -339,30 +354,5 @@ void test() {
   deallocate<int>(&glo_vdwtype);
 
   return;
-
-  //------------------ Virial pressure ---------------
-
-  /*
-  VirialPressure vir;
-  double vpress[9];
-  cudaXYZ<double> coord;
-  cudaXYZ<double> force_double(ncoord, force_fp.xyz.stride, (double *)force_fp.xyz.data);
-  float3 *xyz_shift = NULL;
-  vir.calc_virial(&coord, &force_double, xyz_shift, boxx, boxy, boxz, vpress);
-  force_double.data = NULL;
-  
-  tol = 1.0e-5;
-  max_diff = 0.0;
-  for (int i=0;i < 9;i++) {
-    double diff = fabs(ref_vpress[i] - vpress[i]);
-    max_diff = max(max_diff, diff);
-  }
-  if (max_diff > tol) {
-    std::cout<<"vpress comparison FAILED"<<std::endl;
-  } else {
-    std::cout<<"vpress comparison OK (tolerance " << tol << " max difference "
-	     << max_diff << ")" << std::endl;
-  }
-  */
 
 }

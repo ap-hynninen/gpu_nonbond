@@ -25,7 +25,6 @@ CudaBlock::CudaBlock(const int numBlock) : numBlock(numBlock) {
   allocate<double>(&biflam2, numBlock);
 #ifdef USE_TEXTURE_OBJECTS
   // Use texture objects
-  blockParamTexObj = 0;
   cudaResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
   resDesc.resType = cudaResourceTypeLinear;

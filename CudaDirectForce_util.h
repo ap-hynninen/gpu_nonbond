@@ -9,7 +9,7 @@ template <typename AT, typename CT, int tilesize, int vdw_model, int elec_model,
 	  bool calc_energy, bool calc_virial, bool tex_vdwparam>
 __global__ void CUDA_KERNEL_NAME(
 #ifdef USE_TEXTURE_OBJECTS
-				  const cudaTextureObject_t tex,
+				  const cudaTextureObject_t vdwParamTexObj,
 #endif
 				  const int base,
 				  const int n_ientry, const ientry_t* __restrict__ ientry,
@@ -28,8 +28,8 @@ __global__ void CUDA_KERNEL_NAME(
 				  const cudaTextureObject_t blockParamTexObj,
 #endif
 #endif
-				  DirectEnergyVirial_t* __restrict__ energy_virial,
-				  AT* __restrict__ force) {
+				  AT* __restrict__ force, Virial_t* __restrict__ virial,
+				  double* __restrict__ energy_vdw, double* __restrict__ energy_elec) {
 
   // Pre-computed constants
   const int num_excl = ((tilesize*tilesize-1)/32 + 1);
@@ -119,14 +119,18 @@ __global__ void CUDA_KERNEL_NAME(
   }
 
   // Calculate shift for i-atom
-  // ish = 0...26
+  // ish = 1...26*3+1
+  float shx, shy, shz;
+  calc_box_shift<float>(ish, d_setup.boxx, d_setup.boxy, d_setup.boxz, shx, shy, shz);
+  /*
   int ish_tmp = ish;
   float shz = (ish_tmp/9 - 1)*d_setup.boxz;
   ish_tmp -= (ish_tmp/9)*9;
   float shy = (ish_tmp/3 - 1)*d_setup.boxy;
   ish_tmp -= (ish_tmp/3)*3;
   float shx = (ish_tmp - 1)*d_setup.boxx;
-
+  */
+  
   // Load i-atom data to shared memory (and shift coordinates)
   float4 xyzq_tmp = xyzq[indi + lid];
 #if __CUDA_ARCH__ >= 300
@@ -263,7 +267,7 @@ __global__ void CUDA_KERNEL_NAME(
 	  //c6 = __ldg(&vdwparam[ivdw]);
 	  //c12 = __ldg(&vdwparam[ivdw+1]);
 #ifdef USE_TEXTURE_OBJECTS
-	  float2 c6c12 = tex1Dfetch<float2>(tex, ivdw);
+	  float2 c6c12 = tex1Dfetch<float2>(vdwParamTexObj, ivdw);
 #else
 	  float2 c6c12 = tex1Dfetch(vdwparam_texref, ivdw);
 #endif
@@ -371,7 +375,7 @@ __global__ void CUDA_KERNEL_NAME(
     // Virial is calculated from (sh_fix[], sh_fiy[], sh_fiz[])
     // Variable "ish" depends on warp => Reduce within warp
     // NOTE: we skip the center element because it doesn't contribute to the virial
-    if (ish != 13) {
+    if (ish != 40) {
       // Convert into double
       volatile double *sh_sfix = (double *)sh_fix;
       volatile double *sh_sfiy = (double *)sh_fiy;
@@ -389,9 +393,9 @@ __global__ void CUDA_KERNEL_NAME(
 	}
       }
       if (wid == 0) {
-	atomicAdd(&energy_virial->sforcex[ish], sh_sfix[0]);
-	atomicAdd(&energy_virial->sforcey[ish], sh_sfiy[0]);
-	atomicAdd(&energy_virial->sforcez[ish], sh_sfiz[0]);
+	atomicAdd(&virial->sforce_dp[ish-1], sh_sfix[0]);
+	atomicAdd(&virial->sforce_dp[ish],   sh_sfiy[0]);
+	atomicAdd(&virial->sforce_dp[ish+1], sh_sfiz[0]);
       }
     }
   }
@@ -415,8 +419,8 @@ __global__ void CUDA_KERNEL_NAME(
       __syncthreads();
     }
     if (threadIdx.x == 0) {
-      atomicAdd(&energy_virial->energy_vdw,  sh_pot[0].x);
-      atomicAdd(&energy_virial->energy_elec, sh_pot[0].y);
+      atomicAdd(energy_vdw,  sh_pot[0].x);
+      atomicAdd(energy_elec, sh_pot[0].y);
     }
   }
 

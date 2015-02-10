@@ -5,8 +5,7 @@
 #include "gpu_utils.h"
 #include "XYZQ.h"
 #include "Force.h"
-#include "BondedForce.h"
-#include "VirialPressure.h"
+#include "CudaBondedForce.h"
 
 void test();
 
@@ -119,7 +118,7 @@ void check_results(const bool calc_energy, const bool calc_virial,
 
   if (calc_virial) {
     max_diff = 0.0;
-    tol = 0.16;
+    tol = 0.008;
     for (int i=0;i < 27*3;i++) {
       max_diff = max(max_diff, fabs(results_ref.sforce[i] - results.sforce[i]));
       if (max_diff > tol) {
@@ -164,10 +163,14 @@ void test() {
   results_ref.sforce[39] = 0.0;
   results_ref.sforce[40] = 0.0;
   results_ref.sforce[41] = 0.0;
-   
+
+  // Force arrays
   Force<double> force_ref("test_data/force_bonded.txt");
   Force<long long int> force_fp(ncoord);
   Force<double> force(ncoord);
+
+  // Energy terms
+  CudaEnergyVirial energyVirial;
 
   // Load coordinates
   XYZQ xyzq("test_data/xyzq.txt", 32);
@@ -226,7 +229,7 @@ void test() {
 
   // Single precision
   {
-    BondedForce<long long int, float> bondedforce;
+    CudaBondedForce<long long int, float> bondedforce(energyVirial, "bond", "ureyb", "angle", "dihe", "imdihe", NULL);
     bondedforce.setup_coef(nbondcoef, h_bondcoef,
 			   nureybcoef, h_ureybcoef,
 			   nanglecoef, h_anglecoef,
@@ -244,19 +247,30 @@ void test() {
     for (int bb=0;bb <= 3;bb++) {
       bool calc_energy = ((bb & 1) == 1);
       bool calc_virial = ((bb & 2) == 2);
-      std::cout << "calc_energy, calc_virial = " << calc_energy << " " << calc_virial << std::endl;
       force_fp.clear();
-      bondedforce.clear_energy_virial();
+      //bondedforce.clear_energy_virial();
+      energyVirial.clear();
       bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, calc_energy, calc_virial,
 			     force_fp.stride(), force_fp.xyz(),
 			     true, true, true, true, true, true);
-      bondedforce.get_energy_virial(calc_energy, calc_virial,
-				    &results.energy_bond, &results.energy_ureyb,
-				    &results.energy_angle,
-				    &results.energy_dihe, &results.energy_imdihe,
-				    &results.energy_cmap,
-				    results.sforce);
+      
+      //bondedforce.get_energy_virial(calc_energy, calc_virial,
+      //			    &results.energy_bond, &results.energy_ureyb,
+      //			    &results.energy_angle,
+      //			    &results.energy_dihe, &results.energy_imdihe,
+      //			    &results.energy_cmap,
+      //			    results.sforce);
+
       force_fp.convert(force);
+      energyVirial.calcVirial(ncoord, xyzq.xyzq, boxx, boxy, boxz, force.stride(), force.xyz());
+      energyVirial.copyToHost();
+      results.energy_bond = energyVirial.getEnergy("bond");
+      results.energy_ureyb = energyVirial.getEnergy("ureyb");
+      results.energy_angle = energyVirial.getEnergy("angle");
+      results.energy_dihe = energyVirial.getEnergy("dihe");
+      results.energy_imdihe = energyVirial.getEnergy("imdihe");
+      energyVirial.getSforce(results.sforce);
+
       check_results(calc_energy, calc_virial, results_ref, results, force_ref, force);
     }
     
@@ -269,8 +283,8 @@ void test() {
   // Double precision
   {
     force_fp.clear();
-    BondedForce<long long int, double> bondedforce;
-    bondedforce.clear_energy_virial();
+    CudaBondedForce<long long int, double> bondedforce(energyVirial, "bond", "ureyb", "angle", "dihe", "imdihe", NULL);
+    //bondedforce.clear_energy_virial();
     bondedforce.setup_coef(nbondcoef, h_bondcoef,
 			   nureybcoef, h_ureybcoef,
 			   nanglecoef, h_anglecoef,
@@ -288,19 +302,29 @@ void test() {
     for (int bb=0;bb <= 3;bb++) {
       bool calc_energy = ((bb & 1) == 1);
       bool calc_virial = ((bb & 2) == 2);
-      std::cout << "calc_energy, calc_virial = " << calc_energy << " " << calc_virial << std::endl;
       force_fp.clear();
-      bondedforce.clear_energy_virial();    
+      energyVirial.clear();
+      //bondedforce.clear_energy_virial();    
       bondedforce.calc_force(xyzq.xyzq, boxx, boxy, boxz, calc_energy, calc_virial,
 			     force_fp.stride(), force_fp.xyz(),
 			     true, true, true, true, true, true);
-      bondedforce.get_energy_virial(calc_energy, calc_virial,
-				    &results.energy_bond, &results.energy_ureyb,
-				    &results.energy_angle,
-				    &results.energy_dihe, &results.energy_imdihe,
-				    &results.energy_cmap,
-				    results.sforce);
+      //bondedforce.get_energy_virial(calc_energy, calc_virial,
+      //			    &results.energy_bond, &results.energy_ureyb,
+      //			    &results.energy_angle,
+      //			    &results.energy_dihe, &results.energy_imdihe,
+      //			    &results.energy_cmap,
+      //			    results.sforce);
       force_fp.convert(force);
+
+      energyVirial.calcVirial(ncoord, xyzq.xyzq, boxx, boxy, boxz, force.stride(), force.xyz());
+      energyVirial.copyToHost();
+      results.energy_bond = energyVirial.getEnergy("bond");
+      results.energy_ureyb = energyVirial.getEnergy("ureyb");
+      results.energy_angle = energyVirial.getEnergy("angle");
+      results.energy_dihe = energyVirial.getEnergy("dihe");
+      results.energy_imdihe = energyVirial.getEnergy("imdihe");
+      energyVirial.getSforce(results.sforce);
+      
       check_results(calc_energy, calc_virial, results_ref, results, force_ref, force);
     }
   }

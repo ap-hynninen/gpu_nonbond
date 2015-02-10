@@ -1,9 +1,11 @@
 #ifndef CUDAPMEDIRECTFORCE_H
 #define CUDAPMEDIRECTFORCE_H
 #include <cuda.h>
+#include <string>
 #include "Bonded_struct.h"
 #include "CudaNeighborListBuild.h"
 #include "CudaDirectForceTypes.h"
+#include "CudaEnergyVirial.h"
 
 // If this variable is set, we'll use texture objects.
 // Unset for now because of the problem with texture objects on GTX 750
@@ -69,18 +71,17 @@ public:
 			  const bool calc_energy,
 			  const bool calc_virial,
 			  const int stride, AT *force, cudaStream_t stream=0)=0;
-  virtual void evalPairForce(const float r, double& force_val, double& energy_val)=0;
 
-  virtual void calc_virial(const int ncoord, const float4 *xyzq,
-			   const int stride, AT *force,
-			   cudaStream_t stream=0)=0;
+  //virtual void calc_virial(const int ncoord, const float4 *xyzq,
+  //			   const int stride, double *force,
+  //			   cudaStream_t stream=0)=0;
 
-  virtual void clear_energy_virial(cudaStream_t stream=0)=0;
+  //virtual void clear_energy_virial(cudaStream_t stream=0)=0;
   
-  virtual void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
-				 double *energy_vdw, double *energy_elec,
-				 double *energy_excl,
-				 double *vir)=0;
+  //virtual void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
+  //double *energy_vdw, double *energy_elec,
+  //				 double *energy_excl,
+  //				 double *vir)=0;
 
 };
 
@@ -92,13 +93,22 @@ class CudaPMEDirectForce : public CudaPMEDirectForceBase<AT, CT> {
 
 protected:
 
+  // Energy & Virial
+  CudaEnergyVirial &energyVirial;
+
+  // Energy term names
+  std::string strVdw;
+  std::string strElec;
+  std::string strExcl;
+  
   // VdW parameters
   int nvdwparam;
   int vdwparam_len;
   CT *vdwparam;
   const bool use_tex_vdwparam;
 #ifdef USE_TEXTURE_OBJECTS
-  cudaTextureObject_t vdwparam_tex;
+  bool vdwParamTexObjActive;
+  cudaTextureObject_t vdwParamTexObj;
 #endif
 
   // VdW 1-4 parameters
@@ -107,7 +117,8 @@ protected:
   CT *vdwparam14;
   const bool use_tex_vdwparam14;
 #ifdef USE_TEXTURE_OBJECTS
-  cudaTextureObject_t vdwparam14_tex;
+  bool vdwParam14TexObjActive;
+  cudaTextureObject_t vdwParam14TexObj;
 #endif
 
   // 1-4 interaction and exclusion lists
@@ -140,11 +151,11 @@ protected:
   DirectSettings_t *h_setup;
 
   // Host and Device versions of energy and virial global variables
-  DirectEnergyVirial_t *h_energy_virial;
-  DirectEnergyVirial_t *d_energy_virial;
+  //DirectEnergyVirial_t *h_energy_virial;
+  //DirectEnergyVirial_t *d_energy_virial;
   
   // We save previous calculated values of energies / virial here
-  DirectEnergyVirial_t h_energy_virial_prev;
+  //DirectEnergyVirial_t h_energy_virial_prev;
 
   void setup_ewald_force(CT h);
   void set_elec_model(int elec_model, CT h=0.01);
@@ -155,7 +166,8 @@ protected:
 
 public:
 
-  CudaPMEDirectForce();
+  CudaPMEDirectForce(CudaEnergyVirial &energyVirial,
+		     const char *nameVdw, const char *nameElec, const char *nameExcl);
   ~CudaPMEDirectForce();
 
   void setup(double boxx, double boxy, double boxz, double kappa,
@@ -205,18 +217,17 @@ public:
 		  const bool calc_energy,
 		  const bool calc_virial,
 		  const int stride, AT *force, cudaStream_t stream=0);
-  void evalPairForce(const float r, double& force_val, double& energy_val);
 
-  void calc_virial(const int ncoord, const float4 *xyzq,
-		   const int stride, AT *force,
-		   cudaStream_t stream=0);
+  //void calc_virial(const int ncoord, const float4 *xyzq,
+  //		   const int stride, double *force,
+  //		   cudaStream_t stream=0);
 
-  void clear_energy_virial(cudaStream_t stream=0);
+  //void clear_energy_virial(cudaStream_t stream=0);
   
-  void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
-			 double *energy_vdw, double *energy_elec,
-			 double *energy_excl,
-			 double *vir);
+  //void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
+  //			 double *energy_vdw, double *energy_elec,
+  //			 double *energy_excl,
+  //			 double *vir);
 
 };
 

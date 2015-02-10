@@ -31,7 +31,11 @@ __global__ void merge_biflam_kernel(const int numBlock,
 // Class creator
 //
 template <typename AT, typename CT>
-CudaPMEDirectForceBlock<AT, CT>::CudaPMEDirectForceBlock(CudaBlock &cudaBlock) : cudaBlock(cudaBlock) {
+CudaPMEDirectForceBlock<AT, CT>::CudaPMEDirectForceBlock(CudaEnergyVirial &energyVirial,
+							 const char *nameVdw, const char *nameElec, const char *nameExcl,
+							 CudaBlock &cudaBlock) :
+  CudaPMEDirectForce<AT,CT>(energyVirial, nameVdw, nameElec, nameExcl), cudaBlock(cudaBlock) {
+  
   biflamLen = 0;
   biflam = NULL;
   
@@ -113,12 +117,8 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_force(const float4 *xyzq,
 						 cudaStream_t stream) {
 
 #ifdef USE_TEXTURE_OBJECTS
-  if (this->vdwparam_tex == 0) {
-    std::cerr << "CudaPMEDirectForceBlock<AT, CT>::calc_force, vdwparam_tex must be created" << std::endl;
-    exit(1);
-  }
-  if (blockparam_tex == 0) {
-    std::cerr << "CudaPMEDirectForceBlock<AT, CT>::calc_force, blockparam_tex must be created" << std::endl;
+  if (!this->vdwParamTexObjActive) {
+    std::cerr << "CudaPMEDirectForceBlock<AT, CT>::calc_force, vdwParamTexObj must be created" << std::endl;
     exit(1);
   }
 #else
@@ -175,38 +175,15 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_force(const float4 *xyzq,
 
   calcForceKernelChoice<AT,CT>(nblock_tot, nthread, shmem_size, stream,
 			       vdw_model_loc, elec_model_loc, calc_energy, calc_virial,
-			       nlist, stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
-			       this->d_energy_virial, force, &cudaBlock, this->biflam, this->biflam2);
-
-  /*
-  int3 max_nblock3 = get_max_nblock();
-  unsigned int max_nblock = max_nblock3.x;
-  unsigned int base = 0;
-  
-  while (nblock_tot != 0) {
-
-    int nblock = (nblock_tot > max_nblock) ? max_nblock : nblock_tot;
-    nblock_tot -= nblock;
-
+			       nlist, this->vdwparam, this->nvdwparam, this->vdwtype,
 #ifdef USE_TEXTURE_OBJECTS
-    CREATE_KERNELS(CREATE_KERNEL, calc_force_kernel, this->vdwparam_tex,
-		   base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
-		   nlist.get_tile_excl(), stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
-		   cudaBlock.getNumBlock(), cudaBlock.getBixlam(), cudaBlock.getBlockType(),
-		   this->biflam, this->biflam2, cudaBlock.getBlockParamTexObj(), force);
-#else
-    CREATE_KERNELS(CREATE_KERNEL, calc_force_kernel,
-		   base, nlist.get_n_ientry(), nlist.get_ientry(), nlist.get_tile_indj(),
-		   nlist.get_tile_excl(), stride, this->vdwparam, this->nvdwparam, xyzq, this->vdwtype,
-		   cudaBlock.getNumBlock(), cudaBlock.getBixlam(), cudaBlock.getBlockType(),
-		   this->biflam, this->biflam2, force);
+			       this->vdwParamTexObj,
 #endif
-
-    base += (nthread/warpsize)*nblock;
-
-    cudaCheck(cudaGetLastError());
-  }
-  */
+			       xyzq, stride, force,
+			       this->energyVirial.getVirialPointer(),
+			       this->energyVirial.getEnergyPointer(this->strVdw),
+			       this->energyVirial.getEnergyPointer(this->strElec),
+			       &cudaBlock, this->biflam, this->biflam2);
   
   // Convert biflam and biflam2 into double precision and add to cudaBlock.biflam -arrays
   merge_biflam_kernel<<< (cudaBlock.getNumBlock()-1)/64+1, 64, 0, stream >>>

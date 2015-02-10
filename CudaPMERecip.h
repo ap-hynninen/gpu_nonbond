@@ -1,13 +1,15 @@
-#ifndef GRID_H
-#define GRID_H
+#ifndef CUDAPMERECIP_H
+#define CUDAPMERECIP_H
 
 #include <cuda.h>
 #include <cufft.h>
 #if CUDA_VERSION >= 6000
 #include <cufftXt.h>
 #endif
+#include <string>
 #include "Bspline.h"
 #include "Matrix3d.h"
+#include "CudaEnergyVirial.h"
 
 // CCELEC is 1/ (4 pi eps ) in AKMA units, conversion from SI
 // units: CCELEC = e*e*Na / (4*pi*eps*1Kcal*1A)
@@ -21,7 +23,9 @@
 //       CCELEC_discover = 332.054D0    , &
 //       CCELEC_namd     = 332.0636D0   
 const double ccelec = 332.0716;
+const double half_ccelec = 0.5*ccelec;
 
+/*
 struct RecipEnergyVirial_t {
   // Energy
   double energy;
@@ -30,6 +34,7 @@ struct RecipEnergyVirial_t {
   // Virials
   double virial[6];
 };
+*/
 
 enum FFTtype {COLUMN, SLAB, BOX};
 
@@ -39,7 +44,7 @@ enum FFTtype {COLUMN, SLAB, BOX};
 // CT2 = Calculation Type (complex)
 //
 template <typename AT, typename CT, typename CT2>
-class Grid {
+class CudaPMERecip {
 
 public:
 
@@ -129,9 +134,14 @@ private:
   CT* prefac_z;
 
   // Host and device versions of energy and virials
-  RecipEnergyVirial_t *h_energy_virial;
-  RecipEnergyVirial_t *d_energy_virial;
+  //RecipEnergyVirial_t *h_energy_virial;
+  //RecipEnergyVirial_t *d_energy_virial;
 
+  // Energy terms
+  CudaEnergyVirial& energyVirial;
+  std::string strRecip;
+  std::string strSelf;
+  
   void init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 	  bool y_land_locked, bool z_land_locked);
 
@@ -140,9 +150,10 @@ private:
   void calc_prefac();
 
  public:
-  Grid(int nfftx, int nffty, int nfftz, int order, FFTtype fft_type, int nnode, int mynode, 
+  CudaPMERecip(int nfftx, int nffty, int nfftz, int order, FFTtype fft_type, int nnode, int mynode,
+       CudaEnergyVirial& energyVirial, const char* nameRecip, const char* nameSelf,
        cudaStream_t stream=0);
-  ~Grid();
+  ~CudaPMERecip();
 
   void print_info();
 
@@ -154,7 +165,7 @@ private:
   void scalar_sum(const double* recip, const double kappa,
 		  const bool calc_energy, const bool calc_virial);
 
-  void calc_self_energy(const float4 *xyzq, const int ncoord);
+  void calc_self_energy(const float4 *xyzq, const int ncoord, const double kappa);
 
   void gather_force(const int ncoord, const double* recip, const Bspline<CT> &bspline,
 		    const int stride, CT* force);
@@ -163,10 +174,10 @@ private:
     void gather_force(const float4 *xyzq, const int ncoord, const double* recip,
 		      const int stride, FT* force);
 
-  void clear_energy_virial();
-  void get_energy_virial(const double kappa,
-			 const bool prev_calc_energy, const bool prev_calc_virial,
-			 double& energy, double& energy_self, double *virial);
+  //void clear_energy_virial();
+  //void get_energy_virial(const double kappa,
+  //			 const bool prev_calc_energy, const bool prev_calc_virial,
+  //			 double& energy, double& energy_self, double *virial);
 
   void x_fft_r2c(CT2 *data);
   void x_fft_c2r(CT2 *data);
@@ -186,4 +197,4 @@ private:
 
 };
 
-#endif // GRID_H
+#endif // CUDAPMERECIP_H

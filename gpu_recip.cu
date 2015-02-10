@@ -3,7 +3,7 @@
 #include "cuda_utils.h"
 #include "XYZQ.h"
 #include "Bspline.h"
-#include "Grid.h"
+#include "CudaPMERecip.h"
 #include "Force.h"
 
 void test4();
@@ -108,34 +108,41 @@ void test4() {
   Force<float> force_comp("test_data/force_recip_4.txt");
   Force<float> force(ncoord);
 
+  CudaEnergyVirial energyVirial;
+  
   // Load coordinates
   XYZQ xyzq("test_data/xyzq.txt");
 
-  // Create Bspline and Grid objects
+  // Create Bspline and CudaPMERecip objects
   Bspline<float> bspline(ncoord, order, nfftx, nffty, nfftz);
-  //Grid<long long int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
-  Grid<int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
+  //CudaPMERecip<long long int, float, float2> CudaPMERecip(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
+  CudaPMERecip<int, float, float2> PMErecip(nfftx, nffty, nfftz, order, fft_type, numnode, mynode,
+					    energyVirial, "recip", "self");
 
   double tol = 1.0e-5;
   double max_diff;
 
   bspline.set_recip<double>(recip);
 
-  grid.print_info();
+  PMErecip.print_info();
 
   bspline.fill_bspline(xyzq.xyzq, xyzq.ncoord);
 
   // Warm up
-  //grid.spread_charge(xyzq.ncoord, bspline);
-  grid.clear_energy_virial();
-  grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
-  grid.r2c_fft();
-  grid.scalar_sum(recip, kappa, true, true);
-  grid.c2r_fft();
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
+  //PMErecip.spread_charge(xyzq.ncoord, bspline);
+  //PMErecip.clear_energy_virial();
+  energyVirial.clear();
+  PMErecip.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
+  PMErecip.r2c_fft();
+  PMErecip.scalar_sum(recip, kappa, true, true);
+  PMErecip.c2r_fft();
+  PMErecip.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
 
-  double energy, energy_self, virial[9];
-  grid.get_energy_virial(kappa, true, true, energy, energy_self, virial);
+  double energy, virial[9];
+  //PMErecip.get_energy_virial(kappa, true, true, energy, energy_self, virial);
+  energyVirial.copyToHost();
+  energy = energyVirial.getEnergy("recip");
+  energyVirial.getVirial(virial);
   tol = 1.2e-3;
   max_diff = fabs(energy_comp - energy);
   if (isnan(energy) || max_diff > tol) {
@@ -168,10 +175,10 @@ void test4() {
 
 
   // Run
-  //grid.spread_charge(xyzq.ncoord, bspline);
-  grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
+  //PMErecip.spread_charge(xyzq.ncoord, bspline);
+  PMErecip.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
   /*
-  if (!q.compare(grid.charge_grid, tol, max_diff)) {
+  if (!q.compare(PMErecip.charge_grid, tol, max_diff)) {
     std::cout<< "q comparison FAILED" << std::endl;
     return;
   } else {
@@ -180,19 +187,19 @@ void test4() {
   */
 
   tol = 0.002;
-  grid.r2c_fft();
+  PMErecip.r2c_fft();
   /*
   if (fft_type == BOX) {
     Matrix3d<float2> q_zfft_t(nfftx/2+1, nffty, nfftz);
     q_zfft.transpose_xyz_yzx(&q_zfft_t);
-    if (!q_zfft_t.compare(grid.fft_grid, tol, max_diff)) {
+    if (!q_zfft_t.compare(PMErecip.fft_grid, tol, max_diff)) {
       std::cout<< "q_zfft_t comparison FAILED" << std::endl;
       return;
     } else {
       std::cout<< "q_zfft_t comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
     }
   } else {
-    if (!q_zfft.compare(grid.zfft_grid, tol, max_diff)) {
+    if (!q_zfft.compare(PMErecip.zfft_grid, tol, max_diff)) {
       std::cout<< "q_zfft comparison FAILED" << std::endl;
       return;
     } else {
@@ -202,19 +209,19 @@ void test4() {
   */
 
   tol = 1.0e-6;
-  grid.scalar_sum(recip, kappa, false, false);
+  PMErecip.scalar_sum(recip, kappa, false, false);
   /*
   if (fft_type == BOX) {
     Matrix3d<float2> q_zfft_summed_t(nfftx/2+1, nffty, nfftz);
     q_zfft_summed.transpose_xyz_yzx(&q_zfft_summed_t);
-    if (!q_zfft_summed_t.compare(grid.fft_grid, tol, max_diff)) {
+    if (!q_zfft_summed_t.compare(PMErecip.fft_grid, tol, max_diff)) {
       std::cout<< "q_zfft_summed_t comparison FAILED" << std::endl;
       return;
     } else {
       std::cout<< "q_zfft_summed_t comparison OK (tolerance "<<tol<<" max difference "<<max_diff << ")" << std::endl;
     }
   } else {
-    if (!q_zfft_summed.compare(grid.zfft_grid, tol, max_diff)) {
+    if (!q_zfft_summed.compare(PMErecip.zfft_grid, tol, max_diff)) {
       std::cout<< "q_zfft_summed comparison FAILED" << std::endl;
       return;
     } else {
@@ -225,8 +232,8 @@ void test4() {
 
   /*
   tol = 1.0e-6;
-  grid.z_fft_c2c(grid.zfft_grid->data, CUFFT_INVERSE);
-  if (!q_comp7.compare(grid.zfft_grid, tol, max_diff)) {
+  PMErecip.z_fft_c2c(PMErecip.zfft_grid->data, CUFFT_INVERSE);
+  if (!q_comp7.compare(PMErecip.zfft_grid, tol, max_diff)) {
     std::cout<< "q_comp7 comparison FAILED" << std::endl;
     return;
   } else {
@@ -234,9 +241,9 @@ void test4() {
   }
 
   tol = 3.0e-6;
-  grid.zfft_grid->transpose_xyz_zxy(grid.yfft_grid);
-  grid.y_fft_c2c(grid.yfft_grid->data, CUFFT_INVERSE);
-  if (!q_comp9.compare(grid.yfft_grid, tol, max_diff)) {
+  PMErecip.zfft_grid->transpose_xyz_zxy(PMErecip.yfft_grid);
+  PMErecip.y_fft_c2c(PMErecip.yfft_grid->data, CUFFT_INVERSE);
+  if (!q_comp9.compare(PMErecip.yfft_grid, tol, max_diff)) {
     std::cout<< "q_comp9 comparison FAILED" << std::endl;
     return;
   } else {
@@ -244,8 +251,8 @@ void test4() {
   }
 
   tol = 3.0e-6;
-  grid.yfft_grid->transpose_xyz_zxy(grid.xfft_grid);
-  if (!q_comp10.compare(grid.xfft_grid, tol, max_diff)) {
+  PMErecip.yfft_grid->transpose_xyz_zxy(PMErecip.xfft_grid);
+  if (!q_comp10.compare(PMErecip.xfft_grid, tol, max_diff)) {
     std::cout<< "q_comp10 comparison FAILED" << std::endl;
     return;
   } else {
@@ -254,10 +261,10 @@ void test4() {
   */
 
   tol = 1.0e-5;
-  grid.c2r_fft();
+  PMErecip.c2r_fft();
   /*
-  grid.solved_grid->scale(1.0f/(float)(nfftx*nffty*nfftz));
-  if (!q.compare(grid.solved_grid, tol, max_diff)) {
+  PMErecip.solved_grid->scale(1.0f/(float)(nfftx*nffty*nfftz));
+  if (!q.compare(PMErecip.solved_grid, tol, max_diff)) {
     std::cout<< "q comparison FAILED" << std::endl;
     return;
   } else {
@@ -266,7 +273,7 @@ void test4() {
   */
 
   /*
-  if (!q_solved.compare(grid.solved_grid, tol, max_diff)) {
+  if (!q_solved.compare(PMErecip.solved_grid, tol, max_diff)) {
     std::cout<< "q_solved comparison FAILED" << std::endl;
     return;
   } else {
@@ -275,8 +282,8 @@ void test4() {
   */
 
   // Calculate forces
-  //  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
+  //  PMErecip.gather_force(ncoord, recip, bspline, force.stride, force.data);
+  PMErecip.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
 
   tol = 3.3e-4;
   if (!force_comp.compare(force, tol, max_diff)) {
@@ -333,29 +340,37 @@ void test6() {
   Force<float> force_comp("test_data/force_recip_6.txt");
   Force<float> force(ncoord);
 
+  CudaEnergyVirial energyVirial;
+
   // Load coordinates
   XYZQ xyzq("test_data/xyzq.txt");
 
-  // Create Bspline and Grid objects
-  Grid<int, float, float2> grid(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
+  // Create Bspline and CudaPMERecip objects
+  CudaPMERecip<int, float, float2> PMErecip(nfftx, nffty, nfftz, order, fft_type, numnode, mynode,
+					    energyVirial, "recip", "self");
 
   double tol = 1.0e-5;
   double max_diff;
 
-  grid.print_info();
+  PMErecip.print_info();
 
   // Warm up
-  //grid.spread_charge(xyzq.ncoord, bspline);
-  grid.clear_energy_virial();
-  grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
-  grid.r2c_fft();
-  grid.scalar_sum(recip, kappa, true, true);
-  grid.c2r_fft();
-  //grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
+  //PMErecip.spread_charge(xyzq.ncoord, bspline);
+  //PMErecip.clear_energy_virial();
+  energyVirial.clear();
+  PMErecip.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
+  PMErecip.r2c_fft();
+  PMErecip.scalar_sum(recip, kappa, true, true);
+  PMErecip.c2r_fft();
+  //PMErecip.gather_force(ncoord, recip, bspline, force.stride, force.data);
+  PMErecip.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
 
-  double energy, energy_self, virial[9];
-  grid.get_energy_virial(kappa, true, true, energy, energy_self, virial);
+  double energy, virial[9];
+  //PMErecip.get_energy_virial(kappa, true, true, energy, energy_self, virial);
+  energyVirial.copyToHost();
+  energy = energyVirial.getEnergy("recip");
+  energyVirial.getVirial(virial);
+
   tol = 1.3e-3;
   max_diff = fabs(energy_comp - energy);
   if (isnan(energy) || max_diff > tol) {
@@ -388,10 +403,10 @@ void test6() {
 
 
   // Run
-  //grid.spread_charge(xyzq.ncoord, bspline);
-  grid.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
+  //PMErecip.spread_charge(xyzq.ncoord, bspline);
+  PMErecip.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
   /*
-  if (!q.compare(grid.charge_grid, tol, max_diff)) {
+  if (!q.compare(PMErecip.charge_grid, tol, max_diff)) {
     std::cout<< "q comparison FAILED" << std::endl;
     return;
   } else {
@@ -400,19 +415,19 @@ void test6() {
   */
 
   tol = 0.002;
-  grid.r2c_fft();
+  PMErecip.r2c_fft();
   /*
   if (fft_type == BOX) {
     Matrix3d<float2> q_zfft_t(nfftx/2+1, nffty, nfftz);
     q_zfft.transpose_xyz_yzx(&q_zfft_t);
-    if (!q_zfft_t.compare(grid.fft_grid, tol, max_diff)) {
+    if (!q_zfft_t.compare(PMErecip.fft_grid, tol, max_diff)) {
       std::cout<< "q_zfft_t comparison FAILED" << std::endl;
       return;
     } else {
       std::cout<< "q_zfft_t comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
     }
   } else {
-    if (!q_zfft.compare(grid.zfft_grid, tol, max_diff)) {
+    if (!q_zfft.compare(PMErecip.zfft_grid, tol, max_diff)) {
       std::cout<< "q_zfft comparison FAILED" << std::endl;
       return;
     } else {
@@ -422,19 +437,19 @@ void test6() {
   */
 
   tol = 1.0e-6;
-  grid.scalar_sum(recip, kappa, false, false);
+  PMErecip.scalar_sum(recip, kappa, false, false);
   /*
   if (fft_type == BOX) {
     Matrix3d<float2> q_zfft_summed_t(nfftx/2+1, nffty, nfftz);
     q_zfft_summed.transpose_xyz_yzx(&q_zfft_summed_t);
-    if (!q_zfft_summed_t.compare(grid.fft_grid, tol, max_diff)) {
+    if (!q_zfft_summed_t.compare(PMErecip.fft_grid, tol, max_diff)) {
       std::cout<< "q_zfft_summed_t comparison FAILED" << std::endl;
       return;
     } else {
       std::cout<< "q_zfft_summed_t comparison OK (tolerance "<<tol<<" max difference "<<max_diff << ")" << std::endl;
     }
   } else {
-    if (!q_zfft_summed.compare(grid.zfft_grid, tol, max_diff)) {
+    if (!q_zfft_summed.compare(PMErecip.zfft_grid, tol, max_diff)) {
       std::cout<< "q_zfft_summed comparison FAILED" << std::endl;
       return;
     } else {
@@ -445,8 +460,8 @@ void test6() {
 
   /*
   tol = 1.0e-6;
-  grid.z_fft_c2c(grid.zfft_grid->data, CUFFT_INVERSE);
-  if (!q_comp7.compare(grid.zfft_grid, tol, max_diff)) {
+  PMErecip.z_fft_c2c(PMErecip.zfft_grid->data, CUFFT_INVERSE);
+  if (!q_comp7.compare(PMErecip.zfft_grid, tol, max_diff)) {
     std::cout<< "q_comp7 comparison FAILED" << std::endl;
     return;
   } else {
@@ -454,9 +469,9 @@ void test6() {
   }
 
   tol = 3.0e-6;
-  grid.zfft_grid->transpose_xyz_zxy(grid.yfft_grid);
-  grid.y_fft_c2c(grid.yfft_grid->data, CUFFT_INVERSE);
-  if (!q_comp9.compare(grid.yfft_grid, tol, max_diff)) {
+  PMErecip.zfft_grid->transpose_xyz_zxy(PMErecip.yfft_grid);
+  PMErecip.y_fft_c2c(PMErecip.yfft_grid->data, CUFFT_INVERSE);
+  if (!q_comp9.compare(PMErecip.yfft_grid, tol, max_diff)) {
     std::cout<< "q_comp9 comparison FAILED" << std::endl;
     return;
   } else {
@@ -464,8 +479,8 @@ void test6() {
   }
 
   tol = 3.0e-6;
-  grid.yfft_grid->transpose_xyz_zxy(grid.xfft_grid);
-  if (!q_comp10.compare(grid.xfft_grid, tol, max_diff)) {
+  PMErecip.yfft_grid->transpose_xyz_zxy(PMErecip.xfft_grid);
+  if (!q_comp10.compare(PMErecip.xfft_grid, tol, max_diff)) {
     std::cout<< "q_comp10 comparison FAILED" << std::endl;
     return;
   } else {
@@ -474,10 +489,10 @@ void test6() {
   */
 
   tol = 1.0e-5;
-  grid.c2r_fft();
+  PMErecip.c2r_fft();
   /*
-  grid.solved_grid->scale(1.0f/(float)(nfftx*nffty*nfftz));
-  if (!q.compare(grid.solved_grid, tol, max_diff)) {
+  PMErecip.solved_grid->scale(1.0f/(float)(nfftx*nffty*nfftz));
+  if (!q.compare(PMErecip.solved_grid, tol, max_diff)) {
     std::cout<< "q comparison FAILED" << std::endl;
     return;
   } else {
@@ -486,7 +501,7 @@ void test6() {
   */
 
   /*
-  if (!q_solved.compare(grid.solved_grid, tol, max_diff)) {
+  if (!q_solved.compare(PMErecip.solved_grid, tol, max_diff)) {
     std::cout<< "q_solved comparison FAILED" << std::endl;
     return;
   } else {
@@ -495,8 +510,8 @@ void test6() {
   */
 
   // Calculate forces
-  //  grid.gather_force(ncoord, recip, bspline, force.stride, force.data);
-  grid.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
+  //  PMErecip.gather_force(ncoord, recip, bspline, force.stride, force.data);
+  PMErecip.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
 
   tol = 3.6e-4;
   if (!force_comp.compare(force, tol, max_diff)) {
