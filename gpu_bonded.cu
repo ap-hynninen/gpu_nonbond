@@ -264,6 +264,7 @@ void test() {
       force_fp.convert(force);
       energyVirial.calcVirial(ncoord, xyzq.xyzq, boxx, boxy, boxz, force.stride(), force.xyz());
       energyVirial.copyToHost();
+      cudaCheck(cudaDeviceSynchronize());
       results.energy_bond = energyVirial.getEnergy("bond");
       results.energy_ureyb = energyVirial.getEnergy("ureyb");
       results.energy_angle = energyVirial.getEnergy("angle");
@@ -318,6 +319,7 @@ void test() {
 
       energyVirial.calcVirial(ncoord, xyzq.xyzq, boxx, boxy, boxz, force.stride(), force.xyz());
       energyVirial.copyToHost();
+      cudaCheck(cudaDeviceSynchronize());
       results.energy_bond = energyVirial.getEnergy("bond");
       results.energy_ureyb = energyVirial.getEnergy("ureyb");
       results.energy_angle = energyVirial.getEnergy("angle");

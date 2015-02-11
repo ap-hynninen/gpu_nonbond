@@ -25,17 +25,6 @@
 const double ccelec = 332.0716;
 const double half_ccelec = 0.5*ccelec;
 
-/*
-struct RecipEnergyVirial_t {
-  // Energy
-  double energy;
-  double energy_self;
-
-  // Virials
-  double virial[6];
-};
-*/
-
 enum FFTtype {COLUMN, SLAB, BOX};
 
 //
@@ -133,9 +122,10 @@ private:
   CT* prefac_y;
   CT* prefac_z;
 
-  // Host and device versions of energy and virials
-  //RecipEnergyVirial_t *h_energy_virial;
-  //RecipEnergyVirial_t *d_energy_virial;
+#ifdef USE_TEXTURE_OBJECTS
+  bool gridTexObjActive;
+  cudaTextureObject_t gridTexObj;
+#endif
 
   // Energy terms
   CudaEnergyVirial& energyVirial;
@@ -155,6 +145,8 @@ private:
        cudaStream_t stream=0);
   ~CudaPMERecip();
 
+  void setup_grid_texture(CT *data, const int data_len);
+  
   void print_info();
 
   void set_stream(cudaStream_t stream);
@@ -174,11 +166,6 @@ private:
     void gather_force(const float4 *xyzq, const int ncoord, const double* recip,
 		      const int stride, FT* force);
 
-  //void clear_energy_virial();
-  //void get_energy_virial(const double kappa,
-  //			 const bool prev_calc_energy, const bool prev_calc_virial,
-  //			 double& energy, double& energy_self, double *virial);
-
   void x_fft_r2c(CT2 *data);
   void x_fft_c2r(CT2 *data);
   void y_fft_c2c(CT2 *data, const int direction);
@@ -191,9 +178,6 @@ private:
   int get_nfftz() {return nfftz;}
   int get_order() {return order;}
   void set_order(int order);
-
-  //  void test_copy();
-  //  void test_transpose();
 
 };
 

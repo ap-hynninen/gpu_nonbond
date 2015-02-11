@@ -28,9 +28,10 @@ class CudaDomdecRecip : public DomdecRecip {
   }
 
  public:
-  CudaDomdecRecip(const int nfftx, const int nffty, const int nfftz, const int order, const double kappa, CudaEnergyVirial& energyVirial) : 
+  CudaDomdecRecip(const int nfftx, const int nffty, const int nfftz, const int order, const double kappa,
+		  CudaEnergyVirial& energyVirial, const char* nameRecip, const char* nameSelf) : 
     DomdecRecip(nfftx, nffty, nfftz, order, kappa), energyVirial(energyVirial),
-    PMErecip(nfftx, nffty, nfftz, order, BOX, 1, 0, energyVirial, "recip", "self") {}
+    PMErecip(nfftx, nffty, nfftz, order, BOX, 1, 0, energyVirial, nameRecip, nameSelf) {}
 
   ~CudaDomdecRecip() {}
 

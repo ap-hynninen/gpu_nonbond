@@ -35,11 +35,13 @@ public:
 
 
   void clear(cudaStream_t stream=0);
+  void clearEnergy(cudaStream_t stream=0);
+  void clearVirial(cudaStream_t stream=0);
   void calcVirial(const int ncoord, const float4 *xyzq,
 		  const double boxx, const double boxy, const double boxz,
 		  const int stride, const double *force,
 		  cudaStream_t stream=0);
-  void copyToHost();
+  void copyToHost(cudaStream_t stream=0);
 
   Virial_t* getVirialPointer();
   double* getEnergyPointer(std::string& name);

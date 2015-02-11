@@ -191,6 +191,7 @@ void test() {
   double virtensor[9];
   //dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
   energyVirial.copyToHost();
+  cudaCheck(cudaDeviceSynchronize());
   energy_vdw = energyVirial.getEnergy("vdw");
   energy_elec = energyVirial.getEnergy("elec");
   //energy_excl = energyVirial.getEnergy("excl");
@@ -251,6 +252,7 @@ void test() {
   energyVirial.calcVirial(ncoord, xyzq_sorted.xyzq, boxx, boxy, boxz, force.stride(), force.xyz());
 
   energyVirial.copyToHost();
+  cudaCheck(cudaDeviceSynchronize());
   energy_vdw = energyVirial.getEnergy("vdw");
   energy_elec = energyVirial.getEnergy("elec");
   //energy_excl = energyVirial.getEnergy("excl");
@@ -335,6 +337,7 @@ void test() {
   //dirblock.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
   //cudaCheck(cudaDeviceSynchronize());
   energyVirial.copyToHost();
+  cudaCheck(cudaDeviceSynchronize());
   energy_vdw = energyVirial.getEnergy("vdw");
   energy_elec = energyVirial.getEnergy("elec");
   //energy_excl = energyVirial.getEnergy("excl");

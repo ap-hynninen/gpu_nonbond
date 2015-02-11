@@ -64,6 +64,7 @@ endif
 
 endif  # MPI_FOUND
 
+# NOTE: CUDA texture objects require Kepler GPU + CUDA 5.0
 DEFS += -D USE_TEXTURE_OBJECTS
 
 OBJS_RECIP = CudaPMERecip.o Bspline.o XYZQ.o Matrix3d.o Force.o reduce.o cuda_utils.o gpu_recip.o \

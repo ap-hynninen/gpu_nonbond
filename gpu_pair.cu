@@ -122,6 +122,7 @@ void calcPair(const double L, const double kappa, const int nfft, const int orde
   double energy, energy_self, virial[9];
   //grid.get_energy_virial(kappa, true, true, energy, energy_self, virial);
   energyVirial.copyToHost();
+  cudaCheck(cudaDeviceSynchronize());
   energy = energyVirial.getEnergy("recip");
   energy_self = energyVirial.getEnergy("self");
   energyVirial.getVirial(virial);

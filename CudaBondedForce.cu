@@ -1430,65 +1430,6 @@ void CudaBondedForce<AT, CT>::calc_force(const float4 *xyzq,
 
 }
 
-/*
-//
-// Sets Energies and virials to zero
-//
-template <typename AT, typename CT>
-void CudaBondedForce<AT, CT>::clear_energy_virial(cudaStream_t stream) {
-  h_energy_virial->energy_bond = 0.0;
-  h_energy_virial->energy_ureyb = 0.0;
-  h_energy_virial->energy_angle = 0.0;
-  h_energy_virial->energy_dihe = 0.0;
-  h_energy_virial->energy_imdihe = 0.0;
-  h_energy_virial->energy_cmap = 0.0;
-  for (int i=0;i < 27*3;i++) {
-#ifdef USE_DP_SFORCE
-    h_energy_virial->sforce[i] = 0.0;
-#else
-    h_energy_virial->sforce[i] = 0ll;
-#endif
-  }
-  cudaCheck(cudaMemcpyToSymbolAsync(d_energy_virial, h_energy_virial, sizeof(BondedEnergyVirial_t),
-				    0, cudaMemcpyHostToDevice, stream));
-}
-
-//
-// Read Energies and virials
-// prev_calc_energy = true, if energy was calculated when the force kernel was last called
-// prev_calc_virial = true, if virial was calculated when the force kernel was last called
-//
-template <typename AT, typename CT>
-void CudaBondedForce<AT, CT>::get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
-					    double *energy_bond, double *energy_ureyb,
-					    double *energy_angle,
-					    double *energy_dihe, double *energy_imdihe,
-					    double *energy_cmap,
-					    double *sforce) {
-  if (prev_calc_energy && prev_calc_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, sizeof(BondedEnergyVirial_t)));
-  } else if (prev_calc_energy) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial, d_energy_virial, 6*sizeof(double)));
-  } else if (prev_calc_virial) {
-    cudaCheck(cudaMemcpyFromSymbol(h_energy_virial->sforce, d_energy_virial, 27*3*sizeof(long long int),
-				   6*sizeof(double)));
-  }
-  *energy_bond = h_energy_virial->energy_bond;
-  *energy_ureyb = h_energy_virial->energy_ureyb;
-  *energy_angle = h_energy_virial->energy_angle;
-  *energy_dihe = h_energy_virial->energy_dihe;
-  *energy_imdihe = h_energy_virial->energy_imdihe;
-  *energy_cmap = h_energy_virial->energy_cmap;
-  for (int i=0;i < 27*3;i++) {
-#ifdef USE_DP_SFORCE    
-    sforce[i] = h_energy_virial->sforce[i];
-#else
-    sforce[i] = ((double)h_energy_virial->sforce[i])*INV_FORCE_SCALE_VIR_CPU;
-#endif
-  }
-}
-*/
-
 //
 // Explicit instances of CudaBondedForce
 //

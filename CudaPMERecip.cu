@@ -1251,7 +1251,9 @@ __global__ void scalar_sum_ortho_kernel(const int nfft1, const int nfft2, const 
 
 }
 
-texture<float, 1, cudaReadModeElementType> grid_texref;
+#ifndef USE_TEXTURE_OBJECTS
+texture<float, 1, cudaReadModeElementType> gridTexRef;
+#endif
 
 // Per atom data structure for the gather_force -kernels
 template <typename T, int order>
@@ -1388,6 +1390,9 @@ __global__ void gather_force_4_ortho_kernel(const int ncoord,
 					    const float4 *thetaz,
 					    const float4 *dthetax, const float4 *dthetay,
 					    const float4 *dthetaz,
+#ifdef USE_TEXTURE_OBJECTS
+					    const cudaTextureObject_t gridTexObj,
+#endif
 					    const int stride,
 					    CT *force) {
   // Shared memory
@@ -1477,15 +1482,26 @@ __global__ void gather_force_4_ortho_kernel(const int ncoord,
 
     if (iy1 >= nffty) iy1 -= nffty;
 
-    float q0 = tex1Dfetch(grid_texref, ix0 + (iy0 + iz0*ysize)*xsize);
-    float q1 = tex1Dfetch(grid_texref, ix1 + (iy0 + iz0*ysize)*xsize);
-    float q2 = tex1Dfetch(grid_texref, ix2 + (iy0 + iz0*ysize)*xsize);
-    float q3 = tex1Dfetch(grid_texref, ix3 + (iy0 + iz0*ysize)*xsize);
-    float q4 = tex1Dfetch(grid_texref, ix0 + (iy1 + iz0*ysize)*xsize);
-    float q5 = tex1Dfetch(grid_texref, ix1 + (iy1 + iz0*ysize)*xsize);
-    float q6 = tex1Dfetch(grid_texref, ix2 + (iy1 + iz0*ysize)*xsize);
-    float q7 = tex1Dfetch(grid_texref, ix3 + (iy1 + iz0*ysize)*xsize);
-
+#ifdef USE_TEXTURE_OBJECTS
+    float q0 = tex1Dfetch<float>(gridTexObj, ix0 + (iy0 + iz0*ysize)*xsize);
+    float q1 = tex1Dfetch<float>(gridTexObj, ix1 + (iy0 + iz0*ysize)*xsize);
+    float q2 = tex1Dfetch<float>(gridTexObj, ix2 + (iy0 + iz0*ysize)*xsize);
+    float q3 = tex1Dfetch<float>(gridTexObj, ix3 + (iy0 + iz0*ysize)*xsize);
+    float q4 = tex1Dfetch<float>(gridTexObj, ix0 + (iy1 + iz0*ysize)*xsize);
+    float q5 = tex1Dfetch<float>(gridTexObj, ix1 + (iy1 + iz0*ysize)*xsize);
+    float q6 = tex1Dfetch<float>(gridTexObj, ix2 + (iy1 + iz0*ysize)*xsize);
+    float q7 = tex1Dfetch<float>(gridTexObj, ix3 + (iy1 + iz0*ysize)*xsize);
+#else
+    float q0 = tex1Dfetch(gridTexRef, ix0 + (iy0 + iz0*ysize)*xsize);
+    float q1 = tex1Dfetch(gridTexRef, ix1 + (iy0 + iz0*ysize)*xsize);
+    float q2 = tex1Dfetch(gridTexRef, ix2 + (iy0 + iz0*ysize)*xsize);
+    float q3 = tex1Dfetch(gridTexRef, ix3 + (iy0 + iz0*ysize)*xsize);
+    float q4 = tex1Dfetch(gridTexRef, ix0 + (iy1 + iz0*ysize)*xsize);
+    float q5 = tex1Dfetch(gridTexRef, ix1 + (iy1 + iz0*ysize)*xsize);
+    float q6 = tex1Dfetch(gridTexRef, ix2 + (iy1 + iz0*ysize)*xsize);
+    float q7 = tex1Dfetch(gridTexRef, ix3 + (iy1 + iz0*ysize)*xsize);
+#endif
+    
     float thx0 = shmem[base].thetax[tx+0];
     float thx1 = shmem[base].thetax[tx+1];
     float thx2 = shmem[base].thetax[tx+2];
@@ -1598,6 +1614,9 @@ __global__ void gather_force_4_ortho_kernel(const float4 *xyzq, const int ncoord
 					    const int xsize, const int ysize, const int zsize,
 					    const float recip1, const float recip2, const float recip3,
 					    const float ccelec,
+#ifdef USE_TEXTURE_OBJECTS
+					    const cudaTextureObject_t gridTexObj,
+#endif
 					    const int stride,
 					    FT *force) {
 
@@ -1730,15 +1749,26 @@ __global__ void gather_force_4_ortho_kernel(const float4 *xyzq, const int ncoord
 
     if (iy1 >= nffty) iy1 -= nffty;
 
-    float q0 = tex1Dfetch(grid_texref, ix0 + (iy0 + iz0*ysize)*xsize);
-    float q1 = tex1Dfetch(grid_texref, ix1 + (iy0 + iz0*ysize)*xsize);
-    float q2 = tex1Dfetch(grid_texref, ix2 + (iy0 + iz0*ysize)*xsize);
-    float q3 = tex1Dfetch(grid_texref, ix3 + (iy0 + iz0*ysize)*xsize);
-    float q4 = tex1Dfetch(grid_texref, ix0 + (iy1 + iz0*ysize)*xsize);
-    float q5 = tex1Dfetch(grid_texref, ix1 + (iy1 + iz0*ysize)*xsize);
-    float q6 = tex1Dfetch(grid_texref, ix2 + (iy1 + iz0*ysize)*xsize);
-    float q7 = tex1Dfetch(grid_texref, ix3 + (iy1 + iz0*ysize)*xsize);
-
+#ifdef USE_TEXTURE_OBJECTS
+    float q0 = tex1Dfetch<float>(gridTexObj, ix0 + (iy0 + iz0*ysize)*xsize);
+    float q1 = tex1Dfetch<float>(gridTexObj, ix1 + (iy0 + iz0*ysize)*xsize);
+    float q2 = tex1Dfetch<float>(gridTexObj, ix2 + (iy0 + iz0*ysize)*xsize);
+    float q3 = tex1Dfetch<float>(gridTexObj, ix3 + (iy0 + iz0*ysize)*xsize);
+    float q4 = tex1Dfetch<float>(gridTexObj, ix0 + (iy1 + iz0*ysize)*xsize);
+    float q5 = tex1Dfetch<float>(gridTexObj, ix1 + (iy1 + iz0*ysize)*xsize);
+    float q6 = tex1Dfetch<float>(gridTexObj, ix2 + (iy1 + iz0*ysize)*xsize);
+    float q7 = tex1Dfetch<float>(gridTexObj, ix3 + (iy1 + iz0*ysize)*xsize);
+#else
+    float q0 = tex1Dfetch(gridTexRef, ix0 + (iy0 + iz0*ysize)*xsize);
+    float q1 = tex1Dfetch(gridTexRef, ix1 + (iy0 + iz0*ysize)*xsize);
+    float q2 = tex1Dfetch(gridTexRef, ix2 + (iy0 + iz0*ysize)*xsize);
+    float q3 = tex1Dfetch(gridTexRef, ix3 + (iy0 + iz0*ysize)*xsize);
+    float q4 = tex1Dfetch(gridTexRef, ix0 + (iy1 + iz0*ysize)*xsize);
+    float q5 = tex1Dfetch(gridTexRef, ix1 + (iy1 + iz0*ysize)*xsize);
+    float q6 = tex1Dfetch(gridTexRef, ix2 + (iy1 + iz0*ysize)*xsize);
+    float q7 = tex1Dfetch(gridTexRef, ix3 + (iy1 + iz0*ysize)*xsize);
+#endif
+    
     float thx0 = shmem[base].thetax[tx+0];
     float thx1 = shmem[base].thetax[tx+1];
     float thx2 = shmem[base].thetax[tx+2];
@@ -1871,6 +1901,9 @@ __global__ void gather_force_6_ortho_kernel(const float4 *xyzq, const int ncoord
 					    const int xsize, const int ysize, const int zsize,
 					    const float recip1, const float recip2, const float recip3,
 					    const float ccelec,
+#ifdef USE_TEXTURE_OBJECTS
+					    const cudaTextureObject_t gridTexObj,
+#endif
 					    const int stride,
 					    FT *force) {
 
@@ -2015,7 +2048,11 @@ __global__ void gather_force_6_ortho_kernel(const float4 *xyzq, const int ncoord
       if (ix >= nfftx) ix -= nfftx;
       if (iy >= nffty) iy -= nffty;
       if (iz >= nfftz) iz -= nfftz;
-      float q0 = tex1Dfetch(grid_texref, ix + (iy + iz*ysize)*xsize);
+#ifdef USE_TEXTURE_OBJECTS
+      float q0 = tex1Dfetch<float>(gridTexObj, ix + (iy + iz*ysize)*xsize);
+#else
+      float q0 = tex1Dfetch(gridTexRef, ix + (iy + iz*ysize)*xsize);
+#endif
       float thx0 = shmem[base].thetax[tx];
       float thy0 = shmem[base].thetay[ty];
       float thz0 = shmem[base].thetaz[tz];
@@ -2028,95 +2065,6 @@ __global__ void gather_force_6_ortho_kernel(const float4 *xyzq, const int ncoord
     }
 
     //-------------------------
-
-    /*
-    int ix0 = shmem[base].ix + tx;
-    int iy0 = shmem[base].iy + ty;
-    int iz0 = shmem[base].iz + tz;
-
-    int ix1 = ix0 + 1;
-    int ix2 = ix0 + 2;
-    int ix3 = ix0 + 3;
-    int ix3 = ix0 + 4;
-    int ix3 = ix0 + 5;
-
-    int iy1 = iy0 + 3;
-
-    if (ix0 >= nfftx) ix0 -= nfftx;
-    if (iy0 >= nffty) iy0 -= nffty;
-    if (iz0 >= nfftz) iz0 -= nfftz;
-
-    if (ix1 >= nfftx) ix1 -= nfftx;
-    if (ix2 >= nfftx) ix2 -= nfftx;
-    if (ix3 >= nfftx) ix3 -= nfftx;
-
-    if (iy1 >= nffty) iy1 -= nffty;
-
-    float q0 = tex1Dfetch(grid_texref, ix0 + (iy0 + iz0*ysize)*xsize);
-    float q1 = tex1Dfetch(grid_texref, ix1 + (iy0 + iz0*ysize)*xsize);
-    float q2 = tex1Dfetch(grid_texref, ix2 + (iy0 + iz0*ysize)*xsize);
-    float q3 = tex1Dfetch(grid_texref, ix3 + (iy0 + iz0*ysize)*xsize);
-    float q4 = tex1Dfetch(grid_texref, ix0 + (iy1 + iz0*ysize)*xsize);
-    float q5 = tex1Dfetch(grid_texref, ix1 + (iy1 + iz0*ysize)*xsize);
-    float q6 = tex1Dfetch(grid_texref, ix2 + (iy1 + iz0*ysize)*xsize);
-    float q7 = tex1Dfetch(grid_texref, ix3 + (iy1 + iz0*ysize)*xsize);
-
-    float thx0 = shmem[base].thetax[tx+0];
-    float thx1 = shmem[base].thetax[tx+1];
-    float thx2 = shmem[base].thetax[tx+2];
-    float thx3 = shmem[base].thetax[tx+3];
-    float thy0 = shmem[base].thetay[ty];
-    float thy1 = shmem[base].thetay[ty+2];
-    float thz0 = shmem[base].thetaz[tz];
-
-    float dthx0 = shmem[base].dthetax[tx+0];
-    float dthx1 = shmem[base].dthetax[tx+1];
-    float dthx2 = shmem[base].dthetax[tx+2];
-    float dthx3 = shmem[base].dthetax[tx+3];
-    float dthy0 = shmem[base].dthetay[ty];
-    float dthy1 = shmem[base].dthetay[ty+2];
-    float dthz0 = shmem[base].dthetaz[tz];
-
-    float thy0_thz0  = thy0 * thz0;
-    float dthy0_thz0 = dthy0 * thz0;
-    float thy0_dthz0 = thy0 * dthz0;
-
-    float thy1_thz0  = thy1 * thz0;
-    float dthy1_thz0 = dthy1 * thz0;
-    float thy1_dthz0 = thy1 * dthz0;
-
-    float f1 = dthx0 * thy0_thz0 * q0;
-    float f2 = thx0 * dthy0_thz0 * q0;
-    float f3 = thx0 * thy0_dthz0 * q0;
-
-    f1 += dthx1 * thy0_thz0 * q1;
-    f2 += thx1 * dthy0_thz0 * q1;
-    f3 += thx1 * thy0_dthz0 * q1;
-
-    f1 += dthx2 * thy0_thz0 * q2;
-    f2 += thx2 * dthy0_thz0 * q2;
-    f3 += thx2 * thy0_dthz0 * q2;
-
-    f1 += dthx3 * thy0_thz0 * q3;
-    f2 += thx3 * dthy0_thz0 * q3;
-    f3 += thx3 * thy0_dthz0 * q3;
-
-    f1 += dthx0 * thy1_thz0 * q4;
-    f2 += thx0 * dthy1_thz0 * q4;
-    f3 += thx0 * thy1_dthz0 * q4;
-
-    f1 += dthx1 * thy1_thz0 * q5;
-    f2 += thx1 * dthy1_thz0 * q5;
-    f3 += thx1 * thy1_dthz0 * q5;
-
-    f1 += dthx2 * thy1_thz0 * q6;
-    f2 += thx2 * dthy1_thz0 * q6;
-    f3 += thx2 * thy1_dthz0 * q6;
-
-    f1 += dthx3 * thy1_thz0 * q7;
-    f2 += thx3 * dthy1_thz0 * q7;
-    f3 += thx3 * thy1_dthz0 * q7;
-    */
 
     // Reduce
 #if __CUDA_ARCH__ >= 300
@@ -2194,6 +2142,9 @@ __global__ void gather_force_8_ortho_kernel(const float4 *xyzq, const int ncoord
 					    const int xsize, const int ysize, const int zsize,
 					    const float recip1, const float recip2, const float recip3,
 					    const float ccelec,
+#ifdef USE_TEXTURE_OBJECTS
+					    const cudaTextureObject_t gridTexObj,
+#endif
 					    const int stride,
 					    FT *force) {
 
@@ -2318,7 +2269,11 @@ __global__ void gather_force_8_ortho_kernel(const float4 *xyzq, const int ncoord
       if (ix >= nfftx) ix -= nfftx;
       if (iy >= nffty) iy -= nffty;
       if (iz >= nfftz) iz -= nfftz;
-      float q0 = tex1Dfetch(grid_texref, ix + (iy + iz*ysize)*xsize);
+#ifdef USE_TEXTURE_OBJECTS
+      float q0 = tex1Dfetch<float>(gridTexObj, ix + (iy + iz*ysize)*xsize);
+#else
+      float q0 = tex1Dfetch(gridTexRef, ix + (iy + iz*ysize)*xsize);
+#endif
       float thx0 = shmem[base].thetax[tx];
       float thy0 = shmem[base].thetay[ty];
       float thz0 = shmem[base].thetaz[tz];
@@ -2430,23 +2385,36 @@ __global__ void calc_self_energy_kernel(const int ncoord, const float4* xyzq,
 //#####################################################################################
 //#####################################################################################
 
-template<typename T>
-void bind_grid_texture(const T *data, const int data_len) {
-  std::cerr << "Fatal error: cannot bind generic data type" << std::endl;
-  exit(1);
-}
-
-template<>
-void bind_grid_texture<float>(const float *data, const int data_len) {
-  grid_texref.normalized = 0;
-  grid_texref.filterMode = cudaFilterModePoint;
-  grid_texref.addressMode[0] = cudaAddressModeClamp;
-  grid_texref.channelDesc.x = 32;
-  grid_texref.channelDesc.y = 0;
-  grid_texref.channelDesc.z = 0;
-  grid_texref.channelDesc.w = 0;
-  grid_texref.channelDesc.f = cudaChannelFormatKindFloat;
-  cudaCheck(cudaBindTexture(NULL, grid_texref, data, data_len*sizeof(float)));  
+template <typename AT, typename CT, typename CT2>
+void CudaPMERecip<AT, CT, CT2>::setup_grid_texture(CT *data, const int data_len) {
+  if (sizeof(CT) != 4) {
+    std::cerr << "CudaPMERecip::setup_grid_texture, current implementation only tested for float-type textures" << std::endl;
+    exit(1);
+  }
+#ifdef USE_TEXTURE_OBJECTS
+  // Use texture objects
+  cudaResourceDesc resDesc;
+  memset(&resDesc, 0, sizeof(resDesc));
+  resDesc.resType = cudaResourceTypeLinear;
+  resDesc.res.linear.devPtr = data;
+  resDesc.res.linear.desc.f = cudaChannelFormatKindFloat;
+  resDesc.res.linear.desc.x = sizeof(CT)*8;
+  resDesc.res.linear.sizeInBytes = data_len*sizeof(CT);
+  cudaTextureDesc texDesc;
+  memset(&texDesc, 0, sizeof(texDesc));
+  texDesc.readMode = cudaReadModeElementType;
+  cudaCheck(cudaCreateTextureObject(&gridTexObj, &resDesc, &texDesc, NULL));
+#else
+  gridTexRef.normalized = 0;
+  gridTexRef.filterMode = cudaFilterModePoint;
+  gridTexRef.addressMode[0] = cudaAddressModeClamp;
+  gridTexRef.channelDesc.x = sizeof(CT)*8;
+  gridTexRef.channelDesc.y = 0;
+  gridTexRef.channelDesc.z = 0;
+  gridTexRef.channelDesc.w = 0;
+  gridTexRef.channelDesc.f = cudaChannelFormatKindFloat;
+  cudaCheck(cudaBindTexture(NULL, gridTexRef, data, data_len*sizeof(CT)));
+#endif
 }
 
 //
@@ -2454,7 +2422,7 @@ void bind_grid_texture<float>(const float *data, const int data_len) {
 //
 template <typename AT, typename CT, typename CT2>
 void CudaPMERecip<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
-			     bool y_land_locked, bool z_land_locked) {
+				     bool y_land_locked, bool z_land_locked) {
   
   this->x0 = x0;
   this->x1 = x1;
@@ -2531,7 +2499,7 @@ void CudaPMERecip<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int
   }
 
   // Bind grid_texture to solved_grid->data (data2)
-  bind_grid_texture<CT>(solved_grid->data, xsize*ysize*zsize);
+  setup_grid_texture(solved_grid->data, xsize*ysize*zsize);
 
 }
 
@@ -2540,9 +2508,9 @@ void CudaPMERecip<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int
 //
 template <typename AT, typename CT, typename CT2>
 CudaPMERecip<AT, CT, CT2>::CudaPMERecip(int nfftx, int nffty, int nfftz, int order,
-			FFTtype fft_type, int nnode, int mynode,
-			CudaEnergyVirial& energyVirial, const char* nameRecip, const char* nameSelf,
-			cudaStream_t stream) :
+					FFTtype fft_type, int nnode, int mynode,
+					CudaEnergyVirial& energyVirial, const char* nameRecip, const char* nameSelf,
+					cudaStream_t stream) :
   nfftx(nfftx), nffty(nffty), nfftz(nfftz), fft_type(fft_type),
   energyVirial(energyVirial), stream(stream) {
 
@@ -2743,9 +2711,13 @@ void CudaPMERecip<AT, CT, CT2>::set_stream(cudaStream_t stream) {
 template <typename AT, typename CT, typename CT2>
 CudaPMERecip<AT, CT, CT2>::~CudaPMERecip() {
 
+#ifdef USE_TEXTURE_OBJECTS
+  cudaCheck(cudaDestroyTextureObject(gridTexObj));
+#else
   // Unbind grid texture
-  cudaCheck(cudaUnbindTexture(grid_texref));
-
+  cudaCheck(cudaUnbindTexture(gridTexRef));
+#endif
+  
   delete accum_grid;
   delete charge_grid;
   delete solved_grid;
@@ -2943,7 +2915,7 @@ void CudaPMERecip<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoo
 //
 template <typename AT, typename CT, typename CT2>
 void CudaPMERecip<AT, CT, CT2>::scalar_sum(const double *recip, const double kappa,
-				   const bool calc_energy, const bool calc_virial) {
+					   const bool calc_energy, const bool calc_virial) {
 
   bool calc_energy_virial = (calc_energy || calc_virial);
 
@@ -3118,6 +3090,9 @@ void CudaPMERecip<AT, CT, CT2>::gather_force(const int ncoord, const double* rec
 	 (float4 *)bspline.dthetax,
 	 (float4 *)bspline.dthetay,
 	 (float4 *)bspline.dthetaz,
+#ifdef USE_TEXTURE_OBJECTS
+	 gridTexObj,
+#endif
 	 stride, force);
       break;
 
@@ -3177,6 +3152,9 @@ void CudaPMERecip<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoor
 	 nfftx, nffty, nfftz,
 	 recip_loc[0], recip_loc[4], recip_loc[8],
 	 ccelec_loc,
+#ifdef USE_TEXTURE_OBJECTS
+	 gridTexObj,
+#endif
 	 stride, force);
       break;
 
@@ -3188,6 +3166,9 @@ void CudaPMERecip<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoor
 	 nfftx, nffty, nfftz,
 	 recip_loc[0], recip_loc[4], recip_loc[8],
 	 ccelec_loc,
+#ifdef USE_TEXTURE_OBJECTS
+	 gridTexObj,
+#endif
 	 stride, force);
       break;
  
@@ -3199,6 +3180,9 @@ void CudaPMERecip<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoor
 	 nfftx, nffty, nfftz,
 	 recip_loc[0], recip_loc[4], recip_loc[8],
 	 ccelec_loc,
+#ifdef USE_TEXTURE_OBJECTS
+	 gridTexObj,
+#endif
 	 stride, force);
       break;
 
@@ -3219,52 +3203,6 @@ void CudaPMERecip<AT, CT, CT2>::gather_force(const float4 *xyzq, const int ncoor
 
   cudaCheck(cudaGetLastError());
 }
-
-/*
-//
-// Sets Energies and virials to zero
-//
-template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::clear_energy_virial() {
-  h_energy_virial->energy = 0.0;
-  h_energy_virial->energy_self = 0.0;
-  for (int i=0;i < 6;i++) {
-    h_energy_virial->virial[i] = 0.0;
-  }
-  copy_HtoD<RecipEnergyVirial_t>(h_energy_virial, d_energy_virial, 1, stream);
-}
-
-//
-// Returns energy and virial of the reciprocal
-//
-template <typename AT, typename CT, typename CT2>
-void Grid<AT, CT, CT2>::get_energy_virial(const double kappa,
-					  const bool prev_calc_energy, const bool prev_calc_virial,
-					  double& energy, double& energy_self, double *virial) {
-
-  bool prev_calc_energy_virial = (prev_calc_energy || prev_calc_virial);
-
-  if (prev_calc_energy_virial) {
-    copy_DtoH_sync<RecipEnergyVirial_t>(d_energy_virial, h_energy_virial, 1);
-  }
-
-  double cfact = 0.5*ccelec;
-
-  energy = h_energy_virial->energy*cfact;
-  energy_self = -h_energy_virial->energy_self*kappa*ccelec/sqrt(pi);
-
-  // Set virial pressure contributions
-  virial[0] = -h_energy_virial->virial[0]*cfact;
-  virial[1] = -h_energy_virial->virial[1]*cfact;
-  virial[2] = -h_energy_virial->virial[2]*cfact;
-  virial[3] = -h_energy_virial->virial[1]*cfact;
-  virial[4] = -h_energy_virial->virial[3]*cfact;
-  virial[5] = -h_energy_virial->virial[4]*cfact;
-  virial[6] = -h_energy_virial->virial[2]*cfact;
-  virial[7] = -h_energy_virial->virial[4]*cfact;
-  virial[8] = -h_energy_virial->virial[5]*cfact;
-}
-*/
 
 //
 // FFT x coordinate Real -> Complex

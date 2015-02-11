@@ -6,7 +6,8 @@ Requirements:
 * GNU/Intel C++ compiler
 * MPI library for multi-GPU support
 * CUDA 5.0 or newer
-* Compute capability 3.0 (Kepler) or higher NVIDIA GPU
+* Compute capability 2.0 (Tesla) or higher NVIDIA GPU
+* When compiled with USE_TEXTURE_OBJECTS, compute capability 3.0 (Kepler) or higher required
 
 Compiling:
 -----------

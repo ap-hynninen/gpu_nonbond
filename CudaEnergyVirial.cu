@@ -176,6 +176,27 @@ void CudaEnergyVirial::clear(cudaStream_t stream) {
 }
 
 //
+// Clears (sets to zero) energies
+//
+void CudaEnergyVirial::clearEnergy(cudaStream_t stream) {
+  this->reallocateBuffer();
+  int clear_pos = 27*3*sizeof(double) + 27*3*sizeof(long long int) + 9*sizeof(double);
+  int clear_len = this->getN()*sizeof(double);
+  clear_gpu_array<char>(&d_buffer[clear_pos], clear_len, stream);
+  memset(&h_buffer[clear_pos], 0, clear_len);
+}
+
+//
+// Clears (sets to zero) virials
+//
+void CudaEnergyVirial::clearVirial(cudaStream_t stream) {
+  this->reallocateBuffer();
+  int clear_len = 27*3*sizeof(double) + 27*3*sizeof(long long int) + 9*sizeof(double);
+  clear_gpu_array<char>(d_buffer, clear_len, stream);
+  memset(h_buffer, 0, clear_len);
+}
+
+//
 // Calculates virial
 //
 void CudaEnergyVirial::calcVirial(const int ncoord, const float4 *xyzq,
@@ -199,9 +220,9 @@ void CudaEnergyVirial::calcVirial(const int ncoord, const float4 *xyzq,
 //
 // Copies energy and virial values to host
 //
-void CudaEnergyVirial::copyToHost() {
+void CudaEnergyVirial::copyToHost(cudaStream_t stream) {
   this->reallocateBuffer();
-  copy_DtoH_sync<char>(d_buffer, h_buffer, d_buffer_len);
+  copy_DtoH<char>(d_buffer, h_buffer, d_buffer_len, stream);
 }
 
 //

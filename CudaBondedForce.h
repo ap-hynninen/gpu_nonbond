@@ -16,26 +16,6 @@
 
 //#define USE_DP_SFORCE
 
-/*
-// Data structure for saving energies and virials
-struct BondedEnergyVirial_t {
-  // Energies
-  double energy_bond;
-  double energy_ureyb;
-  double energy_angle;
-  double energy_dihe;
-  double energy_imdihe;
-  double energy_cmap;
-
-  // Shift forces for calculating virials
-#ifdef USE_DP_SFORCE
-  double sforce[27*3];
-#else
-  long long int sforce[27*3];
-#endif
-};
-*/
-
 template <typename AT, typename CT>
 class CudaBondedForce {
 
@@ -168,15 +148,6 @@ public:
 		  const bool calc_angle, const bool calc_dihe,
 		  const bool calc_imdihe, const bool calc_cmap,
 		  cudaStream_t stream=0);
-
-
-  //void clear_energy_virial(cudaStream_t stream=0);
-  //void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
-  //			 double *energy_bond,  double *energy_ureyb, 
-  //			 double *energy_angle,
-  //			 double *energy_dihe, double *energy_imdihe,
-  //			 double *energy_cmap,
-  //			 double *sforce);
 
   void print();
 };

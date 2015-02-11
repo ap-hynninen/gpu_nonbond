@@ -460,6 +460,13 @@ void start_gpu(int numnode, int mynode, std::vector<int>& devices) {
     exit(1);
   }
 
+#ifdef USE_TEXTURE_OBJECTS
+  if (cuda_arch < 300 || cuda_rt_version < 5000 || cuda_driver_version < 5000) {
+    std::cout << "When compiled with USE_TEXTURE_OBJECTS, CUDA 5.0 and compute capability 3.0 (Kepler) or greater required" << std::endl;
+    exit(1);
+  }
+#endif
+  
   if (mynode == 0) {
     std::cout << "Number of CUDA devices found " << deviceNum << std::endl;
     std::cout << "Using CUDA driver version " << cuda_driver_version << std::endl;

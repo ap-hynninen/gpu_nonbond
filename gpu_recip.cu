@@ -141,6 +141,7 @@ void test4() {
   double energy, virial[9];
   //PMErecip.get_energy_virial(kappa, true, true, energy, energy_self, virial);
   energyVirial.copyToHost();
+  cudaCheck(cudaDeviceSynchronize());
   energy = energyVirial.getEnergy("recip");
   energyVirial.getVirial(virial);
   tol = 1.2e-3;
@@ -368,6 +369,7 @@ void test6() {
   double energy, virial[9];
   //PMErecip.get_energy_virial(kappa, true, true, energy, energy_self, virial);
   energyVirial.copyToHost();
+  cudaCheck(cudaDeviceSynchronize());
   energy = energyVirial.getEnergy("recip");
   energyVirial.getVirial(virial);
 

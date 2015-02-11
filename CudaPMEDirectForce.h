@@ -72,17 +72,6 @@ public:
 			  const bool calc_virial,
 			  const int stride, AT *force, cudaStream_t stream=0)=0;
 
-  //virtual void calc_virial(const int ncoord, const float4 *xyzq,
-  //			   const int stride, double *force,
-  //			   cudaStream_t stream=0)=0;
-
-  //virtual void clear_energy_virial(cudaStream_t stream=0)=0;
-  
-  //virtual void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
-  //double *energy_vdw, double *energy_elec,
-  //				 double *energy_excl,
-  //				 double *vir)=0;
-
 };
 
 //
@@ -150,13 +139,6 @@ protected:
   // Host version of setup
   DirectSettings_t *h_setup;
 
-  // Host and Device versions of energy and virial global variables
-  //DirectEnergyVirial_t *h_energy_virial;
-  //DirectEnergyVirial_t *d_energy_virial;
-  
-  // We save previous calculated values of energies / virial here
-  //DirectEnergyVirial_t h_energy_virial_prev;
-
   void setup_ewald_force(CT h);
   void set_elec_model(int elec_model, CT h=0.01);
   void update_setup();
@@ -217,17 +199,6 @@ public:
 		  const bool calc_energy,
 		  const bool calc_virial,
 		  const int stride, AT *force, cudaStream_t stream=0);
-
-  //void calc_virial(const int ncoord, const float4 *xyzq,
-  //		   const int stride, double *force,
-  //		   cudaStream_t stream=0);
-
-  //void clear_energy_virial(cudaStream_t stream=0);
-  
-  //void get_energy_virial(bool prev_calc_energy, bool prev_calc_virial,
-  //			 double *energy_vdw, double *energy_elec,
-  //			 double *energy_excl,
-  //			 double *vir);
 
 };
 

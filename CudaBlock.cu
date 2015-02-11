@@ -35,7 +35,7 @@ CudaBlock::CudaBlock(const int numBlock) : numBlock(numBlock) {
   cudaTextureDesc texDesc;
   memset(&texDesc, 0, sizeof(texDesc));
   texDesc.readMode = cudaReadModeElementType;
-  cudaCreateTextureObject(&blockParamTexObj, &resDesc, &texDesc, NULL);
+  cudaCheck(cudaCreateTextureObject(&blockParamTexObj, &resDesc, &texDesc, NULL));
 #else
   assert(!getBlockParamTexRefBound());
   // Bind blockparam texture

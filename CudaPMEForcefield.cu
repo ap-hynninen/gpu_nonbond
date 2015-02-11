@@ -522,6 +522,7 @@ void CudaPMEForcefield::calc(const bool calc_energy, const bool calc_virial,
     cudaCheck(cudaEventSynchronize(done_direct_event[1]));
     // Copy energy and virial values to host
     energyVirial.copyToHost();
+    cudaCheck(cudaDeviceSynchronize());
   }
 
   energy_bond = energyVirial.getEnergy("bond");

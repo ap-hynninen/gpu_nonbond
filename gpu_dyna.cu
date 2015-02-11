@@ -459,7 +459,7 @@ void test(const int nstep, const bool use_holoconst, const bool cudaAware, const
   
   // Create reciprocal calculator
   if (isRecip) {
-    recip = new CudaDomdecRecip(nfftx, nffty, nfftz, forder, kappa, energyVirial);
+    recip = new CudaDomdecRecip(nfftx, nffty, nfftz, forder, kappa, energyVirial, "recip", "self");
   }
 
   if (isDirect) {
