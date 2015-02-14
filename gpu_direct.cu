@@ -180,21 +180,16 @@ void test() {
   force_fp.clear();
   energyVirial.clear();
   dir.calc_force(xyzq.xyzq, nlist_ref.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
-  //dir.calc_14_force(xyzq.xyzq, true, true, force_fp.stride(), force_fp.xyz());
   force_fp.convert(force);
-  //dir.calc_virial(ncoord, xyzq.xyzq, force.stride(), force.xyz());
   energyVirial.calcVirial(ncoord, xyzq.xyzq, boxx, boxy, boxz, force.stride(), force.xyz());
   
-  double energy_vdw;
-  double energy_elec;
-  //double energy_excl;
+  double energy_vdw, energy_elec, energy_excl;
   double virtensor[9];
-  //dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
   energyVirial.copyToHost();
   cudaCheck(cudaDeviceSynchronize());
   energy_vdw = energyVirial.getEnergy("vdw");
   energy_elec = energyVirial.getEnergy("elec");
-  //energy_excl = energyVirial.getEnergy("excl");
+  energy_excl = energyVirial.getEnergy("excl");
   energyVirial.getVirial(virtensor);
   tol = 7.73e-4;
   if (!force_main.compare(force, tol, max_diff)) {
@@ -232,6 +227,15 @@ void test() {
   std::cout << "max_diff(vir_tensor) = " << max_diff << std::endl;
   std::cout << "max_diff(vir) = " << fabs(vir - ref_vir) << std::endl;
 
+  dir.calc_14_force(xyzq.xyzq, true, true, force_fp.stride(), force_fp.xyz());
+  energyVirial.copyToHost();
+  cudaCheck(cudaDeviceSynchronize());
+  energy_vdw = energyVirial.getEnergy("vdw");
+  energy_elec = energyVirial.getEnergy("elec");
+  energy_excl = energyVirial.getEnergy("excl");
+  std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec
+	    << " energy_excl = " << energy_excl << std::endl;
+  
   //--------------- Non-bonded using GPU built neighborlist -----------
 
   // Update vdwtype to reflect new ordering of atoms
@@ -244,20 +248,16 @@ void test() {
   delete [] h_glo_vdwtype;
   
   force_fp.clear();
-  //dir.clear_energy_virial();
   energyVirial.clear();
   dir.calc_force(xyzq_sorted.xyzq, nlist.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
   force_fp.convert(force);
-  //dir.calc_virial(ncoord, xyzq_sorted.xyzq, force.stride(), force.xyz());
   energyVirial.calcVirial(ncoord, xyzq_sorted.xyzq, boxx, boxy, boxz, force.stride(), force.xyz());
 
   energyVirial.copyToHost();
   cudaCheck(cudaDeviceSynchronize());
   energy_vdw = energyVirial.getEnergy("vdw");
   energy_elec = energyVirial.getEnergy("elec");
-  //energy_excl = energyVirial.getEnergy("excl");
   energyVirial.getVirial(virtensor);
-  //dir.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
 
   std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
   max_diff = max(fabs(energy_vdw-ref_energy_vdw), fabs(energy_elec-ref_energy_elec));
@@ -304,7 +304,6 @@ void test() {
   //--------------- Non-bonded with block  -----------
   CudaBlock cudaBlock(2);
   CudaPMEDirectForceBlock<long long int, float> dirblock(energyVirial, "vdw", "elec", "excl", cudaBlock);
-  //CudaPMEDirectForce<long long int, float> dirblock;
   
   // Setup blockType
   int* h_blockType = new int[ncoord];
@@ -322,28 +321,33 @@ void test() {
     }
   }
   cudaBlock.setBlockParam(h_blockParam);
+  int h_siteMLD[2] = {0, 0};
+  cudaBlock.setSiteMLD(h_siteMLD);
+  dirblock.set_vdwparam14(1260, "test_data/vdwparam14.txt");
+  dirblock.set_14_list(nin14list, nex14list, in14list, ex14list);
+  int h_in14TblBlockPos[4] = {0, nin14list/3, 2*nin14list/3, nin14list};
+  int h_ex14TblBlockPos[4] = {0, nex14list/3, 2*nex14list/3, nex14list};
+  dirblock.set14BlockPos(h_in14TblBlockPos, h_ex14TblBlockPos);
   dirblock.setup(boxx, boxy, boxz, kappa, roff, ron, e14fac, VDW_VSH, EWALD);
   dirblock.set_vdwparam(1260, "test_data/vdwparam.txt");
-  dirblock.set_vdwtype(ncoord, glo_vdwtype, loc2glo);
-    // Calculate forces, energies, and virial
+  dirblock.set_vdwtype(ncoord, "test_data/vdwtype.txt");
+  
+  // Calculate forces, energies, and virial
   force_fp.clear();
-  //dirblock.clear_energy_virial();
   energyVirial.clear();
-  dirblock.calc_force(xyzq_sorted.xyzq, nlist.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
+  dirblock.calc_force(xyzq.xyzq, nlist_ref.getBuilder(0), true, true, force_fp.stride(), force_fp.xyz());
+  dirblock.calc_14_force(xyzq.xyzq, true, true, force_fp.stride(), force_fp.xyz());
   force_fp.convert(force);
-  //dirblock.calc_virial(ncoord, xyzq_sorted.xyzq, force.stride(), force.xyz());
   energyVirial.calcVirial(ncoord, xyzq.xyzq, boxx, boxy, boxz, force.stride(), force.xyz());
 
-  //dirblock.get_energy_virial(true, true, &energy_vdw, &energy_elec, &energy_excl, virtensor);
-  //cudaCheck(cudaDeviceSynchronize());
   energyVirial.copyToHost();
   cudaCheck(cudaDeviceSynchronize());
   energy_vdw = energyVirial.getEnergy("vdw");
   energy_elec = energyVirial.getEnergy("elec");
-  //energy_excl = energyVirial.getEnergy("excl");
   energyVirial.getVirial(virtensor);
 
-  std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec << std::endl;
+  std::cout << "energy_vdw = " << energy_vdw << " energy_elec = " << energy_elec
+	    << " energy_excl = " << energy_excl << std::endl;
   
   // -------------------- END -----------------
 

@@ -704,7 +704,8 @@ void CudaPMEDirectForce<AT, CT>::calc_14_force(const float4 *xyzq,
 #ifdef USE_TEXTURE_OBJECTS
 				 this->vdwParam14TexObj,
 #endif
-				 xyzq, stride, force, energyVirial.getVirialPointer(),
+				 xyzq, 1.0f, stride, force,
+				 energyVirial.getVirialPointer(),
 				 energyVirial.getEnergyPointer(strVdw),
 				 energyVirial.getEnergyPointer(strElec),
 				 energyVirial.getEnergyPointer(strExcl));

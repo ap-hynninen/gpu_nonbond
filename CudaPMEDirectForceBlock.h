@@ -25,6 +25,22 @@ template <typename AT, typename CT>
   AT *biflam;
   int biflam2Len;
   AT *biflam2;
+
+  // Arrays (size nblock*(nblock+1)/2) for storing temporary results in calc_14_force
+  // This is the main buffer that contains the actual allocated pointer
+  double *energy14BlockBuffer;
+  // These are pointers into the main buffer
+  double *energyVdw14Block;
+  double *energyElec14Block;
+  double *energyExcl14Block;
+
+  // Array that contains lower triangle matrix i and j indices (size nblock*(nblock+1)/2)
+  // lowTriangleIJ = (jb << 16) | ib
+  int *lowTriangleIJ;
+
+  // Block table positions for 1-4 calculations (size nblock*(nblock+1)/2+1)
+  int *h_in14TblBlockPos;
+  int *h_ex14TblBlockPos;
   
  public:
 
@@ -33,9 +49,11 @@ template <typename AT, typename CT>
 			  CudaBlock &cudaBlock);
   ~CudaPMEDirectForceBlock();
 
-  //void calc_14_force(const float4 *xyzq,
-  //		     const bool calc_energy, const bool calc_virial,
-  //		     const int stride, AT *force, cudaStream_t stream=0);
+  void set14BlockPos(int *h_in14TblBlockPos_in, int *h_ex14TblBlockPos_in);
+  
+  void calc_14_force(const float4 *xyzq,
+  		     const bool calc_energy, const bool calc_virial,
+  		     const int stride, AT *force, cudaStream_t stream=0);
 
   void calc_force(const float4 *xyzq,
 		  const CudaNeighborListBuild<32>& nlist,

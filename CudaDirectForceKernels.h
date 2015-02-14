@@ -43,7 +43,7 @@ void calcForce14KernelChoice(const int nblock, const int nthread, const int shme
 #ifdef USE_TEXTURE_OBJECTS
 			     cudaTextureObject_t& vdwParam14TexObj,
 #endif
-			     const float4* xyzq, const int stride, AT* force,
+			     const float4* xyzq, const float fscale, const int stride, AT* force,
 			     Virial_t *virial, double *energy_vdw, double *energy_elec, double *energy_excl);
 
 void updateDirectForceSetup(const DirectSettings_t* h_setup);

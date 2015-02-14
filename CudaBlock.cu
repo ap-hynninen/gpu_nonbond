@@ -19,16 +19,18 @@ CudaBlock::CudaBlock(const int numBlock) : numBlock(numBlock) {
   assert(numBlock >= 1);
   blockTypeLen = 0;
   blockType = NULL;
-  allocate<float>(&blockParam, numBlock*(numBlock+1)/2);
+  allocate<float>(&d_blockParam, numBlock*(numBlock+1)/2);
+  allocate_host<float>(&h_blockParam, numBlock*(numBlock+1)/2);
   allocate<float>(&bixlam, numBlock);
   allocate<double>(&biflam, numBlock);
   allocate<double>(&biflam2, numBlock);
+  allocate<int>(&siteMLD, numBlock);
 #ifdef USE_TEXTURE_OBJECTS
   // Use texture objects
   cudaResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
   resDesc.resType = cudaResourceTypeLinear;
-  resDesc.res.linear.devPtr = blockParam;
+  resDesc.res.linear.devPtr = d_blockParam;
   resDesc.res.linear.desc.f = cudaChannelFormatKindFloat;
   resDesc.res.linear.desc.x = sizeof(float)*8;
   resDesc.res.linear.sizeInBytes = numBlock*(numBlock+1)/2*sizeof(float);
@@ -48,7 +50,7 @@ CudaBlock::CudaBlock(const int numBlock) : numBlock(numBlock) {
   getBlockParamTexRef()->channelDesc.z = 0;
   getBlockParamTexRef()->channelDesc.w = 0;
   getBlockParamTexRef()->channelDesc.f = cudaChannelFormatKindFloat;
-  cudaCheck(cudaBindTexture(NULL, *getBlockParamTexRef(), blockParam, numBlock*(numBlock+1)/2*sizeof(float)));
+  cudaCheck(cudaBindTexture(NULL, *getBlockParamTexRef(), d_blockParam, numBlock*(numBlock+1)/2*sizeof(float)));
   setBlockParamTexRefBound(true);
 #endif
 }
@@ -63,10 +65,12 @@ CudaBlock::~CudaBlock() {
   cudaCheck(cudaUnbindTexture(*getBlockParamTexRef()));
 #endif
   if (blockType != NULL) deallocate<int>(&blockType);
-  deallocate<float>(&blockParam);
+  deallocate<float>(&d_blockParam);
+  deallocate_host<float>(&h_blockParam);
   deallocate<float>(&bixlam);
   deallocate<double>(&biflam);
   deallocate<double>(&biflam2);
+  deallocate<int>(&siteMLD);
 }
 
 //
@@ -82,8 +86,9 @@ void CudaBlock::setBlockType(const int ncoord, const int *h_blockType) {
 //
 // Sets block parameters by copying them from CPU
 //
-void CudaBlock::setBlockParam(const float *h_blockParam) {
-  copy_HtoD_sync<float>(h_blockParam, blockParam, numBlock*(numBlock+1)/2);
+void CudaBlock::setBlockParam(const float *h_blockParam_in) {
+  for (int i=0;i < numBlock*(numBlock+1)/2;i++) h_blockParam[i] = h_blockParam_in[i];
+  copy_HtoD_sync<float>(h_blockParam, d_blockParam, numBlock*(numBlock+1)/2);
 }
 
 //
@@ -91,6 +96,13 @@ void CudaBlock::setBlockParam(const float *h_blockParam) {
 //
 void CudaBlock::setBixlam(const float *h_bixlam) {
   copy_HtoD_sync<float>(h_bixlam, bixlam, numBlock);
+}
+
+//
+// Set siteMLD
+//
+void CudaBlock::setSiteMLD(const int *h_siteMLD) {
+  copy_HtoD_sync<int>(h_siteMLD, siteMLD, numBlock);
 }
 
 //

@@ -505,7 +505,8 @@ float pair_elec_force_14(const float r2, const float r, const float rinv,
 //
 template <typename AT, typename CT, int elec_model, bool calc_energy, bool calc_virial>
 __device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list,
-				       const float4* xyzq, const int stride, AT *force,
+				       const float4* xyzq, const float fscale,
+				       const int stride, AT *force,
 				       double &elec_pot,
 				       Virial_t* __restrict__ virial) {
 
@@ -532,7 +533,7 @@ __device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list
   CT fij_elec = pair_elec_force<elec_model, calc_energy, true>(r2, r, rinv, qq, 0.0f, dpot_elec);
   
   if (calc_energy) elec_pot += (double)dpot_elec;
-  CT fij = fij_elec*rinv2;
+  CT fij = fij_elec*rinv2*fscale;
   // Calculate force components
   AT fxij, fyij, fzij;
   calc_component_force<AT, CT>(fij, dx, dy, dz, fxij, fyij, fzij);
@@ -571,7 +572,8 @@ __device__ void calc_in14_force_device(
 #endif
 				       const int pos, const xx14list_t* in14list,
 				       const int* vdwtype, const float* vdwparam14,
-				       const float4* xyzq, const int stride, AT *force,
+				       const float4* xyzq, const float fscale,
+				       const int stride, AT *force,
 				       double &vdw_pot, double &elec_pot,
 				       Virial_t* __restrict__ virial) {
 
@@ -626,7 +628,7 @@ __device__ void calc_in14_force_device(
 							       d_setup.e14fac, dpot_elec);
   if (calc_energy) elec_pot += (double)dpot_elec;
 
-  CT fij = (fij_vdw + fij_elec)*rinv2;
+  CT fij = (fij_vdw + fij_elec)*rinv2*fscale;
 
   // Calculate force components
   AT fxij, fyij, fzij;
@@ -669,7 +671,8 @@ __global__ void calc_14_force_kernel(
 				     const int nin14block,
 				     const xx14list_t* in14list, const xx14list_t* ex14list,
 				     const int* vdwtype, const float* vdwparam14,
-				     const float4* xyzq, const int stride, AT *force,
+				     const float4* xyzq, const float fscale,
+				     const int stride, AT *force,
 				     Virial_t* __restrict__ virial,
 				     double* __restrict__ energy_vdw,
 				     double* __restrict__ energy_elec,
@@ -692,7 +695,7 @@ __global__ void calc_14_force_kernel(
 #ifdef USE_TEXTURE_OBJECTS
 	 vdwParam14TexObj,
 #endif
-	 pos, in14list, vdwtype, vdwparam14, xyzq, stride, force, vdw_pot, elec_pot, virial);
+	 pos, in14list, vdwtype, vdwparam14, xyzq, fscale, stride, force, vdw_pot, elec_pot, virial);
     }
 
     if (calc_energy) {
@@ -715,14 +718,14 @@ __global__ void calc_14_force_kernel(
     }
 
   } else if (elec_model == EWALD || elec_model == EWALD_LOOKUP) {
-    // NOTE: Only Ewald potentials calculte 1-4 exclusions
+    // NOTE: Only Ewald potentials calculate 1-4 exclusions
     double excl_pot;
     if (calc_energy) excl_pot = 0.0;
 
     int pos = threadIdx.x + (blockIdx.x-nin14block)*blockDim.x;
     if (pos < nex14list) {
       calc_ex14_force_device<AT, CT, elec_model, calc_energy, calc_virial>
-	(pos, ex14list, xyzq, stride, force, excl_pot, virial);
+	(pos, ex14list, xyzq, fscale, stride, force, excl_pot, virial);
     }
 
     if (calc_energy) {
@@ -920,17 +923,17 @@ void calcForce14KernelChoice(const int nblock, const int nthread, const int shme
 #ifdef USE_TEXTURE_OBJECTS
 			     cudaTextureObject_t& vdwParam14TexObj,
 #endif
-			     const float4* xyzq, const int stride, AT* force,
+			     const float4* xyzq, const float fscale, const int stride, AT* force,
 			     Virial_t *virial, double *energy_vdw, double *energy_elec, double *energy_excl) {
   
 #ifdef USE_TEXTURE_OBJECTS
   CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL14, calc_14_force_kernel, vdwParam14TexObj,
 		 nin14list, nex14list, nin14block, in14list, ex14list,
-		 vdwtype, vdwparam14, xyzq, stride, force, virial, energy_vdw, energy_elec, energy_excl);
+		 vdwtype, vdwparam14, xyzq, fscale, stride, force, virial, energy_vdw, energy_elec, energy_excl);
 #else
   CREATE_KERNELS(EXPAND_ENERGY_VIRIAL, CREATE_KERNEL14, calc_14_force_kernel,
 		 nin14list, nex14list, nin14block, in14list, ex14list,
-		 vdwtype, vdwparam14, xyzq, stride, force, virial, energy_vdw, energy_elec, energy_excl);
+		 vdwtype, vdwparam14, xyzq, fscale, stride, force, virial, energy_vdw, energy_elec, energy_excl);
 #endif
 
   cudaCheck(cudaGetLastError());
@@ -979,7 +982,7 @@ template void calcForce14KernelChoice<long long int, float>
 #ifdef USE_TEXTURE_OBJECTS
  cudaTextureObject_t& vdwParam14TexObj,
 #endif
- const float4* xyzq, const int stride, long long int* force,
+ const float4* xyzq, const float fscale, const int stride, long long int* force,
  Virial_t *virial, double *energy_vdw, double *energy_elec, double *energy_excl);
 
 //void calcVirial(const int ncoord, const float4 *xyzq,
