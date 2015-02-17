@@ -85,6 +85,7 @@ void CudaBlock::setBlockType(const int ncoord, const int *h_blockType) {
 
 //
 // Sets block parameters by copying them from CPU
+// NOTE: The CPU buffer is in full-matrix form
 //
 void CudaBlock::setBlockParam(const float *h_blockParamFull) {
   int k = 0;
@@ -117,4 +118,12 @@ void CudaBlock::setSiteMLD(const int *h_siteMLD) {
 void CudaBlock::getBiflam(double *h_biflam, double *h_biflam2) {
   copy_DtoH_sync<double>((double *)biflam, h_biflam, numBlock);
   copy_DtoH_sync<double>((double *)biflam2, h_biflam2, numBlock);
+}
+
+//
+// Sets biflam and biflam2 GPU arrays
+//
+void CudaBlock::setBiflam(double *h_biflam, double *h_biflam2) {
+  copy_HtoD_sync<double>(h_biflam, (double *)biflam, numBlock);
+  copy_HtoD_sync<double>(h_biflam2, (double *)biflam2, numBlock);
 }

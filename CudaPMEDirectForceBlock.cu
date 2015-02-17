@@ -167,8 +167,8 @@ CudaPMEDirectForceBlock<AT, CT>::CudaPMEDirectForceBlock(CudaEnergyVirial &energ
   int m = cudaBlock.getNumBlock()*(cudaBlock.getNumBlock()+1)/2;
   int *h_lowTriangleIJ = new int[m];
   int k = 0;
-  for (int jb=0;jb < cudaBlock.getNumBlock();jb++) {
-    for (int ib=jb;ib < cudaBlock.getNumBlock();ib++) {
+  for (int ib=0;ib < cudaBlock.getNumBlock();ib++) {
+    for (int jb=0;jb <= ib;jb++) {
       h_lowTriangleIJ[k] = (jb << 16) | ib;
       k++;
     }
