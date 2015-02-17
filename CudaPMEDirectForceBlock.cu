@@ -132,9 +132,9 @@ __global__ void merge14ResultsKernel(const int m,
   
   // Write to global memory
   if (threadIdx.x == 0) {
-    //atomicAdd(energyVdw, sh_energyVdw[0]);
-    //atomicAdd(energyElec, sh_energyElec[0]);
-    //atomicAdd(energyExcl, sh_energyExcl[0]);
+    atomicAdd(energyVdw, sh_energyVdw[0]);
+    atomicAdd(energyElec, sh_energyElec[0]);
+    atomicAdd(energyExcl, sh_energyExcl[0]);
   }
 
 }
