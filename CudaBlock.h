@@ -40,7 +40,7 @@ public:
   ~CudaBlock();
 
   void setBlockType(const int ncoord, const int *h_blockType);
-  void setBlockParam(const float *h_blockParam_in);
+  void setBlockParam(const float *h_blockParamFull);
   void setBixlam(const float *h_bixlam);
   void setSiteMLD(const int *h_siteMLD);
   

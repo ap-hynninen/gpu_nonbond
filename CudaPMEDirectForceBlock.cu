@@ -132,9 +132,9 @@ __global__ void merge14ResultsKernel(const int m,
   
   // Write to global memory
   if (threadIdx.x == 0) {
-    atomicAdd(energyVdw, sh_energyVdw[0]);
-    atomicAdd(energyElec, sh_energyElec[0]);
-    atomicAdd(energyExcl, sh_energyExcl[0]);
+    //atomicAdd(energyVdw, sh_energyVdw[0]);
+    //atomicAdd(energyElec, sh_energyElec[0]);
+    //atomicAdd(energyExcl, sh_energyExcl[0]);
   }
 
 }
@@ -286,6 +286,7 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_14_force(const float4 *xyzq,
        this->energyVirial.getEnergyPointer(this->strVdw),
        this->energyVirial.getEnergyPointer(this->strElec),
        this->energyVirial.getEnergyPointer(this->strExcl));
+    cudaCheck(cudaGetLastError());
   }
 }
 
@@ -377,25 +378,6 @@ void CudaPMEDirectForceBlock<AT, CT>::calc_force(const float4 *xyzq,
   }
   
 }
-
-/*
-//
-// Merge results. Must be called after calc_force and calc_14_force have finished
-//
-template <typename AT, typename CT>
-void CudaPMEDirectForceBlock<AT, CT>::mergeBlockResults(cudaStream_t stream) {
-  int m = cudaBlock.getNumBlock()*(cudaBlock.getNumBlock()+1)/2;
-  int nthread = 256;
-  int nblock = (m-1)/nthread+1;
-  mergeBlockResultsKernel<<< nblock, nthread, 0, stream >>>
-    (cudaBlock.getNumBlock(), cudaBlock.getBlockParam(), cudaBlock.getSiteMLD(),
-     energyVdw14Block, energyElec14Block, biflam, biflam2,
-     cudaBlock.getBiflam(), cudaBlock.getBiflam2(),
-     this->energyVirial.getEnergyPointer(this->strVdw),
-     this->energyVirial.getEnergyPointer(this->strElec));
-  cudaCheck(cudaGetLastError());
-}
-*/
 
 //
 // Explicit instances of CudaPMEDirectForceBlock

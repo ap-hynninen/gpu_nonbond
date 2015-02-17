@@ -86,8 +86,14 @@ void CudaBlock::setBlockType(const int ncoord, const int *h_blockType) {
 //
 // Sets block parameters by copying them from CPU
 //
-void CudaBlock::setBlockParam(const float *h_blockParam_in) {
-  for (int i=0;i < numBlock*(numBlock+1)/2;i++) h_blockParam[i] = h_blockParam_in[i];
+void CudaBlock::setBlockParam(const float *h_blockParamFull) {
+  int k = 0;
+  for (int i=0;i < numBlock;i++) {
+    for (int j=0;j <= i;j++) {
+      h_blockParam[k] = h_blockParamFull[j*numBlock + i];
+      k++;
+    }
+  }
   copy_HtoD_sync<float>(h_blockParam, d_blockParam, numBlock*(numBlock+1)/2);
 }
 

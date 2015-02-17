@@ -263,7 +263,7 @@ __global__ void CUDA_KERNEL_NAME(
 	int aa = (ja > ia) ? ja : ia;      // aa = max(ja,ia)
 	float c6, c12;
 	if (tex_vdwparam) {
-	  int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
+	  int ivdw = aa*(aa-1)/2 + (ja + ia);
 	  //c6 = __ldg(&vdwparam[ivdw]);
 	  //c12 = __ldg(&vdwparam[ivdw+1]);
 #ifdef USE_TEXTURE_OBJECTS
@@ -274,7 +274,7 @@ __global__ void CUDA_KERNEL_NAME(
 	  c6  = c6c12.x;
 	  c12 = c6c12.y;
 	} else {
-	  int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2);
+	  int ivdw = (aa*(aa-1) + 2*(ja + ia));
 	  c6 = sh_vdwparam[ivdw];
 	  c12 = sh_vdwparam[ivdw+1];
 	}
@@ -296,7 +296,7 @@ __global__ void CUDA_KERNEL_NAME(
 	ib &= 0xffff;
 	jb &= 0xffff;
 	int bb = (jb > ib) ? jb : ib;      // bb = max(jb,ib)
-	int iblock = (bb*(bb-3) + 2*(jb + ib));
+	int iblock = bb*(bb-1)/2 + (jb + ib);
 #ifdef USE_TEXTURE_OBJECTS
 	float scale = tex1Dfetch<float>(blockParamTexObj, iblock);
 #else
@@ -307,16 +307,7 @@ __global__ void CUDA_KERNEL_NAME(
 	  if (scale != 1.0f && scale != 0.0f) {
 	    float dpot = (dpot_elec + dpot_vdw)*FORCE_SCALE_VIR;
 	    int ibb = (ib == jb) ? ib : ( ib == 0 ? jb : (jb == 0 ? ib : -1) );
-
-	    //float dpot_scale = 1.0f;
-	    //if (ibb < 0) {
-	    //  dpot_scale = bixlam[ib];
-	    //  ibb += 
-	    //}
-	    //biflam[ibb] += (double)dpot;
-	    
 	    if (ibb >= 0) {
-	      //biflam[ibb] += (double)dpot;
 	      AT dpotAT = lliroundf(dpot);
 	      atomicAdd((unsigned long long int *)&biflam[ibb], llitoulli(dpotAT));
 	    } else if (ib_site != jb_site) {

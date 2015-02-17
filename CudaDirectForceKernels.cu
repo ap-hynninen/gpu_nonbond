@@ -601,7 +601,7 @@ __device__ void calc_in14_force_device(
 
   CT c6, c12;
   if (tex_vdwparam) {
-    int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2) >> 1;
+    int ivdw = aa*(aa-1)/2 + (ja + ia);
     //c6 = __ldg(&vdwparam14[ivdw]);
     //c12 = __ldg(&vdwparam14[ivdw+1]);
 #ifdef USE_TEXTURE_OBJECTS
@@ -612,7 +612,7 @@ __device__ void calc_in14_force_device(
     c6  = c6c12.x;
     c12 = c6c12.y;
   } else {
-    int ivdw = (aa*(aa-3) + 2*(ja + ia) - 2);
+    int ivdw = (aa*(aa-1) + 2*(ja + ia));
     c6 = vdwparam14[ivdw];
     c12 = vdwparam14[ivdw+1];
   }
