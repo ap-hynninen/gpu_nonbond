@@ -63,6 +63,7 @@ CudaBlock::~CudaBlock() {
   cudaCheck(cudaDestroyTextureObject(blockParamTexObj));
 #else
   cudaCheck(cudaUnbindTexture(*getBlockParamTexRef()));
+  setBlockParamTexRefBound(false);
 #endif
   if (blockType != NULL) deallocate<int>(&blockType);
   deallocate<float>(&d_blockParam);
