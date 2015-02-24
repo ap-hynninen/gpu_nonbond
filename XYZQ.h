@@ -8,6 +8,7 @@
 //
 //
 
+#include "gpu_utils.h"
 #include "cudaXYZ.h"
 
 class XYZQ {
@@ -22,8 +23,8 @@ public:
   float4 *xyzq;
 
   XYZQ();
-  XYZQ(int ncoord, int align=1);
-  XYZQ(const char *filename, int align=1);
+  XYZQ(int ncoord, int align=warpsize);
+  XYZQ(const char *filename, int align=warpsize);
   ~XYZQ();
 
   void realloc(int ncoord, float fac=1.0f);

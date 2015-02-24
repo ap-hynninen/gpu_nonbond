@@ -104,7 +104,8 @@ __global__ void set_xyz_shift_kernel(const int ncoord,
 // ncoord-1 = last possible index
 //
 int XYZQ::get_xyzq_len() {
-  return (ncoord-1 + align);
+  return ((ncoord-1)/align+1)*align;
+  //return (ncoord-1 + align);
 }
 
 //
@@ -113,7 +114,7 @@ int XYZQ::get_xyzq_len() {
 XYZQ::XYZQ() {
   ncoord = 0;
   xyzq_len = 0;
-  align = 32;
+  align = warpsize;
   xyzq = NULL;
 }
 
