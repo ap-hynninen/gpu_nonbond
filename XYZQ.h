@@ -14,7 +14,7 @@
 class XYZQ {
 
 private:
-  int get_xyzq_len();
+  int get_xyzq_len(const int ncoord_in);
 
 public:
   int align;
@@ -27,7 +27,8 @@ public:
   XYZQ(const char *filename, int align=warpsize);
   ~XYZQ();
 
-  void realloc(int ncoord, float fac=1.0f);
+  void realloc(int ncoord_new, float fac=1.0f);
+  void resize(int ncoord_new, float fac=1.0f);
   void set_xyzq(int ncopy, float4 *h_xyzq, size_t offset=0, cudaStream_t stream=0);
 
   void set_xyzq(const cudaXYZ<double>& coord, const float *q, cudaStream_t stream=0);

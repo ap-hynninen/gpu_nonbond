@@ -103,9 +103,8 @@ __global__ void set_xyz_shift_kernel(const int ncoord,
 // Return xyzq length that has extra align:
 // ncoord-1 = last possible index
 //
-int XYZQ::get_xyzq_len() {
-  return ((ncoord-1)/align+1)*align;
-  //return (ncoord-1 + align);
+int XYZQ::get_xyzq_len(const int ncoord_in) {
+  return ((ncoord_in-1)/align+1)*align;
 }
 
 //
@@ -122,7 +121,7 @@ XYZQ::XYZQ() {
 // Class creator
 //
 XYZQ::XYZQ(int ncoord, int align) : ncoord(ncoord), align(align) {
-  xyzq_len = get_xyzq_len();
+  xyzq_len = get_xyzq_len(ncoord);
   allocate<float4>(&xyzq, xyzq_len);
 }
 
@@ -152,7 +151,7 @@ XYZQ::XYZQ(const char *filename, int align) : align(align) {
     while (file >> xyzq_cpu[i].x >> xyzq_cpu[i].y >> xyzq_cpu[i].z >> xyzq_cpu[i].w) i++;
     
     // Allocate GPU memory
-    xyzq_len = get_xyzq_len();
+    xyzq_len = get_xyzq_len(ncoord);
     allocate<float4>(&xyzq, xyzq_len);
 
     // Copy coordinates from CPU to GPU
@@ -178,11 +177,17 @@ XYZQ::~XYZQ() {
 //
 // Re-allocates array, does not preserve content
 //
-void XYZQ::realloc(int ncoord, float fac) {
-  this->ncoord = ncoord;
-  int req_xyzq_len = get_xyzq_len();
-  
-  reallocate<float4>(&xyzq, &xyzq_len, req_xyzq_len, fac);
+void XYZQ::realloc(int ncoord_new, float fac) {
+  reallocate<float4>(&xyzq, &xyzq_len, get_xyzq_len(ncoord_new), fac);
+  this->ncoord = ncoord_new;
+}
+
+//
+// Re-sizes array, preserves content
+//
+void XYZQ::resize(int ncoord_new, float fac) {
+  ::resize<float4>(&xyzq, &xyzq_len, ncoord, get_xyzq_len(ncoord_new), fac);
+  this->ncoord = ncoord_new;
 }
 
 //
