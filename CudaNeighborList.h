@@ -105,7 +105,7 @@ public:
 		    const char* filename=NULL);
 
   void sort(const int indList, const int *zone_patom,
-	    float4 *xyzq,
+	    const float4 *xyzq,
 	    float4 *xyzq_sorted,
 	    int *loc2glo,
 	    cudaStream_t stream=0);

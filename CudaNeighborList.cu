@@ -188,7 +188,7 @@ void CudaNeighborList<tilesize>::registerList(std::vector<int>& numIntZone,
 //
 template <int tilesize>
 void CudaNeighborList<tilesize>::sort(const int indList, const int *zone_patom,
-				      float4 *xyzq,
+				      const float4 *xyzq,
 				      float4 *xyzq_sorted,
 				      int *loc2glo,
 				      cudaStream_t stream) {

@@ -30,6 +30,9 @@ private:
   // Total number of cells
   int ncell;
 
+  // Maximum number of atoms in all columns
+  int col_max_natom;
+  
   // Total number of coordinates
   int ncoord_tot;
 
@@ -53,8 +56,15 @@ private:
   int loc2gloTmp_len;
   int* loc2gloTmp;
 
+  // Temporary array used for constructing xyzq
+  int xyzqTmpLen;
+  float4* xyzqTmp;
+
+  // Pinned memory host-buffers for ncell, col_max_natom combo
+  int2* h_ncell_col_max_natom;
+  
   // Events
-  cudaEvent_t ncell_copy_event;
+  cudaEvent_t ncell_col_max_natom_copy_event;
   
   // Flag for testing neighborlist build
   bool test;
@@ -90,7 +100,7 @@ public:
 		 ZoneParam_t* h_ZoneParam, ZoneParam_t* d_ZoneParam,
 		 NlistParam_t* d_NlistParam,
 		 int* cell_patom, int* col_ncellz, int4* cell_xyz_zone,
-		 int* col_cell, int* ind_sorted, float4 *xyzq, float4 *xyzq_sorted,
+		 int* col_cell, int* ind_sorted, const float4 *xyzq, float4 *xyzq_sorted,
 		 cudaStream_t stream);
 
   void sort_build_indices(const int* zone_patom, const int cellStart,

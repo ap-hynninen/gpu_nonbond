@@ -59,8 +59,18 @@ struct NlistParam_t {
   int imy_lo, imy_hi;
   int imz_lo, imz_hi;
 
-  // Total number of cells
-  int ncell;
+  // ----------------------------------------------------------------------------------
+  // NOTE: ncell and col_max_natom must be kept together, hence this union-struct here
+  union {
+    int2 ncell_col_max_natom;
+    struct {
+      // Total number of cells
+      int ncell;
+      // Maximum number of atoms in all columns
+      int col_max_natom;
+    };
+  };
+  // ----------------------------------------------------------------------------------
 
   // Number of entries in ientry -table
   int n_ientry;
@@ -70,7 +80,6 @@ struct NlistParam_t {
 
   // Number of cell-cell exclusions
   int nexcl;
-
 };
 
 //
