@@ -8,10 +8,6 @@
 // IF defined, uses strict (Factor = 1.0f) memory reallocation. Used for debuggin memory problems.
 #define STRICT_MEMORY_REALLOC
 
-//static const int numNlistParam=2;
-//static __device__ NeighborListParam_t d_NlistParam[numNlistParam];
-//static __device__ ZoneParam_t d_ZoneParam[maxNumZone];
-
 //
 // Sort atoms into z-columns
 //
@@ -507,6 +503,86 @@ __global__ void sort_z_column_kernel(const int* __restrict__ col_patom,
   }
 }
 
+/*
+//
+// Assign atoms into buckets in z-direction
+// bucketPos[]   = for each bucket, position
+// bucketIndex[] = for each atom, bucket index
+//
+__global__ void assign_z_to_bucket_kernel(const int izoneStart, const int izoneEnd,
+					  const ZoneParam_t* __restrict__ d_ZoneParam,
+					  const float4* __restrict__ xyzq,
+					  int* __restrict__ bucketPos,
+					  int* __restrict__ bucketIndex) {
+  // Atom index
+  const int i = threadIdx.x + blockIdx.x*blockDim.x;
+  
+  int ind0 = 0;
+  int istart = 0;
+  int iend   = 0;
+  for (int izone=izoneStart;izone <= izoneEnd;izone++) {
+    istart = iend;
+    iend   = istart + d_ZoneParam[izone].ncoord;
+    if (i >= istart && i < iend) {
+      float z = xyzq[i].z;
+      float min_z = d_ZoneParam[izone].min_xyz.z;
+      int iz = (int)((z - min_z)*d_ZoneParam[izone].invBucketDz);
+      int ind = ind0 + iz;
+      atomicAdd(&bucketPos[ind], 1);
+      bucketIndex[i] = ind;
+      break;
+    }
+    ind0 += d_ZoneParam[izone].numBucket*d_ZoneParam[izone].ncellx*d_ZoneParam[izone].ncelly;
+  }
+
+  // Calculate cumulative number of buckets for each zone
+  if (i == 0) {
+    int pos = 0;
+    for (int izone=izoneStart;izone <= izoneEnd;izone++) {
+      d_ZoneParam[izone].posBucket = pos;
+      pos += d_ZoneParam[izone].numBucket*d_ZoneParam[izone].ncellx*d_ZoneParam[izone].ncelly;
+    }
+    d_ZoneParam[izoneEnd+1].posBucket = pos;
+  }
+
+}
+
+//
+// Compute bucket positions
+// One thread block computes one set of buckets. Set of buckets has numBucketZ[] -number of buckets
+//
+__global__ void calc_bucket_pos_kernel(const int izoneStart, const int izoneEnd,
+				       const ZoneParam_t* __restrict__ d_ZoneParam,
+				       int* __restrict__ bucketPos) {
+  // Shared memory, requirement: max(ZoneParam[izone].numBucketZ)
+  extern __shared__ int shBucketPos[];
+
+  const int izone = 
+  
+  for (int iblock=blockIdx.x;iblock < d_ZoneParam[izoneEnd+1].posBucketZ;iblock+=gridDim.x) {
+
+    // Load bucketPos into shared memory
+    for (int i=0) {
+    }
+    __syncthreads();
+
+    
+    
+  }
+  
+  const int i = threadIdx.x + blockIdx.x*blockDim.x;
+  int start = 0;
+  int end = 0;
+  for (int izone=izoneStart;izone <= izoneEnd;izone++) {
+    int numBucketPerZone = d_ZoneParam[izone].numBucketZ*d_ZoneParam[izone].ncellx*d_ZoneParam[izone].ncelly;
+    end += numBucketPerZone;
+    if (i >= start && i < end) {
+    }
+    start += numBucketPerZone;
+  }
+}
+*/
+
 //
 // Calculates bounding box (bb) and cell z-boundaries (cell_bz)
 // NOTE: Each thread calculates one bounding box
@@ -607,9 +683,6 @@ CudaNeighborListSort::~CudaNeighborListSort() {
 void CudaNeighborListSort::setZoneParam(ZoneParam_t* h_ZoneParam, ZoneParam_t* d_ZoneParam,
 					cudaStream_t stream) {
   copy_HtoD<ZoneParam_t>(h_ZoneParam+izoneStart, d_ZoneParam+izoneStart, izoneEnd-izoneStart+1, stream);
-  //cudaCheck(cudaMemcpyToSymbolAsync(&d_ZoneParam[izoneStart], &h_ZoneParam[izoneStart],
-  //sizeof(ZoneParam_t)*(izoneEnd-izoneStart+1),
-  //				    0, cudaMemcpyHostToDevice, stream));
 }
 
 //
@@ -619,24 +692,7 @@ void CudaNeighborListSort::getZoneParam(ZoneParam_t* h_ZoneParam, ZoneParam_t* d
 					cudaStream_t stream) {
   cudaCheck(cudaStreamSynchronize(stream));
   copy_DtoH_sync<ZoneParam_t>(d_ZoneParam+izoneStart, h_ZoneParam+izoneStart, izoneEnd-izoneStart+1);
-  //cudaCheck(cudaMemcpyFromSymbol(&h_ZoneParam[izoneStart], &d_ZoneParam[izoneStart],
-  //sizeof(ZoneParam_t)*(izoneEnd-izoneStart+1),
-  //0, cudaMemcpyDeviceToHost));
 }
-
-/*
-//
-// Resets n_tile and n_ientry variables for build() -call
-//
-void CudaNeighborListSort::reset() {
-  get_NlistParam();
-  cudaCheck(cudaDeviceSynchronize());
-  h_NlistParam->n_tile = 0;
-  h_NlistParam->n_ientry = 0;
-  set_NlistParam(0);
-  cudaCheck(cudaDeviceSynchronize());
-}
-*/
 
 //
 // Calculate min_xyz and max_xyz
@@ -845,10 +901,26 @@ void CudaNeighborListSort::sort_core(const int* zone_patom, const int cellStart,
     std::cerr << "CudaNeighborListSort::sort_core, Device maximum reached: shmem_size="
 	      << shmem_size << " nthread=" << nthread << std::endl;
     exit(1);
+    /*
+    // Atoms in z-columns do not fit in shared memory => Use bucket sorting
+
+    for (int izone=izoneStart;izone <= izoneEnd;izone++) {
+      int nstart = zone_patom[izone];
+      int ncoord_zone = zone_patom[izone+1] - nstart;
+      if (ncoord_zone > 0) {
+      }
+    }
+    
+    // Assign atoms to buckets
+    assign_to_buckets_kernel<<< nblock, nthread, 0, stream >>>
+      (col_patom, xyzq_sorted+atomStart);
+    cudaCheck(cudaGetLastError());
+    */
+  } else {
+    sort_z_column_kernel<<< nblock, nthread, shmem_size, stream >>>
+      (col_patom, xyzq_sorted+atomStart, xyzqTmp, ind_sorted+atomStart);
+    cudaCheck(cudaGetLastError());
   }
-  sort_z_column_kernel<<< nblock, nthread, shmem_size, stream >>>
-    (col_patom, xyzq_sorted+atomStart, xyzqTmp, ind_sorted+atomStart);
-  cudaCheck(cudaGetLastError());
   
 }
 
