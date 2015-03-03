@@ -1154,48 +1154,49 @@ void CudaBondedForce<AT, CT>::setup_coef(const int nbondcoef, const float2 *h_bo
 //
 template <typename AT, typename CT>
 void CudaBondedForce<AT, CT>::setup_list(const int nbondlist, const bondlist_t *h_bondlist, 
-				     const int nureyblist, const bondlist_t *h_ureyblist,
-				     const int nanglelist, const anglelist_t *h_anglelist,
-				     const int ndihelist, const dihelist_t *h_dihelist,
-				     const int nimdihelist, const dihelist_t *h_imdihelist,
-				     const int ncmaplist, const cmaplist_t *h_cmaplist) {
+					 const int nureyblist, const bondlist_t *h_ureyblist,
+					 const int nanglelist, const anglelist_t *h_anglelist,
+					 const int ndihelist, const dihelist_t *h_dihelist,
+					 const int nimdihelist, const dihelist_t *h_imdihelist,
+					 const int ncmaplist, const cmaplist_t *h_cmaplist,
+					 cudaStream_t stream) {
 
   assert((nureyblist == 0) || (nureyblist > 0 && nureyblist == nanglelist));
 
   this->nbondlist = nbondlist;
   if (nbondlist > 0) {
     reallocate<bondlist_t>(&bondlist, &bondlist_len, nbondlist, 1.2f);
-    copy_HtoD_sync<bondlist_t>(h_bondlist, bondlist, nbondlist);
+    copy_HtoD<bondlist_t>(h_bondlist, bondlist, nbondlist, stream);
   }  
 
   this->nureyblist = nureyblist;
   if (nureyblist > 0) {
     reallocate<bondlist_t>(&ureyblist, &ureyblist_len, nureyblist, 1.2f);
-    copy_HtoD_sync<bondlist_t>(h_ureyblist, ureyblist, nureyblist);
+    copy_HtoD<bondlist_t>(h_ureyblist, ureyblist, nureyblist, stream);
   }
 
   this->nanglelist = nanglelist;
   if (nanglelist > 0) {
     reallocate<anglelist_t>(&anglelist, &anglelist_len, nanglelist, 1.2f);
-    copy_HtoD_sync<anglelist_t>(h_anglelist, anglelist, nanglelist);
+    copy_HtoD<anglelist_t>(h_anglelist, anglelist, nanglelist, stream);
   }
 
   this->ndihelist = ndihelist;
   if (ndihelist > 0) {
     reallocate<dihelist_t>(&dihelist, &dihelist_len, ndihelist, 1.2f);
-    copy_HtoD_sync<dihelist_t>(h_dihelist, dihelist, ndihelist);
+    copy_HtoD<dihelist_t>(h_dihelist, dihelist, ndihelist, stream);
   }
 
   this->nimdihelist = nimdihelist;
   if (nimdihelist > 0) {
     reallocate<dihelist_t>(&imdihelist, &imdihelist_len, nimdihelist, 1.2f);
-    copy_HtoD_sync<dihelist_t>(h_imdihelist, imdihelist, nimdihelist);
+    copy_HtoD<dihelist_t>(h_imdihelist, imdihelist, nimdihelist, stream);
   }
 
   this->ncmaplist = ncmaplist;
   if (ncmaplist > 0) {
     reallocate<cmaplist_t>(&cmaplist, &cmaplist_len, ncmaplist, 1.2f);
-    copy_HtoD_sync<cmaplist_t>(h_cmaplist, cmaplist, ncmaplist);
+    copy_HtoD<cmaplist_t>(h_cmaplist, cmaplist, ncmaplist, stream);
   }
 
 }
@@ -1207,15 +1208,15 @@ void CudaBondedForce<AT, CT>::setup_list(const int nbondlist, const bondlist_t *
 //
 template <typename AT, typename CT>
 void CudaBondedForce<AT, CT>::setup_list(const float4 *xyzq,
-				     const CT boxx, const CT boxy, const CT boxz,
-				     const int *glo2loc_ind,
-				     const int nbond_tbl, const int *bond_tbl, const bond_t *bond, 
-				     const int nureyb_tbl, const int *ureyb_tbl, const bond_t *ureyb,
-				     const int nangle_tbl, const int *angle_tbl, const angle_t *angle,
-				     const int ndihe_tbl, const int *dihe_tbl, const dihe_t *dihe,
-				     const int nimdihe_tbl, const int *imdihe_tbl, const dihe_t *imdihe,
-				     const int ncmap_tbl, const int *cmap_tbl, const cmap_t *cmap,
-				     cudaStream_t stream) {
+					 const CT boxx, const CT boxy, const CT boxz,
+					 const int *glo2loc_ind,
+					 const int nbond_tbl, const int *bond_tbl, const bond_t *bond, 
+					 const int nureyb_tbl, const int *ureyb_tbl, const bond_t *ureyb,
+					 const int nangle_tbl, const int *angle_tbl, const angle_t *angle,
+					 const int ndihe_tbl, const int *dihe_tbl, const dihe_t *dihe,
+					 const int nimdihe_tbl, const int *imdihe_tbl, const dihe_t *imdihe,
+					 const int ncmap_tbl, const int *cmap_tbl, const cmap_t *cmap,
+					 cudaStream_t stream) {
 
   this->nbondlist = nbond_tbl;
   if (nbondlist > 0) reallocate<bondlist_t>(&bondlist, &bondlist_len, nbondlist, 1.2f);

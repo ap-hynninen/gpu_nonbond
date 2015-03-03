@@ -126,7 +126,8 @@ public:
 		  const int nanglelist, const anglelist_t *h_anglelist,
 		  const int ndihelist, const dihelist_t *h_dihelist,
 		  const int nimdihelist, const dihelist_t *h_imdihelist,
-		  const int ncmaplist, const cmaplist_t *h_cmaplist);
+		  const int ncmaplist, const cmaplist_t *h_cmaplist,
+		  cudaStream_t stream=0);
 
   void setup_list(const float4 *xyzq,
 		  const CT boxx, const CT boxy, const CT boxz,

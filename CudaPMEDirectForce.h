@@ -53,7 +53,8 @@ public:
 			   const int *loc2glo, cudaStream_t stream=0)=0;
   
   virtual void set_14_list(int nin14list, int nex14list,
-			   xx14list_t* h_in14list, xx14list_t* h_ex14list)=0;
+			   xx14list_t* h_in14list, xx14list_t* h_ex14list,
+			   cudaStream_t stream=0)=0;
 
   virtual void set_14_list(const float4 *xyzq,
 			   const float boxx, const float boxy, const float boxz,
@@ -181,7 +182,8 @@ public:
 		   const int *loc2glo, cudaStream_t stream=0);
 
   void set_14_list(int nin14list, int nex14list,
-		   xx14list_t* h_in14list, xx14list_t* h_ex14list);
+		   xx14list_t* h_in14list, xx14list_t* h_ex14list,
+		   cudaStream_t stream=0);
 
   void set_14_list(const float4 *xyzq,
 		   const float boxx, const float boxy, const float boxz,

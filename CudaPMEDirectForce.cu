@@ -573,19 +573,20 @@ void CudaPMEDirectForce<AT, CT>::set_vdwtype(const int ncoord, const char *filen
 //
 template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::set_14_list(int nin14list, int nex14list,
-					     xx14list_t* h_in14list, xx14list_t* h_ex14list) {
+					     xx14list_t* h_in14list, xx14list_t* h_ex14list,
+					     cudaStream_t stream) {
 
   this->nin14list = nin14list;
   this->nex14list = nex14list;
 
   if (nin14list > 0) {
     reallocate<xx14list_t>(&in14list, &in14list_len, nin14list);
-    copy_HtoD_sync<xx14list_t>(h_in14list, in14list, nin14list);
+    copy_HtoD<xx14list_t>(h_in14list, in14list, nin14list, stream);
   }
 
   if (nex14list > 0) {
     reallocate<xx14list_t>(&ex14list, &ex14list_len, nex14list);
-    copy_HtoD_sync<xx14list_t>(h_ex14list, ex14list, nex14list);
+    copy_HtoD<xx14list_t>(h_ex14list, ex14list, nex14list, stream);
   }
 
 }
@@ -595,11 +596,11 @@ void CudaPMEDirectForce<AT, CT>::set_14_list(int nin14list, int nex14list,
 //
 template <typename AT, typename CT>
 void CudaPMEDirectForce<AT, CT>::set_14_list(const float4 *xyzq,
-				      const float boxx, const float boxy, const float boxz,
-				      const int *glo2loc_ind,
-				      const int nin14_tbl, const int *in14_tbl, const xx14_t *in14,
-				      const int nex14_tbl, const int *ex14_tbl, const xx14_t *ex14,
-				      cudaStream_t stream) {
+					     const float boxx, const float boxy, const float boxz,
+					     const int *glo2loc_ind,
+					     const int nin14_tbl, const int *in14_tbl, const xx14_t *in14,
+					     const int nex14_tbl, const int *ex14_tbl, const xx14_t *ex14,
+					     cudaStream_t stream) {
 
   this->nin14list = nin14_tbl;
   if (nin14list > 0) reallocate<xx14list_t>(&in14list, &in14list_len, nin14list, 1.2f);

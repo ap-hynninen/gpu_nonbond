@@ -1630,7 +1630,7 @@ void CudaNeighborListBuild<tilesize>::build(const int ncell, const int cellStart
 
   bool IvsI = (izoneStart == 0 && izoneEnd == 0);
 
-  nthread = 512;
+  nthread = 128;
   //nblock = (ncell_max-1)/(nthread/warpsize) + 1;
   nblock = (ncell-1)/(nthread/warpsize) + 1;
   shmem_size = (nthread/warpsize)*n_jlist_max*sizeof(int);     // sh_jlist[]

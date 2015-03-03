@@ -3,6 +3,7 @@
 #include <cassert>
 #include "gpu_utils.h"
 #include "cuda_utils.h"
+//#define BUCKET_SORT_IN_USE
 #include "CudaNeighborListSort.h"
 
 // IF defined, uses strict (Factor = 1.0f) memory reallocation. Used for debuggin memory problems.
@@ -15,7 +16,7 @@
 // atom_icol[istart..iend]     = column index for atoms 
 //
 __global__ void calc_z_column_index_kernel(const int izoneStart, const int izoneEnd,
-					   const ZoneParam_t* __restrict__ d_ZoneParam,
+					   const ZoneParam_t* __restrict__ ZoneParam,
 					   const float4* __restrict__ xyzq,
 					   int* __restrict__ col_natom,
 					   int* __restrict__ atom_icol,
@@ -28,15 +29,17 @@ __global__ void calc_z_column_index_kernel(const int izoneStart, const int izone
   int iend   = 0;
   for (int izone=izoneStart;izone <= izoneEnd;izone++) {
     istart = iend;
-    iend   = istart + d_ZoneParam[izone].ncoord;
+    iend   = istart + ZoneParam[izone].ncoord;
     if (i >= istart && i < iend) {
       float4 xyzq_val = xyzq[i];
       float x = xyzq_val.x;
       float y = xyzq_val.y;
-      float3 min_xyz = d_ZoneParam[izone].min_xyz;
-      int ix = (int)((x - min_xyz.x)*d_ZoneParam[izone].inv_celldx);
-      int iy = (int)((y - min_xyz.y)*d_ZoneParam[izone].inv_celldy);
-      int ind = ind0 + ix + iy*d_ZoneParam[izone].ncellx;
+      float3 min_xyz = ZoneParam[izone].min_xyz;
+      int ncellx = ZoneParam[izone].ncellx;
+      int ncelly = ZoneParam[izone].ncelly;
+      int ix = min((int)((x - min_xyz.x)*ZoneParam[izone].inv_celldx), ncellx-1);
+      int iy = min((int)((y - min_xyz.y)*ZoneParam[izone].inv_celldy), ncelly-1);
+      int ind = ind0 + ix + iy*ncellx;
       atomicAdd(&col_natom[ind], 1);
       atom_icol[i] = ind;
       int3 col_xy_zone_val;
@@ -46,9 +49,54 @@ __global__ void calc_z_column_index_kernel(const int izoneStart, const int izone
       col_xy_zone[ind] = col_xy_zone_val;
       break;
     }
-    ind0 += d_ZoneParam[izone].ncellx*d_ZoneParam[izone].ncelly;
+    ind0 += ZoneParam[izone].ncellx*ZoneParam[izone].ncelly;
   }
 
+}
+
+//
+// For each zone, calculates the maximum number of atoms per z-column
+// This information is used in the sorting of z-columns
+//
+// Thread block per zone
+//
+__global__ void calcZoneMaxZColNatomKernel(const int izoneStart,
+					   const ZoneParam_t* __restrict__ ZoneParam,
+					   const int* __restrict__ col_natom,
+					   int* __restrict__ zoneMaxZColNatom) {
+  // Shared memory
+  // Requires: blockDim.x*sizeof(int)
+  extern __shared__ int shZoneMaxZColNatom[];
+
+  // Number of columns in this zone
+  const int ncol = ZoneParam[izoneStart+blockIdx.x].ncellx*ZoneParam[izoneStart+blockIdx.x].ncelly;
+  // Starting column index in this zone
+  const int col0 = ZoneParam[izoneStart+blockIdx.x].zone_col - ZoneParam[izoneStart].zone_col;
+
+  // Result, only used by threadIdx.x = 0
+  int max_val = 0;  
+  for (int base=0;base < ncol;base+=blockDim.x) {
+
+    // Load blockDim.x number of values into shared memory
+    shZoneMaxZColNatom[threadIdx.x] = (base + threadIdx.x < ncol) ? col_natom[col0 + base + threadIdx.x] : 0;
+    __syncthreads();
+
+    // Find maximum of blockDim.x number of values
+    for (int d=1;d < blockDim.x;d*=2) {
+      int val = (threadIdx.x >= d) ? shZoneMaxZColNatom[threadIdx.x-d] : 0;
+      __syncthreads();
+      shZoneMaxZColNatom[threadIdx.x] = max(shZoneMaxZColNatom[threadIdx.x], val);
+      __syncthreads();
+    }
+
+    // Compare maximum found to the global maximum
+    if (threadIdx.x == 0) max_val = max(max_val, shZoneMaxZColNatom[blockDim.x-1]);
+  }
+
+  // Write result into global memory
+  if (threadIdx.x == 0) {
+    zoneMaxZColNatom[blockIdx.x] = max_val;
+  }
 }
 
 //
@@ -68,19 +116,14 @@ __global__ void calc_z_column_pos_kernel(const int tilesize, const int ncol_tot,
 					 int* __restrict__ col_cell,
 					 NlistParam_t* __restrict__ d_NlistParam) {
   // Shared memory
-  // Requires: blockDim.x*sizeof(int2) + blockDim.x*sizeof(int)
+  // Requires: blockDim.x*sizeof(int2)
   // This shared memory buffer is used for computing positions (cumulative sums) of columns, size blockDim.x*sizeof(int2)
   extern __shared__ int2 sh_pos[];
-  // This shared memory buffer is used for obtaining the maximum number of atoms in all columns, size blockDim.x*sizeof(int)
-  volatile int* sh_num = (int *)&sh_pos[blockDim.x];
   
   if (threadIdx.x == 0) {
     col_patom[0] = 0;
   }
 
-  // Maximum number of atoms in columns. Only used by threadIdx.x=0
-  int max_num = 0;
-  
   int2 offset = make_int2(0, 0);
   for (int base=0;base < ncol_tot;base += blockDim.x) {
     // i = column index
@@ -90,24 +133,19 @@ __global__ void calc_z_column_pos_kernel(const int tilesize, const int ncol_tot,
     tmpval.y = (i < ncol_tot) ? (tmpval.x - 1)/tilesize + 1 : 0; // Number of z-cells in this column (NOTE: this needs to be 0 when tmpval.x = 0)
     if (i < ncol_tot) col_ncellz[i] = tmpval.y;    // Set col_ncellz[icol]
     sh_pos[threadIdx.x] = tmpval;
-    sh_num[threadIdx.x] = tmpval.x;
     if (i < ncol_tot) col_natom[i] = 0;
     __syncthreads();
 
     for (int d=1;d < blockDim.x; d *= 2) {
       int2 posd = (threadIdx.x >= d) ? sh_pos[threadIdx.x-d] : make_int2(0, 0);
-      int  numd = (threadIdx.x >= d) ? sh_num[threadIdx.x-d] : 0;
       __syncthreads();
       int2 pos0 = sh_pos[threadIdx.x];
       pos0.x += posd.x;
       pos0.y += posd.y;
       sh_pos[threadIdx.x] = pos0;
-      sh_num[threadIdx.x] = max(sh_num[threadIdx.x], numd);
       __syncthreads();
     }
 
-    if (threadIdx.x == 0) max_num = max(max_num, sh_num[blockDim.x-1]);
-    
     if (i < ncol_tot) {
       // shpos[threadIdx.x].x = cumulative sum of number of atoms in this column
       // shpos[threadIdx.x].y = cumulative sum of number of z-cells in this column
@@ -160,8 +198,6 @@ __global__ void calc_z_column_pos_kernel(const int tilesize, const int ncol_tot,
     // Zero n_ientry and n_tile -counters in preparation for neighbor list build
     d_NlistParam->n_ientry = 0;
     d_NlistParam->n_tile = 0;
-    // Store maximum number of atoms in a column
-    d_NlistParam->col_max_natom = max_num;
   }
 
   // Set zone_cell = starting cell for each zone
@@ -405,35 +441,50 @@ __global__ void build_atom_pcell_kernel(const int* __restrict__ cell_patom,
 // Uses bitonic sort, see:
 // http://www.tools-of-computing.com/tc/CS/Sorts/bitonic_sort.htm
 //
-// Each thread block sorts a single z column. Size of z-columns is limited by the shared memory size.
+// Each thread block sorts a single z column.
 //
-struct keyval_t {
-  union {
-    float key;
-    int ind;
-  };
-  int val;
-};
-__global__ void sort_z_column_kernel(const int* __restrict__ col_patom,
-				     float4* __restrict__ xyzq,
-				     float4* __restrict__ xyzq_tmp,
-				     int* __restrict__ ind_sorted) {
+// Shared memory version (use_shmem = true)
+// Length of z-columns is limited by the shared memory size.
+// max_n not used
+// glo_keyvalBase = NULL
+//
+// Global memory version (use_shmem = false)
+// No limitations on the length of the z-columns
+// max_n = maximum number of atoms across all z-columns
+// glo_keyvalBase = buffer of size max_n*blockDim.x
+//
+template <bool use_shmem>
+__global__
+void bitonicSortZColKernel(const int max_n,
+			   const int* __restrict__ col_patom,
+			   float4* __restrict__ xyzq,
+			   float4* __restrict__ xyzqTmp,
+			   int* __restrict__ indSorted,
+			   keyval_t* __restrict__ glo_keyvalBase) {
 
-  // Shared memory
-  // Requires: max(n)*sizeof(keyval_t)
+  // Shared memory:
+  // Requires max_n*sizeof(keyval_t) for the shared memory version
   extern __shared__ keyval_t sh_keyval[];
 
   const int col_patom0 = col_patom[blockIdx.x];
   const int n = col_patom[blockIdx.x+1] - col_patom0;
+
+  // Get pointer for this column (global memory version only)
+  keyval_t* __restrict__ glo_keyval;
+  if (!use_shmem) glo_keyval = &glo_keyvalBase[max_n*blockIdx.x];
   
-  // Read keys and values into shared memory
+  // Read keys and values into shared/global memory
   // key = z-coordinate
   // val = index
   for (int i=threadIdx.x;i < n;i+=blockDim.x) {
     keyval_t keyval;
     keyval.key = xyzq[i + col_patom0].z;
     keyval.val = i + col_patom0;
-    sh_keyval[i] = keyval;
+    if (use_shmem) {
+      sh_keyval[i] = keyval;
+    } else {
+      glo_keyval[i] = keyval;
+    }
   }
   __syncthreads();
 
@@ -448,20 +499,22 @@ __global__ void sort_z_column_kernel(const int* __restrict__ col_patom,
 	    asc = ((i & kk) == 0 ? !asc : asc);
 
 	  // Read data
-	  keyval_t keyval1 = sh_keyval[i];
-	  keyval_t keyval2 = sh_keyval[ixj];
+	  keyval_t keyval1 = (use_shmem) ? sh_keyval[i] : glo_keyval[i];
+	  keyval_t keyval2 = (use_shmem) ? sh_keyval[ixj] : glo_keyval[ixj];
 
 	  float lo_key = asc ? keyval1.key : keyval2.key;
 	  float hi_key = asc ? keyval2.key : keyval1.key;
 	
 	  if (lo_key > hi_key) {
 	    // keys are in wrong order => exchange
-	    sh_keyval[i]   = keyval2;
-	    sh_keyval[ixj] = keyval1;
+	    if (use_shmem) {
+	      sh_keyval[i]   = keyval2;
+	      sh_keyval[ixj] = keyval1;
+	    } else {
+	      glo_keyval[i]   = keyval2;
+	      glo_keyval[ixj] = keyval1;
+	    }
 	  }
-
-	  //if ((i&k)==0 && get(i)>get(ixj)) exchange(i,ixj);
-	  //if ((i&k)!=0 && get(i)<get(ixj)) exchange(i,ixj);
 	}
       }
       __syncthreads();
@@ -476,7 +529,11 @@ __global__ void sort_z_column_kernel(const int* __restrict__ col_patom,
 
   // keys are not needed anymore, store index into that memory location
   for (int i=threadIdx.x;i < n;i+=blockDim.x) {
-    sh_keyval[i].ind = ind_sorted[i + col_patom0];
+    if (use_shmem) {
+      sh_keyval[i].ind = indSorted[i + col_patom0];
+    } else {
+      glo_keyval[i].ind = indSorted[i + col_patom0];
+    }
   }
   __syncthreads();
   
@@ -485,103 +542,110 @@ __global__ void sort_z_column_kernel(const int* __restrict__ col_patom,
     float4 xyzq_val;
     int ind_val;
     if (i < n) {
-      int pos = sh_keyval[i].val;
-      ind_val = sh_keyval[pos - col_patom0].ind;
+      int pos = (use_shmem) ? sh_keyval[i].val : glo_keyval[i].val;
+      ind_val = (use_shmem) ? sh_keyval[pos - col_patom0].ind : glo_keyval[pos - col_patom0].ind;
       xyzq_val = xyzq[pos];
     }
     __syncthreads();
     if (i < n) {
       int newpos = i + col_patom0;
-      ind_sorted[newpos] = ind_val;
-      xyzq_tmp[newpos] = xyzq_val;
+      indSorted[newpos] = ind_val;
+      xyzqTmp[newpos] = xyzq_val;
     }
   }
   __syncthreads();
 
   for (int i=threadIdx.x;i < n;i+=blockDim.x) {
-    xyzq[i + col_patom0] = xyzq_tmp[i + col_patom0];
+    xyzq[i + col_patom0] = xyzqTmp[i + col_patom0];
   }
 }
 
-/*
+#ifdef BUCKET_SORT_IN_USE
 //
-// Assign atoms into buckets in z-direction
+// Sort atoms in z-columns using bucket sort
+// One block does one z-column
+//
+// min_z = minimum z-coordinate for this zone
+// invBucketWidth = 1/(bucket width)
+// numBucket = number of buckets per column
 // bucketPos[]   = for each bucket, position
 // bucketIndex[] = for each atom, bucket index
 //
-__global__ void assign_z_to_bucket_kernel(const int izoneStart, const int izoneEnd,
-					  const ZoneParam_t* __restrict__ d_ZoneParam,
-					  const float4* __restrict__ xyzq,
-					  int* __restrict__ bucketPos,
-					  int* __restrict__ bucketIndex) {
-  // Atom index
-  const int i = threadIdx.x + blockIdx.x*blockDim.x;
-  
-  int ind0 = 0;
-  int istart = 0;
-  int iend   = 0;
-  for (int izone=izoneStart;izone <= izoneEnd;izone++) {
-    istart = iend;
-    iend   = istart + d_ZoneParam[izone].ncoord;
-    if (i >= istart && i < iend) {
-      float z = xyzq[i].z;
-      float min_z = d_ZoneParam[izone].min_xyz.z;
-      int iz = (int)((z - min_z)*d_ZoneParam[izone].invBucketDz);
-      int ind = ind0 + iz;
-      atomicAdd(&bucketPos[ind], 1);
-      bucketIndex[i] = ind;
-      break;
-    }
-    ind0 += d_ZoneParam[izone].numBucket*d_ZoneParam[izone].ncellx*d_ZoneParam[izone].ncelly;
-  }
-
-  // Calculate cumulative number of buckets for each zone
-  if (i == 0) {
-    int pos = 0;
-    for (int izone=izoneStart;izone <= izoneEnd;izone++) {
-      d_ZoneParam[izone].posBucket = pos;
-      pos += d_ZoneParam[izone].numBucket*d_ZoneParam[izone].ncellx*d_ZoneParam[izone].ncelly;
-    }
-    d_ZoneParam[izoneEnd+1].posBucket = pos;
-  }
-
-}
-
-//
-// Compute bucket positions
-// One thread block computes one set of buckets. Set of buckets has numBucketZ[] -number of buckets
-//
-__global__ void calc_bucket_pos_kernel(const int izoneStart, const int izoneEnd,
-				       const ZoneParam_t* __restrict__ d_ZoneParam,
-				       int* __restrict__ bucketPos) {
-  // Shared memory, requirement: max(ZoneParam[izone].numBucketZ)
+__global__ void bucketSortZColKernel(const int* __restrict__ col_patom,
+				     const float min_z, const float invBucketWidth,
+				     const int numBucket,
+				     int* __restrict__ bucketPosBase,
+				     int* __restrict__ bucketIndexBase,
+				     float4* __restrict__ xyzqBase,
+				     float4* __restrict__ xyzqTmpBase,
+				     int* __restrict__ indSortedBase,
+				     int* __restrict__ indSortedTmpBase) {
+  // Shared memory, requires: blockDim.x*sizeof(int)
   extern __shared__ int shBucketPos[];
 
-  const int izone = 
+  // Get atom starting index and number of coordinates
+  const int atomStart = col_patom[blockIdx.x];
+  const int ncoord = col_patom[blockIdx.x+1] - atomStart;
   
-  for (int iblock=blockIdx.x;iblock < d_ZoneParam[izoneEnd+1].posBucketZ;iblock+=gridDim.x) {
+  // Pointers for this column
+  int* __restrict__ bucketPos = &bucketPosBase[numBucket*blockIdx.x];
+  int* __restrict__ bucketIndex = &bucketIndexBase[atomStart];
+  float4* __restrict__ xyzq = &xyzqBase[atomStart];
+  float4* __restrict__ xyzqTmp = &xyzqTmpBase[atomStart];
+  int* __restrict__ indSorted = &indSortedBase[atomStart];
+  int* __restrict__ indSortedTmp = &indSortedTmpBase[atomStart];
+  
+  // Before starting, clear bucketPos
+  for (int i=threadIdx.x;i < numBucket;i+=blockDim.x) bucketPos[i] = 0;
+  __syncthreads();
 
+  // Assign atoms into buckets
+  for (int i=threadIdx.x;i < ncoord;i+=blockDim.x) {
+    int ibucket = min((int)((xyzq[i].z - min_z)*invBucketWidth), numBucket-1);
+    atomicAdd(&bucketPos[ibucket], 1);
+    bucketIndex[i] = ibucket;
+  }
+  __syncthreads();
+  
+  // Compute position of buckets
+  int pos0 = 0;
+  for (int base=0;base < ncoord;base+=blockDim.x) {
     // Load bucketPos into shared memory
-    for (int i=0) {
-    }
+    shBucketPos[threadIdx.x] = (base+threadIdx.x < ncoord) ? bucketPos[base+threadIdx.x] : 0;
     __syncthreads();
-
-    
-    
-  }
-  
-  const int i = threadIdx.x + blockIdx.x*blockDim.x;
-  int start = 0;
-  int end = 0;
-  for (int izone=izoneStart;izone <= izoneEnd;izone++) {
-    int numBucketPerZone = d_ZoneParam[izone].numBucketZ*d_ZoneParam[izone].ncellx*d_ZoneParam[izone].ncelly;
-    end += numBucketPerZone;
-    if (i >= start && i < end) {
+    // Reduce in shared memory, result is inclusive cumsum
+    for (int d=1;d < blockDim.x;d*=2) {
+      int val = (threadIdx.x >= d) ? shBucketPos[threadIdx.x-d] : 0;
+      __syncthreads();
+      shBucketPos[threadIdx.x] += val;
+      __syncthreads();
     }
-    start += numBucketPerZone;
+    // Write result back into global memory and shift to get exclusive cumsum
+    bucketPos[base+threadIdx.x] = pos0 + (threadIdx.x >= 1) ? shBucketPos[threadIdx.x-1] : 0;
+    // Broadcast last value to pos0
+    pos0 = shBucketPos[blockDim.x-1];
   }
+  __syncthreads();
+  
+  // Re-order according to buckets, result in (xyzqTmp, indSortedTmp)
+  for (int i=threadIdx.x;i < ncoord;i+=blockDim.x) {
+    int ibucket = bucketIndex[i];
+    int pos = atomicAdd(&bucketPos[ibucket], 1);
+    xyzqTmp[pos] = xyzq[i];
+    indSortedTmp[pos] = indSorted[i];
+  }
+  __syncthreads();
+
+  // Sort within buckets
+  THIS PART NOT IMPLEMENTED!
+  
+  // Copy final result back to xyzq
+  for (int i=threadIdx.x;i < ncoord;i+=blockDim.x) {
+    xyzq[i] = xyzqTmp[i];
+    indSorted[i] = indSortedTmp[i];
+  }  
 }
-*/
+#endif
 
 //
 // Calculates bounding box (bb) and cell z-boundaries (cell_bz)
@@ -656,11 +720,32 @@ CudaNeighborListSort::CudaNeighborListSort(const int tilesize, const int izoneSt
   xyzqTmpLen = 0;
   xyzqTmp = NULL;
 
+#ifdef BUCKET_SORT_IN_USE
+  bucketPosLen = 0;
+  bucketPos = NULL;
+
+  bucketIndexLen = 0;
+  bucketIndex = NULL;
+
+  indSortedTmpLen = 0;
+  indSortedTmp = NULL;
+#else
+  keyvalBufferLen = 0;
+  keyvalBuffer = NULL;
+#endif
+
   test = false;
 
-  allocate_host<int2>(&h_ncell_col_max_natom, 1);
+  // Allocate pinned host memory
+  allocate_host<int>(&h_ncell, 1);
+  allocate_host<int>(&h_zoneMaxZColNatom, izoneEnd-izoneStart+1);
+
+  // Allocate device memory
+  allocate<int>(&d_zoneMaxZColNatom, izoneEnd-izoneStart+1);  
   
-  cudaCheck(cudaEventCreate(&ncell_col_max_natom_copy_event));
+  // Create events
+  cudaCheck(cudaEventCreate(&ncell_copy_event));
+  cudaCheck(cudaEventCreate(&zoneMaxZColNatom_copy_event));
 }
 
 //
@@ -673,8 +758,18 @@ CudaNeighborListSort::~CudaNeighborListSort() {
   if (col_xy_zone != NULL) deallocate<int3>(&col_xy_zone);
   if (loc2gloTmp != NULL) deallocate<int>(&loc2gloTmp);
   if (xyzqTmp != NULL) deallocate<float4>(&xyzqTmp);
-  deallocate_host<int2>(&h_ncell_col_max_natom);
-  cudaCheck(cudaEventDestroy(ncell_col_max_natom_copy_event));
+#ifdef BUCKET_SORT_IN_USE
+  if (bucketPos != NULL) deallocate<int>(&bucketPos);
+  if (bucketIndex != NULL) deallocate<int>(&bucketIndex);
+  if (indSortedTmp != NULL) deallocate<int>(&indSortedTmp);
+#else
+  if (keyvalBuffer != NULL) deallocate<keyval_t>(&keyvalBuffer);
+#endif  
+  deallocate_host<int>(&h_ncell);
+  deallocate_host<int>(&h_zoneMaxZColNatom);
+  deallocate<int>(&d_zoneMaxZColNatom);
+  cudaCheck(cudaEventDestroy(ncell_copy_event));
+  cudaCheck(cudaEventDestroy(zoneMaxZColNatom_copy_event));
 }
 
 //
@@ -742,7 +837,7 @@ void CudaNeighborListSort::sort_setup(const int *zone_patom,
   ncol_tot = 0;
   ncoord_tot = 0;
   ncell_max = 0;
-  h_ZoneParam[izoneStart].zone_col = 0;
+  if (izoneStart == 0) h_ZoneParam[0].zone_col = 0;
   for (int izone=izoneStart;izone <= izoneEnd;izone++) {
     h_ZoneParam[izone].ncoord = zone_patom[izone+1] - zone_patom[izone];
     if (h_ZoneParam[izone].ncoord > 0) {
@@ -782,7 +877,7 @@ void CudaNeighborListSort::sort_setup(const int *zone_patom,
     h_ZoneParam[izone].inv_celldy = 1.0f/h_ZoneParam[izone].celldy;
     if (izone > 0) {
       h_ZoneParam[izone].zone_col = h_ZoneParam[izone-1].zone_col +
-	h_ZoneParam[izone-1].ncellx*h_ZoneParam[izone-1].ncelly;
+    	h_ZoneParam[izone-1].ncellx*h_ZoneParam[izone-1].ncelly;
     }
     int ncellxy = h_ZoneParam[izone].ncellx*h_ZoneParam[izone].ncelly;
     ncol_tot += ncellxy;
@@ -847,11 +942,26 @@ void CudaNeighborListSort::sort_core(const int* zone_patom, const int cellStart,
   cudaCheck(cudaGetLastError());
 
   //
+  // For each zone, calculate maximum number of atoms in columns
+  //
+  nthread = 0;
+  for (int izone=izoneStart;izone <= izoneEnd;izone++) {
+    nthread = max(nthread, h_ZoneParam[izone].ncellx*h_ZoneParam[izone].ncelly);
+  }
+  nthread = min(nthread, get_max_nthread());
+  shmem_size = nthread*sizeof(int);
+  calcZoneMaxZColNatomKernel<<< izoneEnd-izoneStart+1, nthread, shmem_size, stream>>>
+    (izoneStart, d_ZoneParam, col_natom, d_zoneMaxZColNatom);
+  cudaCheck(cudaGetLastError());
+  copy_DtoH<int>(d_zoneMaxZColNatom, h_zoneMaxZColNatom, izoneEnd-izoneStart+1, stream);
+  cudaCheck(cudaEventRecord(zoneMaxZColNatom_copy_event, stream));
+  
+  //
   // Calculate positions in z columns
   // NOTE: Clears col_natom and sets (col_patom, cell_patom, col_ncellz, d_NlistParam.ncell)
   //
   nthread = min(((ncol_tot-1)/tilesize+1)*tilesize, get_max_nthread());
-  shmem_size = nthread*sizeof(int2) + nthread*sizeof(int);
+  shmem_size = nthread*sizeof(int2);
   if (shmem_size > get_max_shmem_size()) {
     std::cerr << "CudaNeighborListSort::sort_core, Device maximum reached: shmem_size="
 	      << shmem_size << std::endl;
@@ -864,8 +974,8 @@ void CudaNeighborListSort::sort_core(const int* zone_patom, const int cellStart,
   cudaCheck(cudaGetLastError());
 
   // This copying is done to get value of ncell and col_max_natom
-  copy_DtoH<int2>(&d_NlistParam->ncell_col_max_natom, h_ncell_col_max_natom, 1, stream);
-  cudaCheck(cudaEventRecord(ncell_col_max_natom_copy_event, stream));
+  copy_DtoH<int>(&d_NlistParam->ncell, h_ncell, 1, stream);
+  cudaCheck(cudaEventRecord(ncell_copy_event, stream));
 
   //
   // Reorder atoms into z-columns
@@ -885,12 +995,55 @@ void CudaNeighborListSort::sort_core(const int* zone_patom, const int cellStart,
 		   col_patom, ind_sorted+atomStart);
   }
 
-  // Wait until value of ncell and col_max_natom is received on host
-  cudaCheck(cudaEventSynchronize(ncell_col_max_natom_copy_event));
-  this->ncell = h_ncell_col_max_natom->x;
-  this->col_max_natom = h_ncell_col_max_natom->y;
-  
-  // Now sort according to z coordinate
+  // Wait until zoneMaxZColNatom is received on host
+  cudaCheck(cudaEventSynchronize(zoneMaxZColNatom_copy_event));
+
+  //
+  // Now sort according to z coordinate. We sort each zone separately
+  //
+  int colStartZone = 0;
+  for (int izone=izoneStart;izone <= izoneEnd;izone++) {
+    int maxZColNatom = h_zoneMaxZColNatom[izone-izoneStart];
+    int ncellxy = h_ZoneParam[izone].ncellx*h_ZoneParam[izone].ncelly;
+    nblock = ncellxy;
+    nthread = min(maxZColNatom, get_max_nthread());
+    shmem_size = maxZColNatom*sizeof(keyval_t);
+    // Amount of shared memory is the limiting factor here:
+    // For a simple bitonic sort, values and keys must fit into shared memory
+    if (shmem_size <= get_max_shmem_size()) {
+      // Bitonic sort in shared memory
+      bitonicSortZColKernel<true> <<< nblock, nthread, shmem_size, stream >>>
+	(0, col_patom+colStartZone, xyzq_sorted+atomStart, xyzqTmp, ind_sorted+atomStart, NULL);
+      cudaCheck(cudaGetLastError());
+    } else {
+#ifdef BUCKET_SORT_IN_USE
+      // Bucket sort
+      float min_z = h_ZoneParam[izone].min_xyz.z;
+      float max_z = h_ZoneParam[izone].max_xyz.z;
+      int ncoord = h_ZoneParam[izone].ncoord;
+      int numBucket = maxZColNatom;
+      float invBucketWidth = ((float)numBucket)/(max_z - min_z);
+      reallocate<int>(&bucketPos, &bucketPosLen, numBucket*ncellxy, 1.5f);
+      reallocate<int>(&bucketIndex, &bucketIndexLen, ncoord, 1.5f);
+      reallocate<int>(&indSortedTmp, &indSortedTmpLen, ncoord, 1.5f);
+      shmem_size = nthread*sizeof(int);
+      bucketSortZColKernel<<< nblock, nthread, shmem_size, stream >>>
+	(col_patom+colStartZone, min_z, invBucketWidth, numBucket,
+	 bucketPos, bucketIndex, xyzq_sorted+atomStart, xyzqTmp,
+	 ind_sorted+atomStart, indSortedTmp);
+      cudaCheck(cudaGetLastError());
+#else
+      // Bitonic sort in global memory
+      reallocate<keyval_t>(&keyvalBuffer, &keyvalBufferLen, maxZColNatom*nblock, 1.5f);
+      bitonicSortZColKernel<false> <<< nblock, nthread, 0, stream >>>
+	(maxZColNatom, col_patom+colStartZone, xyzq_sorted+atomStart, xyzqTmp, ind_sorted+atomStart, keyvalBuffer);
+      cudaCheck(cudaGetLastError());
+#endif
+    }
+    colStartZone += ncellxy;
+  }
+
+  /*
   nblock = 0;
   for (int izone=izoneStart;izone <= izoneEnd;izone++) {
     nblock += h_ZoneParam[izone].ncellx*h_ZoneParam[izone].ncelly;
@@ -901,26 +1054,12 @@ void CudaNeighborListSort::sort_core(const int* zone_patom, const int cellStart,
     std::cerr << "CudaNeighborListSort::sort_core, Device maximum reached: shmem_size="
 	      << shmem_size << " nthread=" << nthread << std::endl;
     exit(1);
-    /*
-    // Atoms in z-columns do not fit in shared memory => Use bucket sorting
-
-    for (int izone=izoneStart;izone <= izoneEnd;izone++) {
-      int nstart = zone_patom[izone];
-      int ncoord_zone = zone_patom[izone+1] - nstart;
-      if (ncoord_zone > 0) {
-      }
-    }
-    
-    // Assign atoms to buckets
-    assign_to_buckets_kernel<<< nblock, nthread, 0, stream >>>
-      (col_patom, xyzq_sorted+atomStart);
-    cudaCheck(cudaGetLastError());
-    */
   } else {
     sort_z_column_kernel<<< nblock, nthread, shmem_size, stream >>>
       (col_patom, xyzq_sorted+atomStart, xyzqTmp, ind_sorted+atomStart);
     cudaCheck(cudaGetLastError());
   }
+  */
   
 }
 
@@ -962,6 +1101,10 @@ void CudaNeighborListSort::sort_build_indices(const int* zone_patom, const int c
   build_atom_pcell_kernel<<< nblock, nthread, 0, stream >>>(cell_patom, atom_pcell);
   cudaCheck(cudaGetLastError());
   */
+
+  // Wait until value of ncell is received on host
+  cudaCheck(cudaEventSynchronize(ncell_copy_event));
+  this->ncell = h_ncell[0];
 
   // Build bounding box (bb) and cell boundaries (cell_bz)
   nthread = 512;

@@ -9,6 +9,14 @@
 #include <cuda.h>
 #include "CudaNeighborListStruct.h"
 
+struct keyval_t {
+  union {
+    float key;
+    int ind;
+  };
+  int val;
+};
+
 class CudaNeighborListSort {
 private:
   // Disable copy constructor
@@ -60,11 +68,33 @@ private:
   int xyzqTmpLen;
   float4* xyzqTmp;
 
-  // Pinned memory host-buffers for ncell, col_max_natom combo
-  int2* h_ncell_col_max_natom;
+#ifdef BUCKET_SORT_IN_USE
+  //-------------------------------------------------
+  // These are required by the z-column bucket sort
+  int bucketPosLen;
+  int* bucketPos;
+
+  int bucketIndexLen;
+  int* bucketIndex;
+
+  int indSortedTmpLen;
+  int* indSortedTmp;
+  //-------------------------------------------------
+#else
+  int keyvalBufferLen;
+  keyval_t* keyvalBuffer;
+#endif
+  
+  // Pinned memory host-buffer for ncell (single value)
+  int* h_ncell;
+
+  // Pinned memory host and device buffers for zoneMaxZColNatom (izoneEnd-izoneStart+1 values)
+  int* h_zoneMaxZColNatom;
+  int* d_zoneMaxZColNatom;
   
   // Events
-  cudaEvent_t ncell_col_max_natom_copy_event;
+  cudaEvent_t ncell_copy_event;
+  cudaEvent_t zoneMaxZColNatom_copy_event;
   
   // Flag for testing neighborlist build
   bool test;
