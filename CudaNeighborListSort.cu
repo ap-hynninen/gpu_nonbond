@@ -621,7 +621,8 @@ __global__ void bucketSortZColKernel(const int* __restrict__ col_patom,
       __syncthreads();
     }
     // Write result back into global memory and shift to get exclusive cumsum
-    bucketPos[base+threadIdx.x] = pos0 + (threadIdx.x >= 1) ? shBucketPos[threadIdx.x-1] : 0;
+    if (base+threadIdx.x < ncoord)
+      bucketPos[base+threadIdx.x] = pos0 + (threadIdx.x >= 1) ? shBucketPos[threadIdx.x-1] : 0;
     // Broadcast last value to pos0
     pos0 = shBucketPos[blockDim.x-1];
   }

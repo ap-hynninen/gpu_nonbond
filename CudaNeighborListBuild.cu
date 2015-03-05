@@ -1980,7 +1980,8 @@ void bucketSortShortIentryKernel(const int numBucket,
       __syncthreads();
     }
     // Store bucketPos back into global memory and switch to exclusive cumsum
-    bucketPos[base+threadIdx.x] = pos0 + (threadIdx.x >= 1) ? shBucketPos[threadIdx.x-1] : 0;
+    if (base+threadIdx.x < numBucket)
+      bucketPos[base+threadIdx.x] = pos0 + (threadIdx.x >= 1) ? shBucketPos[threadIdx.x-1] : 0;
     // Get end position value for this block
     pos0 = shBucketPos[blockDim.x-1];
   }
