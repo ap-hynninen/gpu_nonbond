@@ -107,10 +107,10 @@ __global__ void CUDA_KERNEL_NAME(
 
   int indi, ish, startj, endj;
   if (ientry_ind < n_ientry) {
-    indi   = ientry[ientry_ind].indi;
+    indi   = ientry[ientry_ind].iatomStart;
     ish    = ientry[ientry_ind].ish;
-    startj = ientry[ientry_ind].startj;
-    endj   = ientry[ientry_ind].endj;
+    startj = ientry[ientry_ind].tileStart;
+    endj   = ientry[ientry_ind].tileEnd;
   } else {
     indi = 0;
     ish  = 1;
@@ -366,7 +366,7 @@ __global__ void CUDA_KERNEL_NAME(
     // Virial is calculated from (sh_fix[], sh_fiy[], sh_fiz[])
     // Variable "ish" depends on warp => Reduce within warp
     // NOTE: we skip the center element because it doesn't contribute to the virial
-    if (ish != 40) {
+    if (ish != 13) {
       // Convert into double
       volatile double *sh_sfix = (double *)sh_fix;
       volatile double *sh_sfiy = (double *)sh_fiy;
@@ -384,9 +384,9 @@ __global__ void CUDA_KERNEL_NAME(
 	}
       }
       if (wid == 0) {
-	atomicAdd(&virial->sforce_dp[ish-1], sh_sfix[0]);
-	atomicAdd(&virial->sforce_dp[ish],   sh_sfiy[0]);
-	atomicAdd(&virial->sforce_dp[ish+1], sh_sfiz[0]);
+	atomicAdd(&virial->sforce_dp[ish][0], sh_sfix[0]);
+	atomicAdd(&virial->sforce_dp[ish][1], sh_sfiy[0]);
+	atomicAdd(&virial->sforce_dp[ish][2], sh_sfiz[0]);
       }
     }
   }

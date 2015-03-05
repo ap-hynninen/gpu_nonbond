@@ -301,19 +301,13 @@ void write_force <long long int> (const long long int fx,
 //
 // Calculates box shift
 // 
-// On CPU this index is calculated as:
-//
-// ! shift index = 1...26*3+1
-// calc_ishift_{P*} = (is(1)+1 + (is(2)+1)*3 + (is(3)+1)*9 + 1)*3 - 2
-//
-// where is(1:3) = {-1, 0, 1}
+// ish = (imx+1) + 3*(imy+1) + 9*(imz+1) = 0...26
 //
 template <typename T>
 __forceinline__ __device__ __host__
 void calc_box_shift(int ish,
 		    const T boxx, const T boxy, const T boxz,
 		    T &shx, T &shy, T &shz) {
-  ish = (ish+2)/3 - 1;
   shz = (ish/9 - 1)*boxz;
   ish -= (ish/9)*9;
   shy = (ish/3 - 1)*boxy;
@@ -353,8 +347,7 @@ __forceinline__ __device__ int calc_ishift(const float4 xyzq_i, const float4 xyz
     is.z = 1;
   }
 
-  // shift index = 1...26*3+1
-  return (is.x+1 + (is.y+1)*3 + (is.z+1)*9 + 1)*3 - 2;
+  return is.x+1 + (is.y+1)*3 + (is.z+1)*9;
 }
 
 //----------------------------------------------------------------------------------------

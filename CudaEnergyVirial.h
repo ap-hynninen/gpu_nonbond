@@ -11,8 +11,8 @@
 // Structure into which virials are stored
 // NOTE: This structure is only used for computing addresses
 struct Virial_t {
-  double sforce_dp[27*3];
-  long long int sforce_fp[27*3];
+  double sforce_dp[27][3];
+  long long int sforce_fp[27][3];
   double virmat[9];
   // Energies start here ...
 };

@@ -2,9 +2,9 @@
 #define CUDANEIGHBORLISTSTRUCT_H
 
 // Constants
-const int n_jlist_max = 64;
-const int n_jlist_max_shift = 6;
-const int n_jlist_max_mask = (1<<6) - 1;
+const int n_jlist_max = 128;
+const int n_jlist_max_shift = 7;
+const int n_jlist_max_mask = (1<<7) - 1;
 const int max_ncoord = (1 << (32-n_jlist_max_shift));
 // Maximum number of interacting zones for each zone
 const int maxNumIntZone = 4;

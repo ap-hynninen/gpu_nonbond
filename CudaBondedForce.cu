@@ -110,19 +110,19 @@ __device__ void calc_bond_force_device(const int pos,
   // Store virial
   if (calc_virial) {
 #ifdef USE_DP_SFORCE
-    if (ish != 40) {
-      atomicAdd(&virial->sforce_dp[ish-1], (double)(fij*dx));
-      atomicAdd(&virial->sforce_dp[ish],   (double)(fij*dy));
-      atomicAdd(&virial->sforce_dp[ish+1], (double)(fij*dz));
+    if (ish != 13) {
+      atomicAdd(&virial->sforce_dp[ish][0], (double)(fij*dx));
+      atomicAdd(&virial->sforce_dp[ish][1], (double)(fij*dy));
+      atomicAdd(&virial->sforce_dp[ish][2], (double)(fij*dz));
     }
 #else
-    if (ish != 40) {
+    if (ish != 13) {
       fxij /= CONVERT_TO_VIR;
       fyij /= CONVERT_TO_VIR;
       fzij /= CONVERT_TO_VIR;
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish-1], llitoulli(fxij));
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish],   llitoulli(fyij));
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish+1], llitoulli(fzij));
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish][0], llitoulli(fxij));
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish][1], llitoulli(fyij));
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish][2], llitoulli(fzij));
     }
 #endif
   }
@@ -290,32 +290,32 @@ __device__ void calc_angle_force_device(const int pos,
     // Store virial
     if (calc_virial) {
 #ifdef USE_DP_SFORCE
-      if (ish != 40) {
-	atomicAdd(&virial->sforce_dp[ish-1], (double)(df*dtxi));
-	atomicAdd(&virial->sforce_dp[ish],   (double)(df*dtyi));
-	atomicAdd(&virial->sforce_dp[ish+1], (double)(df*dtzi));
+      if (ish != 13) {
+	atomicAdd(&virial->sforce_dp[ish][0], (double)(df*dtxi));
+	atomicAdd(&virial->sforce_dp[ish][1], (double)(df*dtyi));
+	atomicAdd(&virial->sforce_dp[ish][2], (double)(df*dtzi));
       }
-      if (ksh != 40) {
-	atomicAdd(&virial->sforce_dp[ksh-1], (double)(df*dtxj));
-	atomicAdd(&virial->sforce_dp[ksh],   (double)(df*dtyj));
-	atomicAdd(&virial->sforce_dp[ksh+1], (double)(df*dtzj));
+      if (ksh != 13) {
+	atomicAdd(&virial->sforce_dp[ksh][0], (double)(df*dtxj));
+	atomicAdd(&virial->sforce_dp[ksh][1], (double)(df*dtyj));
+	atomicAdd(&virial->sforce_dp[ksh][2], (double)(df*dtzj));
       }
 #else
-      if (ish != 40) {
+      if (ish != 13) {
 	AT_dtxi /= CONVERT_TO_VIR;
 	AT_dtyi /= CONVERT_TO_VIR;
 	AT_dtzi /= CONVERT_TO_VIR;
-	atomicAdd((unsigned long long int *)&virial->sforce_fp[ish-1], llitoulli(AT_dtxi));
-	atomicAdd((unsigned long long int *)&virial->sforce_fp[ish],   llitoulli(AT_dtyi));
-	atomicAdd((unsigned long long int *)&virial->sforce_fp[ish+1], llitoulli(AT_dtzi));
+	atomicAdd((unsigned long long int *)&virial->sforce_fp[ish][0], llitoulli(AT_dtxi));
+	atomicAdd((unsigned long long int *)&virial->sforce_fp[ish][1], llitoulli(AT_dtyi));
+	atomicAdd((unsigned long long int *)&virial->sforce_fp[ish][2], llitoulli(AT_dtzi));
       }
-      if (ksh != 40) {
+      if (ksh != 13) {
 	AT_dtxj /= CONVERT_TO_VIR;
 	AT_dtyj /= CONVERT_TO_VIR;
 	AT_dtzj /= CONVERT_TO_VIR;
-	atomicAdd((unsigned long long int *)&virial->sforce_fp[ksh-1], llitoulli(AT_dtxj));
-	atomicAdd((unsigned long long int *)&virial->sforce_fp[ksh],   llitoulli(AT_dtyj));
-	atomicAdd((unsigned long long int *)&virial->sforce_fp[ksh+1], llitoulli(AT_dtzj));
+	atomicAdd((unsigned long long int *)&virial->sforce_fp[ksh][0], llitoulli(AT_dtxj));
+	atomicAdd((unsigned long long int *)&virial->sforce_fp[ksh][1], llitoulli(AT_dtyj));
+	atomicAdd((unsigned long long int *)&virial->sforce_fp[ksh][2], llitoulli(AT_dtzj));
       }
 #endif
     }
@@ -605,20 +605,20 @@ __device__ void calc_dihe_force_device(const int pos,
   // Store virial
   if (calc_virial) {
 #ifdef USE_DP_SFORCE
-    if (ish != 40) {
-      atomicAdd(&virial->sforce_dp[ish-1], (double)(-gaa*ax));
-      atomicAdd(&virial->sforce_dp[ish],   (double)(-gaa*ay));
-      atomicAdd(&virial->sforce_dp[ish+1], (double)(-gaa*az));
+    if (ish != 13) {
+      atomicAdd(&virial->sforce_dp[ish][0], (double)(-gaa*ax));
+      atomicAdd(&virial->sforce_dp[ish][1], (double)(-gaa*ay));
+      atomicAdd(&virial->sforce_dp[ish][2], (double)(-gaa*az));
     }
-    if (jsh != 40) {
-      atomicAdd(&virial->sforce_dp[jsh-1], (double)(fga*ax - hgb*bx + gaa*ax));
-      atomicAdd(&virial->sforce_dp[jsh],   (double)(fga*ay - hgb*by + gaa*ay));
-      atomicAdd(&virial->sforce_dp[jsh+1], (double)(fga*az - hgb*bz + gaa*az));
+    if (jsh != 13) {
+      atomicAdd(&virial->sforce_dp[jsh][0], (double)(fga*ax - hgb*bx + gaa*ax));
+      atomicAdd(&virial->sforce_dp[jsh][1], (double)(fga*ay - hgb*by + gaa*ay));
+      atomicAdd(&virial->sforce_dp[jsh][2], (double)(fga*az - hgb*bz + gaa*az));
     }
-    if (lsh != 40) {
-      atomicAdd(&virial->sforce_dp[lsh-1], (double )(gbb*bx));
-      atomicAdd(&virial->sforce_dp[lsh],   (double )(gbb*by));
-      atomicAdd(&virial->sforce_dp[lsh+1], (double )(gbb*bz));
+    if (lsh != 13) {
+      atomicAdd(&virial->sforce_dp[lsh][0], (double )(gbb*bx));
+      atomicAdd(&virial->sforce_dp[lsh][1], (double )(gbb*by));
+      atomicAdd(&virial->sforce_dp[lsh][2], (double )(gbb*bz));
     }
 #else
     dfx /= CONVERT_TO_VIR;
@@ -627,23 +627,23 @@ __device__ void calc_dihe_force_device(const int pos,
     dgx /= CONVERT_TO_VIR;
     dgy /= CONVERT_TO_VIR;
     dgz /= CONVERT_TO_VIR;
-    if (ish != 40) {
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish-1], llitoulli(dfx));
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish],   llitoulli(dfy));
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish+1], llitoulli(dfz));
+    if (ish != 13) {
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish][0], llitoulli(dfx));
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish][1], llitoulli(dfy));
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[ish][2], llitoulli(dfz));
     }
-    if (jsh != 40) {
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[jsh-1], llitoulli(dgx-dfx));
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[jsh],   llitoulli(dgy-dfy));
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[jsh+1], llitoulli(dgz-dfz));
+    if (jsh != 13) {
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[jsh][0], llitoulli(dgx-dfx));
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[jsh][1], llitoulli(dgy-dfy));
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[jsh][2], llitoulli(dgz-dfz));
     }
-    if (lsh != 40) {
+    if (lsh != 13) {
       dhx /= CONVERT_TO_VIR;
       dhy /= CONVERT_TO_VIR;
       dhz /= CONVERT_TO_VIR;
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[lsh-1], llitoulli(dhx));
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[lsh],   llitoulli(dhy));
-      atomicAdd((unsigned long long int *)&virial->sforce_fp[lsh+1], llitoulli(dhz));
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[lsh][0], llitoulli(dhx));
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[lsh][1], llitoulli(dhy));
+      atomicAdd((unsigned long long int *)&virial->sforce_fp[lsh][2], llitoulli(dhz));
     }
 #endif
   }

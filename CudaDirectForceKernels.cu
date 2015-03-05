@@ -543,10 +543,10 @@ __device__ void calc_ex14_force_device(const int pos, const xx14list_t* ex14list
   write_force<AT>(-fxij, -fyij, -fzij, j, stride, force);
   // Store shifted forces
   if (calc_virial) {
-    if (ish != 40) {
-      atomicAdd(&virial->sforce_dp[ish-1], (double)(fij*dx));
-      atomicAdd(&virial->sforce_dp[ish],   (double)(fij*dy));
-      atomicAdd(&virial->sforce_dp[ish+1], (double)(fij*dz));
+    if (ish != 13) {
+      atomicAdd(&virial->sforce_dp[ish][0], (double)(fij*dx));
+      atomicAdd(&virial->sforce_dp[ish][1], (double)(fij*dy));
+      atomicAdd(&virial->sforce_dp[ish][2], (double)(fij*dz));
       fxij /= CONVERT_TO_VIR;
       fyij /= CONVERT_TO_VIR;
       fzij /= CONVERT_TO_VIR;
@@ -640,10 +640,10 @@ __device__ void calc_in14_force_device(
   
   // Store shifted forces
   if (calc_virial) {
-    if (ish != 40) {
-      atomicAdd(&virial->sforce_dp[ish-1], (double)(fij*dx));
-      atomicAdd(&virial->sforce_dp[ish],   (double)(fij*dy));
-      atomicAdd(&virial->sforce_dp[ish+1], (double)(fij*dz));
+    if (ish != 13) {
+      atomicAdd(&virial->sforce_dp[ish][0], (double)(fij*dx));
+      atomicAdd(&virial->sforce_dp[ish][1], (double)(fij*dy));
+      atomicAdd(&virial->sforce_dp[ish][2], (double)(fij*dz));
       fxij /= CONVERT_TO_VIR;
       fyij /= CONVERT_TO_VIR;
       fzij /= CONVERT_TO_VIR;

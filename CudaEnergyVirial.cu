@@ -16,7 +16,7 @@ __global__ void calcVirialKernel(const int ncoord, const float4* __restrict__ xy
   extern __shared__ volatile double sh_vir[];
 
   const int i = threadIdx.x + blockIdx.x*blockDim.x;
-  int ish = (i - ncoord)*3 + 1;
+  int ish = i - ncoord;
 
   double vir[9];
   if (i < ncoord) {
@@ -36,10 +36,10 @@ __global__ void calcVirialKernel(const int ncoord, const float4* __restrict__ xy
     vir[6] = z*fx;
     vir[7] = z*fy;
     vir[8] = z*fz;
-  } else if (ish >= 1 && ish <= 26*3+1) {
-    double sforcex = virial->sforce_dp[ish-1] + ((double)virial->sforce_fp[ish-1])*INV_FORCE_SCALE_VIR;
-    double sforcey = virial->sforce_dp[ish]   + ((double)virial->sforce_fp[ish])*INV_FORCE_SCALE_VIR;
-    double sforcez = virial->sforce_dp[ish+1] + ((double)virial->sforce_fp[ish+1])*INV_FORCE_SCALE_VIR;
+  } else if (ish >= 0 && ish <= 26) {
+    double sforcex = virial->sforce_dp[ish][0] + ((double)virial->sforce_fp[ish][0])*INV_FORCE_SCALE_VIR;
+    double sforcey = virial->sforce_dp[ish][1] + ((double)virial->sforce_fp[ish][1])*INV_FORCE_SCALE_VIR;
+    double sforcez = virial->sforce_dp[ish][2] + ((double)virial->sforce_fp[ish][2])*INV_FORCE_SCALE_VIR;
     double shx, shy, shz;
     calc_box_shift<double>(ish, boxx, boxy, boxz, shx, shy, shz);
     vir[0] = shx*sforcex;
@@ -270,7 +270,9 @@ void CudaEnergyVirial::getVirial(double *virmat) {
 void CudaEnergyVirial::getSforce(double *sforce) {
   this->reallocateBuffer();
   Virial_t *virial = (Virial_t *)(&h_buffer[0]);
-  for (int i=0;i < 27*3;i++) {
-    sforce[i] = virial->sforce_dp[i] + ((double)virial->sforce_fp[i])*INV_FORCE_SCALE_VIR_CPU;
+  for (int i=0;i < 27;i++) {
+    for (int d=0;d < 3;d++) {
+      sforce[i*3+d] = virial->sforce_dp[i][d] + ((double)virial->sforce_fp[i][d])*INV_FORCE_SCALE_VIR_CPU;
+    }
   }
 }

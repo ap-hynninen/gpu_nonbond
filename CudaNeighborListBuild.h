@@ -22,10 +22,10 @@ struct tile_excl_t {
 };
 
 struct ientry_t {
-  int indi;
+  int iatomStart;
   int ish;
-  int startj;
-  int endj;
+  int tileStart;
+  int tileEnd;
 };
 
 #ifdef USE_SPARSE
@@ -92,8 +92,19 @@ private:
   int n_int_zone_max;
 
   // Atom-Atom exclusion heap
-  int excl_atom_heap_len;
-  int* excl_atom_heap;
+  int exclAtomHeapLen;
+  int* exclAtomHeap;
+
+  // ------------------------------------
+  // Used for sorting ientry:
+  // bucketPos[n_jlist_max+1]
+  int bucketPosLen;
+  int* bucketPos;
+
+  // bucketIndex[n_ientry]
+  int bucketIndexLen;
+  int* bucketIndex;
+  // ------------------------------------
 
   // Flag for testing neighborlist build
   bool test;
