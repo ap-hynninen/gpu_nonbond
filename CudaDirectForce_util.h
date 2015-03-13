@@ -30,7 +30,6 @@ __global__ void CUDA_KERNEL_NAME(
 #endif
 				  AT* __restrict__ force, Virial_t* __restrict__ virial,
 				  double* __restrict__ energy_vdw, double* __restrict__ energy_elec) {
-
   // Pre-computed constants
   const int num_excl = ((tilesize*tilesize-1)/32 + 1);
   const int num_thread_per_excl = (32/num_excl);
@@ -80,6 +79,13 @@ __global__ void CUDA_KERNEL_NAME(
   shmem_pos += (blockDim.x/warpsize)*tilesize*sizeof(int);
 #endif
 #endif
+  
+  volatile AT *sh_fix = (AT *)&shmem[shmem_pos + (threadIdx.x/warpsize)*warpsize*sizeof(AT)];
+  shmem_pos += (blockDim.x/warpsize)*warpsize*sizeof(AT);
+  volatile AT *sh_fiy = (AT *)&shmem[shmem_pos + (threadIdx.x/warpsize)*warpsize*sizeof(AT)];
+  shmem_pos += (blockDim.x/warpsize)*warpsize*sizeof(AT);
+  volatile AT *sh_fiz = (AT *)&shmem[shmem_pos + (threadIdx.x/warpsize)*warpsize*sizeof(AT)];
+  shmem_pos += (blockDim.x/warpsize)*warpsize*sizeof(AT);
 
 #ifdef USE_BLOCK
 #ifndef NUMBLOCK_LARGE
@@ -88,13 +94,6 @@ __global__ void CUDA_KERNEL_NAME(
   shmem_pos += numBlock*sizeof(float);
 #endif
 #endif
-  
-  volatile AT *sh_fix = (AT *)&shmem[shmem_pos + (threadIdx.x/warpsize)*warpsize*sizeof(AT)];
-  shmem_pos += (blockDim.x/warpsize)*warpsize*sizeof(AT);
-  volatile AT *sh_fiy = (AT *)&shmem[shmem_pos + (threadIdx.x/warpsize)*warpsize*sizeof(AT)];
-  shmem_pos += (blockDim.x/warpsize)*warpsize*sizeof(AT);
-  volatile AT *sh_fiz = (AT *)&shmem[shmem_pos + (threadIdx.x/warpsize)*warpsize*sizeof(AT)];
-  shmem_pos += (blockDim.x/warpsize)*warpsize*sizeof(AT);
 
   float *sh_vdwparam;
   if (!tex_vdwparam) {
@@ -130,7 +129,7 @@ __global__ void CUDA_KERNEL_NAME(
   ish_tmp -= (ish_tmp/3)*3;
   float shx = (ish_tmp - 1)*d_setup.boxx;
   */
-  
+
   // Load i-atom data to shared memory (and shift coordinates)
   float4 xyzq_tmp = xyzq[indi + lid];
 #if __CUDA_ARCH__ >= 300
@@ -172,7 +171,7 @@ __global__ void CUDA_KERNEL_NAME(
   __syncthreads();
 #endif
 #endif
-  
+
   double vdwpotl;
   double coulpotl;
   if (calc_energy) {

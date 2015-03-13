@@ -8,17 +8,25 @@
 #include "CudaPMERecip.h"
 
 template <typename T, typename T2>
-void calcPair(const double L, const double kappa, const int nfft, const int order);
+void calcPair(const double r, const double L, const double kappa, const int nfft, const int order);
 
 int main(int argc, char *argv[]) {
 
-  double L=0.0, kappa=0.0;
+  double L=0.0, r=0.0, kappa=0.0;
   int nfft=0, order=0;
 
   bool arg_ok = true;
   int iarg = 1;
   while (iarg < argc) {
-    if (strcmp(argv[iarg],"-L")==0) {
+    if (strcmp(argv[iarg],"-r")==0) {
+      iarg++;
+      if (iarg == argc) {
+	arg_ok = false;
+	break;
+      }
+      sscanf(argv[iarg],"%lf",&r);
+      iarg++;
+    } else if (strcmp(argv[iarg],"-L")==0) {
       iarg++;
       if (iarg == argc) {
 	arg_ok = false;
@@ -57,19 +65,19 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (!arg_ok || L == 0.0 || kappa == 0.0 || nfft == 0 || order == 0) {
-    std::cout << "Usage: gpu_pair -L L -kappa kappa -nfft nfft -order order"<< std::endl;
+  if (!arg_ok || r == 0.0 || L == 0.0 || kappa == 0.0 || nfft == 0 || order == 0) {
+    std::cout << "Usage: gpu_pair -r r -L L -kappa kappa -nfft nfft -order order"<< std::endl;
     return 1;
   }
   
-  calcPair<float, float2>(L, kappa, nfft, order);
+  calcPair<float, float2>(r, L, kappa, nfft, order);
   
   return 1;
 }
 
 
 template <typename T, typename T2>
-void calcPair(const double L, const double kappa, const int nfft, const int order) {
+void calcPair(const double r, const double L, const double kappa, const int nfft, const int order) {
   const FFTtype fft_type = BOX;
 
   // Setup reciprocal vectors
@@ -87,7 +95,6 @@ void calcPair(const double L, const double kappa, const int nfft, const int orde
   Force<T> force(2);
 
   // r = Distance along diagonal
-  double r = 6.0;
   double a = r/(2.0*sqrt(3.0));
   float4 h_xyzq[2];
   T fx[2], fy[2], fz[2];
