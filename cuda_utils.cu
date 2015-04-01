@@ -4,7 +4,6 @@
 #include <utility>
 #include <cuda.h>
 #include <nvToolsExtCuda.h>
-#include "gpu_utils.h"
 #include "cuda_utils.h"
 
 //----------------------------------------------------------------------------------------
