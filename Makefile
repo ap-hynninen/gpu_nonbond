@@ -28,6 +28,11 @@ endif
 
 CUDA_COMPILER := $(shell which nvcc | wc -l 2> /dev/null)
 INTEL_COMPILER := $(shell which icc | wc -l 2> /dev/null)
+XLC_COMPILER := $(shell which xlc++ | wc -l 2> /dev/null)
+
+ifeq ($(XLC_COMPILER), $(YES))
+MPI_FOUND := $(shell which mpcc | wc -l 2> /dev/null)
+endif
 
 ifeq ($(MPI_FOUND), $(YES))
 
@@ -43,8 +48,13 @@ CC = mpicc
 CL = mpicc
 DEFS += -D MPICH_IGNORE_CXX_SEEK
 else
+ifeq ($(XLC_COMPILER), $(YES))
+CC = mpCC -compiler xlc++
+CL = mpCC -compiler xlc++
+else
 CC = mpic++
 CL = mpic++
+endif
 endif
 
 endif  # ifeq ($(OS),titan)
@@ -58,8 +68,13 @@ CC = icc
 CL = icc
 DEFS += -D MPICH_IGNORE_CXX_SEEK
 else
+ifeq ($(XLC_COMPILER), $(YES))
+CC = xlc++
+CL = xlc++
+else
 CC = g++
 CL = g++
+endif
 endif
 
 endif  # MPI_FOUND
@@ -119,7 +134,11 @@ endif
 ifeq ($(INTEL_COMPILER), $(YES))
 OPENMP_OPT = -openmp
 else
+ifeq ($(XLC_COMPILER), $(YES))
+OPENMP_OPT = -qsmp=omp
+else
 OPENMP_OPT = -fopenmp
+endif
 endif
 
 ifeq ($(CUDA_COMPILER), $(YES))
@@ -138,9 +157,16 @@ endif
 # NVCC_CFLAGS = flags for nvcc compiler
 # CUDA_LFLAGS = flags for linking with CUDA
 
-CUDA_CFLAGS = -I${CUDAROOT}/include $(OPTLEV) $(OPENMP_OPT) -std=c++0x
+CUDA_CFLAGS = -I${CUDAROOT}/include $(OPTLEV) $(OPENMP_OPT)
+ifeq ($(XLC_COMPILER), $(NO))
+CUDA_FLAGS += -std=c++0x
+endif
 NVCC_CFLAGS = $(OPTLEV) -lineinfo -fmad=true -use_fast_math $(GENCODE_FLAGS)
+ifeq ($(XLC_COMPILER), $(YES))
+MPI_CFLAGS = -I/opt/ibmhpc/pecurrent/mpich/gnu/include64
+else
 MPI_CFLAGS = -I${MPIROOT}/include
+endif
 
 ifeq ($(OS),linux)
 CUDA_LFLAGS = -L$(CUDAROOT)/lib64
@@ -196,6 +222,11 @@ clean:
 	nvcc -c $(MPI_CFLAGS) $(NVCC_CFLAGS) $(DEFS) $<
 	nvcc -M $(MPI_CFLAGS) $(NVCC_CFLAGS) $(DEFS) $*.cu > $*.d
 
+ifeq ($(XLC_COMPILER), $(YES))
+%.o : %.cpp
+	$(CC) -Mc $(CUDA_CFLAGS) $(DEFS) $<
+else
 %.o : %.cpp
 	$(CC) -c $(CUDA_CFLAGS) $(DEFS) $<
 	$(CC) -MM $(CUDA_CFLAGS) $(DEFS) $*.cpp > $*.d
+endif
