@@ -8,6 +8,85 @@
 
 //----------------------------------------------------------------------------------------
 //
+// Deallocate unified (managed) memory
+// pp = memory pointer
+//
+void deallocate_unified_T(void **pp) {
+  
+  if (*pp != NULL) {
+    cudaCheck(cudaFree((void *)(*pp)));
+    *pp = NULL;
+  }
+
+}
+//----------------------------------------------------------------------------------------
+//
+// Allocate unified (managed) memory
+// pp = memory pointer
+// len = length of the array
+//
+void allocate_unified_T(void **pp, const int len, const size_t sizeofT) {
+  cudaCheck(cudaMallocManaged(pp, sizeofT*len, cudaMemAttachGlobal));
+}
+
+//----------------------------------------------------------------------------------------
+//
+// Allocate & re-allocate unified (managed) memory
+// pp = memory pointer
+// curlen = current length of the array
+// newlen = new required length of the array
+// fac = extra space allocation factor: in case of re-allocation new length will be fac*newlen
+//
+void reallocate_unified_T(void **pp, int *curlen, const int newlen, const float fac, const size_t sizeofT) {
+  if (*pp != NULL && *curlen < newlen) {
+    cudaCheck(cudaFree((void *)(*pp)));
+    *pp = NULL;
+  }
+
+  if (*pp == NULL) {
+    if (fac > 1.0f) {
+      *curlen = (int)(((double)(newlen))*(double)fac);
+    } else {
+      *curlen = newlen;
+    }
+    allocate_unified_T(pp, *curlen, sizeofT);
+  }
+
+}
+
+//----------------------------------------------------------------------------------------
+//
+// Allocate & re-allocate unified (managed) memory, preserves content
+//
+void resize_unified_T(void **pp, int *curlen, const int cur_size, const int new_size,
+       const float fac, const size_t sizeofT) {
+
+  char *old = NULL;
+
+  if (*pp != NULL && *curlen < new_size) {
+    old = new char[cur_size*sizeofT];
+    memcpy(old, *pp, cur_size*sizeofT);
+    cudaCheck(cudaFree((void *)(*pp)));
+    *pp = NULL;
+  }
+
+  if (*pp == NULL) {
+    if (fac > 1.0f) {
+      *curlen = (int)(((double)(new_size))*(double)fac);
+    } else {
+      *curlen = new_size;
+    }
+    allocate_unified_T(pp, *curlen, sizeofT);
+    if (old != NULL) {
+      memcpy(*pp, old, cur_size*sizeofT);
+      delete [] old;
+    }
+  }
+
+}
+
+//----------------------------------------------------------------------------------------
+//
 // Deallocate page-locked host memory
 // pp = memory pointer
 //

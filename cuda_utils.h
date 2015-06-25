@@ -14,6 +14,12 @@
         }                                                  \
     } while(0)
 
+void deallocate_unified_T(void **pp);
+void allocate_unified_T(void **pp, const int len, const size_t sizeofT);
+void reallocate_unified_T(void **pp, int *curlen, const int newlen, const float fac, const size_t sizeofT);
+void resize_unified_T(void **pp, int *curlen, const int cur_size, const int new_size,
+		   const float fac, const size_t sizeofT);
+
 void deallocate_host_T(void **pp);
 void allocate_host_T(void **pp, const int len, const size_t sizeofT);
 void reallocate_host_T(void **pp, int *curlen, const int newlen, const float fac, const size_t sizeofT);
@@ -71,6 +77,61 @@ void copy3D_DtoH_T(void* src_data, void* dst_data,
 		   size_t width, size_t height, size_t depth,
 		   size_t dst_xsize, size_t dst_ysize,
 		   size_t sizeofT);
+
+//----------------------------------------------------------------------------------------
+//
+// Deallocate unified (managed) memory
+// pp = memory pointer
+//
+#ifdef __cplusplus
+template <class T>
+void deallocate_unified(T **pp) {
+  deallocate_unified_T((void **)pp);
+}
+#endif
+//----------------------------------------------------------------------------------------
+//
+// Allocate unified (managed) memory
+// pp = memory pointer
+// len = length of the array
+//
+#ifdef __cplusplus
+template <class T>
+void allocate_unified(T **pp, const int len) {
+  allocate_unified_T((void **)pp, len, sizeof(T));
+}
+#endif
+
+//----------------------------------------------------------------------------------------
+//
+// Allocate & re-allocate unified (managed) memory
+// pp = memory pointer
+// curlen = current length of the array
+// newlen = new required length of the array
+// fac = extra space allocation factor: in case of re-allocation new length will be fac*newlen
+//
+#ifdef __cplusplus
+template <class T>
+void reallocate_unified(T **pp, int *curlen, const int newlen, const float fac=1.0f) {
+  reallocate_unified_T((void **)pp, curlen, newlen, fac, sizeof(T));
+}
+#endif
+
+//----------------------------------------------------------------------------------------
+//
+// Allocate & re-allocate unified (managed) memory, preserves content
+// pp = memory pointer
+// curlen = current length of the array
+// cur_size = current size of the data content
+// new_size = new size
+// fac = extra space allocation factor: in case of re-allocation new length will be fac*new_size
+//
+#ifdef __cplusplus
+template <class T>
+void resize_unified(T **pp, int *curlen, const int cur_size, const int new_size, const float fac=1.0f) {
+  resize_unified_T((void **)pp, curlen, cur_size, new_size, fac, sizeof(T));
+}
+#endif
 
 //----------------------------------------------------------------------------------------
 //

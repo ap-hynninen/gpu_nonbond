@@ -37,6 +37,7 @@ endif
 ifeq ($(MPI_FOUND), $(YES))
 
 DEFS = -D USE_MPI
+#-D USE_FBFFT
 
 ifeq ($(OS),titan)
 CC = CC
@@ -103,6 +104,8 @@ OBJS_DYNA = cuda_utils.o gpu_dyna.o Force.o reduce.o CudaLeapfrogIntegrator.o Cu
 
 OBJS_PAIR = gpu_pair.o CudaPMERecip.o Force.o XYZQ.o cuda_utils.o reduce.o Matrix3d.o EnergyVirial.o CudaEnergyVirial.o
 
+OBJS_FBFFT = test_fbfft.o cuda_utils.o
+
 OBJS_TRANSPOSE = cpu_transpose.o mpi_utils.o CpuMultiNodeMatrix3d.o CpuMatrix3d.o
 
 ifeq ($(CUDA_COMPILER), $(YES))
@@ -112,6 +115,7 @@ OBJS += $(OBJS_BONDED)
 OBJS += $(OBJS_CONST)
 OBJS += $(OBJS_DYNA)
 OBJS += $(OBJS_PAIR)
+OBJS += $(OBJS_FBFFT)
 endif
 ifeq ($(MPI_FOUND), $(YES))
 OBJS += $(OBJS_TRANSPOSE)
@@ -146,7 +150,7 @@ GENCODE_SM20  := -gencode arch=compute_20,code=sm_20
 GENCODE_SM30  := -gencode arch=compute_30,code=sm_30
 GENCODE_SM35  := -gencode arch=compute_35,code=sm_35
 GENCODE_SM50  := -gencode arch=compute_50,code=sm_50
-GENCODE_FLAGS := $(GENCODE_SM20) $(GENCODE_SM30) $(GENCODE_SM35)
+GENCODE_FLAGS := $(GENCODE_SM30) $(GENCODE_SM35)
 # See if CUDA compiler supports compute 5.0
 ifneq ($(shell nvcc --help|grep compute_50|wc -l), 0)
 GENCODE_FLAGS += $(GENCODE_SM50)
@@ -161,7 +165,7 @@ CUDA_CFLAGS = -I${CUDAROOT}/include $(OPTLEV) $(OPENMP_OPT)
 ifeq ($(XLC_COMPILER), $(NO))
 CUDA_FLAGS += -std=c++0x
 endif
-NVCC_CFLAGS = $(OPTLEV) -lineinfo -fmad=true -use_fast_math $(GENCODE_FLAGS)
+NVCC_CFLAGS = $(OPTLEV) -lineinfo -fmad=true -use_fast_math $(GENCODE_FLAGS) --disable-warnings
 ifeq ($(XLC_COMPILER), $(YES))
 MPI_CFLAGS = -I/opt/ibmhpc/pecurrent/mpich/gnu/include64
 else
@@ -180,7 +184,7 @@ endif
 CUDA_LFLAGS += -lcudart -lcufft -lnvToolsExt
 
 ifeq ($(CUDA_COMPILER), $(YES))
-BINARIES = gpu_bonded gpu_recip gpu_const gpu_dyna gpu_direct gpu_pair
+BINARIES = gpu_bonded gpu_recip gpu_const gpu_dyna gpu_direct gpu_pair test_fbfft
 endif
 ifeq ($(MPI_FOUND), $(YES))
 BINARIES += cpu_transpose
@@ -205,6 +209,9 @@ gpu_dyna : $(OBJS_DYNA)
 
 gpu_pair : $(OBJS_PAIR)
 	$(CL) $(OPTLEV) $(CUDA_LFLAGS) -o gpu_pair $(OBJS_PAIR)
+
+test_fbfft : $(OBJS_FBFFT)
+	$(CL) $(OPTLEV) $(CUDA_LFLAGS) -o test_fbfft $(OBJS_FBFFT)
 
 cpu_transpose : $(OBJS_TRANSPOSE)
 	$(CL) $(CUDA_LFLAGS) $(OPENMP_OPT) -o cpu_transpose $(OBJS_TRANSPOSE)

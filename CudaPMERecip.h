@@ -2,7 +2,9 @@
 #define CUDAPMERECIP_H
 
 #include <cuda.h>
+#ifndef USE_FBFFT
 #include <cufft.h>
+#endif
 #if CUDA_VERSION >= 6000
 #include <cufftXt.h>
 #endif
@@ -90,6 +92,20 @@ private:
   // Total size of the data array
   int data_size;
 
+#ifdef USE_FBFFT
+  // Parameters for "COLUMN" FFT
+  int x_r2c_batchSize;
+  int x_r2c_nfft;
+
+  int y_c2c_batchSize;
+  int y_c2c_nfft;
+
+  int z_c2c_batchSize;
+  int z_c2c_nfft;
+
+  int x_c2r_batchSize;
+  int x_c2r_nfft;
+#else
   // Plans for "COLUMN" FFT
   cufftHandle x_r2c_plan;
   cufftHandle y_c2c_plan;
@@ -103,6 +119,7 @@ private:
   // Plans for "BOX" FFT
   cufftHandle r2c_plan;
   cufftHandle c2r_plan;
+#endif
 
   // true for using multiple GPUs for the FFTs
   bool multi_gpu;

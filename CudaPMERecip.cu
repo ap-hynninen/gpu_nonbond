@@ -5,6 +5,23 @@
 #include "cuda_utils.h"
 #include "reduce.h"
 #include "CudaPMERecip.h"
+#ifdef USE_FBFFT
+#include "fbfft/FBFFT.cuh"
+#include "fbfft/FBFFTCommon.cuh"
+
+#define fbfftCheck(stmt) do {           \
+    facebook::cuda::fbfft::FBFFTParameters::ErrorCode err = stmt;           \
+    if (err != facebook::cuda::fbfft::FBFFTParameters::Success) {           \
+      printf("Error running %s in file %s, function %s\n", #stmt,__FILE__,__FUNCTION__); \
+      if (err == facebook::cuda::fbfft::FBFFTParameters::UnsupportedSize) \
+        printf("Error code: UnsupportedSize\n"); \
+      if (err == facebook::cuda::fbfft::FBFFTParameters::UnsupportedDimension) \
+        printf("Error code: UnsupportedDimension\n"); \
+      exit(1);                \
+    }                 \
+  } while(0)
+
+#endif
 
 static const double pi = 3.14159265358979323846;
 
@@ -2468,6 +2485,10 @@ void CudaPMERecip<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int
   allocate<CT>(&data2, data_size);
 
   if (multi_gpu) {
+#ifdef USE_FBFFT
+    std::cerr << "No Multi-gpu support in FBFFT" << std::endl;
+    exit(1);
+#else // !USE_FBFFT
 #if CUDA_VERSION >= 6000
     cufftCheck(cufftXtMalloc(r2c_plan, &multi_data, CUFFT_XT_FORMAT_INPLACE));
     host_data = new CT2[xsize*ysize*zsize];
@@ -2476,6 +2497,7 @@ void CudaPMERecip<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int
     std::cerr << "No Multi-gpu FFT support in CUDA versions below 6.0" << std::endl;
     exit(1);
 #endif
+#endif // USE_FBFFT
   }
 
   data1_len = data_size*sizeof(AT)/sizeof(CT);
@@ -2494,6 +2516,10 @@ void CudaPMERecip<AT, CT, CT2>::init(int x0, int x1, int y0, int y1, int z0, int
     zfft_grid   = new Matrix3d<CT2>(zsize, xsize/2+1, ysize, zsize, xsize/2+1, ysize, (CT2 *)data1);
     solved_grid = new Matrix3d<CT>(xsize, ysize, zsize, xsize, ysize, zsize, (CT *)data2);
   } else if (fft_type == BOX) {
+#ifdef USE_FBFFT
+    std::cerr << "No 3D FFT support in FBFFT" << std::endl;
+    exit(1);
+#endif
     fft_grid = new Matrix3d<CT2>(xsize/2+1, ysize, zsize, xsize/2+1, ysize, zsize, (CT2 *)data2);
     solved_grid = new Matrix3d<CT>(xsize, ysize, zsize, xsize, ysize, zsize, (CT *)data2);
   }
@@ -2592,11 +2618,24 @@ void CudaPMERecip<AT, CT, CT2>::make_fft_plans() {
 
   if (fft_type == COLUMN) {
     // Set the size of the local FFT transforms
-    int batch;
     int nfftx_local = x1 - x0 + 1;
     int nffty_local = y1 - y0 + 1;
     int nfftz_local = z1 - z0 + 1;
     
+#ifdef USE_FBFFT
+    x_r2c_batchSize = nffty_local * nfftz_local;
+    x_r2c_nfft = nfftx_local;
+
+    y_c2c_batchSize = nfftz_local*(nfftx_local/2+1);
+    y_c2c_nfft = nffty_local;
+
+    z_c2c_batchSize = (nfftx_local/2+1)*nffty_local;
+    z_c2c_nfft = nfftz_local;
+
+    x_c2r_batchSize = nffty_local*nfftz_local;
+    x_c2r_nfft = nfftx_local;
+#else
+    int batch;
     batch = nffty_local * nfftz_local;
     cufftCheck(cufftPlanMany(&x_r2c_plan, 1, &nfftx_local,
 			     NULL, 0, 0,
@@ -2624,14 +2663,19 @@ void CudaPMERecip<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_C2R, batch));
     cufftCheck(cufftSetCompatibilityMode(x_c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
+#endif
   } else if (fft_type == SLAB) {
-    int batch;
     int nfftx_local = x1 - x0 + 1;
     int nffty_local = y1 - y0 + 1;
     int nfftz_local = z1 - z0 + 1;
 
     int n[2] = {nffty_local, nfftx_local};
 
+#ifdef USE_FBFFT
+    std::cerr << "make_fft_plans, SLAB not yet implemented for FBFFT" << std::endl;
+    exit(1);
+#else
+    int batch;
     batch = nfftz_local;
     cufftCheck(cufftPlanMany(&xy_r2c_plan, 2, n,
 			     NULL, 0, 0,
@@ -2652,8 +2696,12 @@ void CudaPMERecip<AT, CT, CT2>::make_fft_plans() {
 			     NULL, 0, 0, 
 			     CUFFT_C2R, batch));
     cufftCheck(cufftSetCompatibilityMode(xy_c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
-    
+#endif
   } else if (fft_type == BOX) {
+#ifdef USE_FBFFT
+    std::cerr << "make_fft_plans, BOX not supported for FBFFT" << std::endl;
+    exit(1);
+#else // !USE_FBFFT
     if (multi_gpu) {
 #if CUDA_VERSION >= 6000
       cufftCheck(cufftCreate(&r2c_plan));
@@ -2676,6 +2724,7 @@ void CudaPMERecip<AT, CT, CT2>::make_fft_plans() {
       cufftCheck(cufftPlan3d(&c2r_plan, nfftz, nffty, nfftx, CUFFT_C2R));
       cufftCheck(cufftSetCompatibilityMode(c2r_plan, CUFFT_COMPATIBILITY_NATIVE));
     }
+#endif // USE_FBFFT
   }
 
 }
@@ -2688,6 +2737,7 @@ void CudaPMERecip<AT, CT, CT2>::set_stream(cudaStream_t stream) {
 
   this->stream = stream;
 
+#ifndef USE_FBFFT
   if (fft_type == COLUMN) {
     cufftCheck(cufftSetStream(x_r2c_plan, stream));
     cufftCheck(cufftSetStream(y_c2c_plan, stream));
@@ -2701,6 +2751,7 @@ void CudaPMERecip<AT, CT, CT2>::set_stream(cudaStream_t stream) {
     cufftCheck(cufftSetStream(r2c_plan, stream));
     cufftCheck(cufftSetStream(c2r_plan, stream));
   }
+#endif
 
 }
 
@@ -2728,7 +2779,9 @@ CudaPMERecip<AT, CT, CT2>::~CudaPMERecip() {
   if (multi_gpu) {
     delete [] host_data;
     delete [] host_tmp;
+#ifndef USE_FBFFT
     cufftCheck(cufftXtFree(multi_data));
+#endif
   }
 #endif
 
@@ -2736,20 +2789,26 @@ CudaPMERecip<AT, CT, CT2>::~CudaPMERecip() {
     delete xfft_grid;
     delete yfft_grid;
     delete zfft_grid;
+#ifndef USE_FBFFT
     cufftCheck(cufftDestroy(x_r2c_plan));
     cufftCheck(cufftDestroy(y_c2c_plan));
     cufftCheck(cufftDestroy(z_c2c_plan));
     cufftCheck(cufftDestroy(x_c2r_plan));
+#endif
   } else if (fft_type == SLAB) {
     delete xyfft_grid;
     delete zfft_grid;
+#ifndef USE_FBFFT
     cufftCheck(cufftDestroy(xy_r2c_plan));
     cufftCheck(cufftDestroy(z_c2c_plan));
     cufftCheck(cufftDestroy(xy_c2r_plan));
+#endif
   } else if (fft_type == BOX) {
     delete fft_grid;
+#ifndef USE_FBFFT
     cufftCheck(cufftDestroy(r2c_plan));
     cufftCheck(cufftDestroy(c2r_plan));
+#endif
   }
 
   deallocate<CT>(&prefac_x);
@@ -2764,12 +2823,17 @@ template <typename AT, typename CT, typename CT2>
 void CudaPMERecip<AT, CT, CT2>::print_info() {
   std::cout << "fft_type = ";
   if (fft_type == COLUMN) {
-    std::cout << "COLUMN" << std::endl;
+    std::cout << "COLUMN";
   } else if (fft_type == SLAB) {
-    std::cout << "SLAB" << std::endl;
+    std::cout << "SLAB";
   } else {
-    std::cout << "BOX" << std::endl;
+    std::cout << "BOX";
   }
+#ifdef USE_FBFFT
+  std::cout << " computed using FBFFT" << std::endl;
+#else
+  std::cout << " computed using cuFFT" << std::endl;
+#endif
   std::cout << "order = " << order << std::endl;
   std::cout << "nfftx, nffty, nfftz = " << nfftx << " " << nffty << " " << nfftz << std::endl;
   std::cout << "x0...x1   = " << x0 << " ... " << x1 << std::endl;
@@ -3211,9 +3275,18 @@ template <typename AT, typename CT, typename CT2>
 void CudaPMERecip<AT, CT, CT2>::x_fft_r2c(CT2 *data) {
 
   if (fft_type == COLUMN) {
+#ifdef USE_FBFFT
+    using namespace facebook::cuda::fbfft;
+    int dataInSize[2] = {x_r2c_batchSize, x_r2c_nfft};
+    int dataOutSize[3] = {x_r2c_batchSize, x_r2c_nfft/2+1, 2};
+    DeviceTensor<float, 2> dataInTensor((float *)data, dataInSize);
+    DeviceTensor<float, 3> dataOutTensor((float *)data, dataOutSize);
+    fbfftCheck(fbfft1D<1>(dataInTensor, dataOutTensor, stream));
+#else // !USE_FBFFT
     cufftCheck(cufftExecR2C(x_r2c_plan,
 			    (cufftReal *)data,
 			    (cufftComplex *)data));
+#endif // USE_FBFFT
   } else {
     std::cerr << "CudaPMERecip::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
     exit(1);
@@ -3228,11 +3301,20 @@ template <typename AT, typename CT, typename CT2>
 void CudaPMERecip<AT, CT, CT2>::x_fft_c2r(CT2 *data) {
 
   if (fft_type == COLUMN) {
+#ifdef USE_FBFFT
+    using namespace facebook::cuda::fbfft;
+    int dataInSize[2] = {x_c2r_batchSize, x_c2r_nfft};
+    int dataOutSize[3] = {x_c2r_batchSize, x_c2r_nfft/2+1, 2};
+    DeviceTensor<float, 2> dataInTensor((float *)data, dataInSize);
+    DeviceTensor<float, 3> dataOutTensor((float *)data, dataOutSize);
+    fbfftCheck(fbifft1D<1>(dataInTensor, dataOutTensor, stream));
+#else
     cufftCheck(cufftExecC2R(x_c2r_plan,
 			    (cufftComplex *)data,
 			    (cufftReal *)data));
+#endif
   } else {
-    std::cerr << "CudaPMERecip::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
+    std::cerr << "CudaPMERecip::x_fft_c2r, only COLUMN type FFT can call this function" << std::endl;
     exit(1);
   }
 
@@ -3245,12 +3327,15 @@ template <typename AT, typename CT, typename CT2>
 void CudaPMERecip<AT, CT, CT2>::y_fft_c2c(CT2 *data, const int direction) {
 
   if (fft_type == COLUMN) {
+#ifdef USE_FBFFT
+#else
     cufftCheck(cufftExecC2C(y_c2c_plan,
 			    (cufftComplex *)data,
 			    (cufftComplex *)data,
 			    direction));
+#endif
   } else {
-    std::cerr << "CudaPMERecip::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
+    std::cerr << "CudaPMERecip::y_fft_c2c, only COLUMN type FFT can call this function" << std::endl;
     exit(1);
   }
 
@@ -3263,12 +3348,15 @@ template <typename AT, typename CT, typename CT2>
 void CudaPMERecip<AT, CT, CT2>::z_fft_c2c(CT2 *data, const int direction) {
 
   if (fft_type == COLUMN) {
+#ifdef USE_FBFFT
+#else
     cufftCheck(cufftExecC2C(z_c2c_plan,
 			    (cufftComplex *)data,
 			    (cufftComplex *)data,
 			    direction));
+#endif
   } else {
-    std::cerr << "CudaPMERecip::x_fft_r2c, only COLUMN type FFT can call this function" << std::endl;
+    std::cerr << "CudaPMERecip::z_fft_c2c, only COLUMN type FFT can call this function" << std::endl;
     exit(1);
   }
 
@@ -3292,6 +3380,18 @@ void CudaPMERecip<AT, CT, CT2>::r2c_fft() {
     // data2(z, x, y)
     z_fft_c2c(zfft_grid->data, CUFFT_FORWARD);
   } else if (fft_type == SLAB) {
+#ifdef USE_FBFFT
+    /*
+    using namespace facebook::cuda::fbfft;
+    int dataInSize[2] = {x_r2c_batchSize, x_r2c_nfft};
+    int dataOutSize[3] = {x_r2c_batchSize, x_r2c_nfft/2+1, 2};
+    DeviceTensor<float, 2> dataInTensor((float *)data, dataInSize);
+    DeviceTensor<float, 3> dataOutTensor((float *)data, dataOutSize);
+    fbfftCheck(fbfft1D<1>(dataInTensor, dataOutTensor, stream));
+    */
+    std::cerr << "CudaPMERecip::r2c_fft, slab FFT not yet implemented for FBFFT" << std::endl;
+    exit(1);
+#else // !USE_FBFFT
     cufftCheck(cufftExecR2C(xy_r2c_plan,
 			    (cufftReal *)charge_grid->data,
 			    (cufftComplex *)xyfft_grid->data));
@@ -3299,19 +3399,23 @@ void CudaPMERecip<AT, CT, CT2>::r2c_fft() {
     cufftCheck(cufftExecC2C(z_c2c_plan,
 			    (cufftComplex *)zfft_grid->data,
 			    (cufftComplex *)zfft_grid->data, CUFFT_FORWARD));
+#endif // USE_FBFFT
   } else if (fft_type == BOX) {
+#ifdef USE_FBFFT
+    std::cerr << "CudaPMERecip::r2c_fft, 3D FFT not implemented for FBFFT" << std::endl;
+    exit(1);
+#else // !USE_FBFFT
     if (multi_gpu) {
 #if CUDA_VERSION >= 6000
       // Transform from Real -> Complex
       cudaCheck(cudaMemcpy(host_tmp, charge_grid->data, sizeof(CT)*xsize*ysize*zsize,
 			   cudaMemcpyDeviceToHost));
       for (int z=0;z < zsize;z++)
-	for (int y=0;y < ysize;y++)
-	  for (int x=0;x < xsize;x++) {
-	    host_data[x + (y + z*ysize)*xsize].x = host_tmp[x + (y + z*ysize)*xsize];
-	    host_data[x + (y + z*ysize)*xsize].y = 0;
-	  }
-
+        for (int y=0;y < ysize;y++)
+          for (int x=0;x < xsize;x++) {
+            host_data[x + (y + z*ysize)*xsize].x = host_tmp[x + (y + z*ysize)*xsize];
+            host_data[x + (y + z*ysize)*xsize].y = 0;
+          }
 
       cufftCheck(cufftXtMemcpy(r2c_plan, multi_data, host_data, CUFFT_COPY_HOST_TO_DEVICE));
       cufftCheck(cufftXtExecDescriptorC2C(r2c_plan,
@@ -3322,12 +3426,11 @@ void CudaPMERecip<AT, CT, CT2>::r2c_fft() {
 
       CT2 *tmp = (CT2 *)host_tmp;
       for (int z=0;z < zsize;z++)
-	for (int y=0;y < ysize;y++)
-	  for (int x=0;x < xsize/2+1;x++) {
-	    tmp[x + (y + z*ysize)*(xsize/2+1)].x = host_data[x + (y + z*ysize)*xsize].x;
-	    tmp[x + (y + z*ysize)*(xsize/2+1)].y = host_data[x + (y + z*ysize)*xsize].y;
-	  }
-
+        for (int y=0;y < ysize;y++)
+          for (int x=0;x < xsize/2+1;x++) {
+            tmp[x + (y + z*ysize)*(xsize/2+1)].x = host_data[x + (y + z*ysize)*xsize].x;
+            tmp[x + (y + z*ysize)*(xsize/2+1)].y = host_data[x + (y + z*ysize)*xsize].y;
+          }
       cudaCheck(cudaMemcpy(fft_grid->data, tmp, sizeof(CT2)*(xsize/2+1)*ysize*zsize,
 			   cudaMemcpyHostToDevice));
 #endif
@@ -3336,8 +3439,8 @@ void CudaPMERecip<AT, CT, CT2>::r2c_fft() {
 			      (cufftReal *)charge_grid->data,
 			      (cufftComplex *)fft_grid->data));
     }
+#endif // USE_FBFFT
   }
-
 }
 
 //
@@ -3358,6 +3461,10 @@ void CudaPMERecip<AT, CT, CT2>::c2r_fft() {
     // data2(x, y, z)
     x_fft_c2r(xfft_grid->data);
   } else if (fft_type == SLAB) {
+#ifdef USE_FBFFT
+    std::cerr << "CudaPMERecip::c2c_fft, slab FFT not yet implemented for FBFFT" << std::endl;
+    exit(1);
+#else // !USE_FBFFT
     cufftCheck(cufftExecC2C(z_c2c_plan,
 			    (cufftComplex *)zfft_grid->data,
 			    (cufftComplex *)zfft_grid->data, CUFFT_INVERSE));
@@ -3365,10 +3472,16 @@ void CudaPMERecip<AT, CT, CT2>::c2r_fft() {
     cufftCheck(cufftExecC2R(xy_c2r_plan,
 			    (cufftComplex *)xyfft_grid->data,
 			    (cufftReal *)xyfft_grid->data));
+#endif // USE_FBFFT
   } else if (fft_type == BOX) {
+#ifdef USE_FBFFT
+    std::cerr << "CudaPMERecip::c2c_fft, 3D FFT not implemented for FBFFT" << std::endl;
+    exit(1);
+#else // !USE_FBFFT
     cufftCheck(cufftExecC2R(c2r_plan,
 			    (cufftComplex *)fft_grid->data,
 			    (cufftReal *)fft_grid->data));
+#endif // USE_FBFFT
   }
 
 }
