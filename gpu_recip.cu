@@ -95,16 +95,14 @@ void test4() {
   recip[8] = 1.0/boxz;
 
   // Load comparison data
-  /*
-  Matrix3d<float> q(nfftx, nffty, nfftz, "test_data/q_real_double.txt");
-  Matrix3d<float2> q_xfft(nfftx/2+1, nffty, nfftz, "test_data/q_comp1_double.txt");
-  Matrix3d<float2> q_zfft(nfftz, nfftx/2+1, nffty, "test_data/q_comp5_double.txt");
-  Matrix3d<float2> q_zfft_summed(nfftz, nfftx/2+1, nffty, "test_data/q_comp6_double.txt");
-  Matrix3d<float2> q_comp7(nfftz, nfftx/2+1, nffty, "test_data/q_comp7_double.txt");
-  Matrix3d<float2> q_comp9(nffty, nfftz, nfftx/2+1, "test_data/q_comp9_double.txt");
-  Matrix3d<float2> q_comp10(nfftx/2+1, nffty, nfftz, "test_data/q_comp10_double.txt");
-  Matrix3d<float> q_solved(nfftx, nffty, nfftz, "test_data/q_real2_double.txt");
-  */
+  // Matrix3d<float> q(nfftx, nffty, nfftz, "test_data/q_real_double.txt");
+  // Matrix3d<float2> q_xfft(nfftx/2+1, nffty, nfftz, "test_data/q_comp1_double.txt");
+  // Matrix3d<float2> q_zfft(nfftz, nfftx/2+1, nffty, "test_data/q_comp5_double.txt");
+  // Matrix3d<float2> q_zfft_summed(nfftz, nfftx/2+1, nffty, "test_data/q_comp6_double.txt");
+  // Matrix3d<float2> q_comp7(nfftz, nfftx/2+1, nffty, "test_data/q_comp7_double.txt");
+  // Matrix3d<float2> q_comp9(nffty, nfftz, nfftx/2+1, "test_data/q_comp9_double.txt");
+  // Matrix3d<float2> q_comp10(nfftx/2+1, nffty, nfftz, "test_data/q_comp10_double.txt");
+  // Matrix3d<float> q_solved(nfftx, nffty, nfftz, "test_data/q_real2_double.txt");
 
   Force<float> force_comp("test_data/force_recip_4.txt");
   Force<float> force(ncoord);
@@ -115,19 +113,19 @@ void test4() {
   XYZQ xyzq("test_data/xyzq.txt");
 
   // Create Bspline and CudaPMERecip objects
-  Bspline<float> bspline(ncoord, order, nfftx, nffty, nfftz);
+  // Bspline<float> bspline(ncoord, order, nfftx, nffty, nfftz);
   //CudaPMERecip<long long int, float, float2> CudaPMERecip(nfftx, nffty, nfftz, order, fft_type, numnode, mynode);
-  CudaPMERecip<int, float, float2> PMErecip(nfftx, nffty, nfftz, order, fft_type, numnode, mynode,
+  CudaPMERecip<float, float, float2> PMErecip(nfftx, nffty, nfftz, order, fft_type, numnode, mynode,
 					    energyVirial, "recip", "self");
 
   double tol = 1.0e-5;
   double max_diff;
 
-  bspline.set_recip<double>(recip);
+  // bspline.set_recip<double>(recip);
 
   PMErecip.print_info();
 
-  bspline.fill_bspline(xyzq.xyzq, xyzq.ncoord);
+  // bspline.fill_bspline(xyzq.xyzq, xyzq.ncoord);
 
   // Warm up
   //PMErecip.spread_charge(xyzq.ncoord, bspline);
@@ -151,7 +149,7 @@ void test4() {
     std::cout<< "energy comparison FAILED" << std::endl;
     std::cout<< "energy_comp = " << energy_comp << std::endl;
     std::cout<< "energy      = " << energy << std::endl;
-    return;
+    //return;
   } else {
     std::cout<< "energy comparison OK (tolerance " << tol << " max difference "
 	     << max_diff << ")" << std::endl;
@@ -169,7 +167,7 @@ void test4() {
     for (int i=0;i < 9;i++) {
       std::cout << virial_comp[i] << " " << virial[i] << std::endl;
     }
-    return;
+    //return;
   } else {
     std::cout<< "virial comparison OK (tolerance " << tol << " max difference "
 	     << max_diff << ")" << std::endl;
@@ -179,14 +177,12 @@ void test4() {
   // Run
   //PMErecip.spread_charge(xyzq.ncoord, bspline);
   PMErecip.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
-  /*
-  if (!q.compare(PMErecip.charge_grid, tol, max_diff)) {
-    std::cout<< "q comparison FAILED" << std::endl;
-    return;
-  } else {
-    std::cout<< "q comparison OK (tolerance " << tol << " max difference "<< max_diff << ")" << std::endl;
-  }
-  */
+  // if (!q.compare(PMErecip.charge_grid, tol, max_diff)) {
+  //   std::cout<< "q comparison FAILED" << std::endl;
+  //   //return;
+  // } else {
+  //   std::cout<< "q comparison OK (tolerance " << tol << " max difference "<< max_diff << ")" << std::endl;
+  // }
 
   tol = 0.002;
   PMErecip.r2c_fft();
@@ -348,7 +344,7 @@ void test6() {
   XYZQ xyzq("test_data/xyzq.txt");
 
   // Create Bspline and CudaPMERecip objects
-  CudaPMERecip<int, float, float2> PMErecip(nfftx, nffty, nfftz, order, fft_type, numnode, mynode,
+  CudaPMERecip<float, float, float2> PMErecip(nfftx, nffty, nfftz, order, fft_type, numnode, mynode,
 					    energyVirial, "recip", "self");
 
   double tol = 1.0e-5;
@@ -572,7 +568,7 @@ void test8() {
   XYZQ xyzq("test_data/xyzq.txt");
 
   // Create Bspline and CudaPMERecip objects
-  CudaPMERecip<int, float, float2> PMErecip(nfftx, nffty, nfftz, order, fft_type, numnode, mynode,
+  CudaPMERecip<float, float, float2> PMErecip(nfftx, nffty, nfftz, order, fft_type, numnode, mynode,
               energyVirial, "recip", "self");
 
   double tol = 1.0e-5;

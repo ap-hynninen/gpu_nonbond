@@ -1,3 +1,4 @@
+#include <typeinfo>
 #include <iostream>
 #include <cassert>
 #include <math.h>
@@ -39,10 +40,11 @@ static const double pi = 3.14159265358979323846;
 // Note that usually x0=0, x1=nfftx-1
 //
 
+// The generic version can only be used for float at the moment
 template <typename T>
 __forceinline__ __device__ void write_grid(const float val, const int ind,
-					   T* data) {
-  // The generic version can not be used
+             T* data) {
+  atomicAdd(&data[ind], (T)val);
 }
 
 // Template specialization for 64bit integer = "long long int"
@@ -3184,7 +3186,9 @@ void CudaPMERecip<AT, CT, CT2>::print_info() {
 template <typename AT, typename CT, typename CT2>
 void CudaPMERecip<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT> &bspline) {
 
-  clear_gpu_array<AT>((AT *)accum_grid->data, xsize*ysize*zsize, stream);
+  AT *dest = (typeid(AT) != typeid(CT)) ? (AT *)accum_grid->data : (AT *)charge_grid->data;
+
+  clear_gpu_array<AT>(dest, xsize*ysize*zsize, stream);
 
   dim3 nthread, nblock;
 
@@ -3206,8 +3210,7 @@ void CudaPMERecip<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT
        (float4 *)bspline.thetax,
        (float4 *)bspline.thetay,
        (float4 *)bspline.thetaz,
-       nfftx, nffty, nfftz,
-       (AT *)accum_grid->data);
+       nfftx, nffty, nfftz, dest);
     break;
 
   default:
@@ -3216,17 +3219,19 @@ void CudaPMERecip<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT
   }
   cudaCheck(cudaGetLastError());
 
-  // Reduce charge data back to a float/double value
-  nthread.x = 512;
-  nthread.y = 1;
-  nthread.z = 1;
-  nblock.x = (nfftx*nffty*nfftz - 1)/nthread.x + 1;
-  nblock.y = 1;
-  nblock.z = 1;
-  reduce_force<AT, CT> <<< nblock, nthread, 0, stream >>>(xsize*ysize*zsize,
-							  (AT *)accum_grid->data,
-							  charge_grid->data);
-  cudaCheck(cudaGetLastError());
+  if (typeid(AT) != typeid(CT)) {
+    // Reduce charge data back to a float/double value
+    nthread.x = 512;
+    nthread.y = 1;
+    nthread.z = 1;
+    nblock.x = (nfftx*nffty*nfftz - 1)/nthread.x + 1;
+    nblock.y = 1;
+    nblock.z = 1;
+    reduce_force<AT, CT> <<< nblock, nthread, 0, stream >>>(xsize*ysize*zsize,
+  							  (AT *)accum_grid->data,
+  							  charge_grid->data);
+    cudaCheck(cudaGetLastError());
+  }
 
 }
 
@@ -3236,7 +3241,9 @@ void CudaPMERecip<AT, CT, CT2>::spread_charge(const int ncoord, const Bspline<CT
 template <typename AT, typename CT, typename CT2>
 void CudaPMERecip<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoord, const double *recip) {
 
-  clear_gpu_array<AT>((AT *)accum_grid->data, xsize*ysize*zsize, stream);
+  AT *dest = (typeid(AT) != typeid(CT)) ? (AT *)accum_grid->data : (AT *)charge_grid->data;
+
+  clear_gpu_array<AT>(dest, xsize*ysize*zsize, stream);
 
   dim3 nthread, nblock;
 
@@ -3258,8 +3265,7 @@ void CudaPMERecip<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoo
     //    (AT *)accum_grid->data);
     spread_charge_ortho<AT, 4> <<< nblock, nthread, 0, stream >>>
       (xyzq, ncoord, recip1, recip2, recip3,
-       nfftx, nffty, nfftz,
-       (AT *)accum_grid->data);
+       nfftx, nffty, nfftz, dest);
     break;
 
   case 6:
@@ -3275,8 +3281,7 @@ void CudaPMERecip<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoo
     //    (AT *)accum_grid->data);
     spread_charge_ortho<AT, 6> <<< nblock, nthread, 0, stream >>>
       (xyzq, ncoord, recip1, recip2, recip3,
-       nfftx, nffty, nfftz,
-       (AT *)accum_grid->data);
+       nfftx, nffty, nfftz, dest);
     break;
 
   case 8:
@@ -3292,8 +3297,7 @@ void CudaPMERecip<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoo
     //    (AT *)accum_grid->data);
     spread_charge_ortho<AT, 8> <<< nblock, nthread, 0, stream >>>
       (xyzq, ncoord, recip1, recip2, recip3,
-       nfftx, nffty, nfftz,
-       (AT *)accum_grid->data);
+       nfftx, nffty, nfftz, dest);
     break;
 
   default:
@@ -3302,19 +3306,20 @@ void CudaPMERecip<AT, CT, CT2>::spread_charge(const float4 *xyzq, const int ncoo
   }
   cudaCheck(cudaGetLastError());
 
-  // Reduce charge data back to a float/double value
-  nthread.x = 512;
-  nthread.y = 1;
-  nthread.z = 1;
-  nblock.x = (nfftx*nffty*nfftz - 1)/nthread.x + 1;
-  nblock.y = 1;
-  nblock.z = 1;
-  reduce_force<AT, CT> <<< nblock, nthread, 0, stream >>>
-    (xsize*ysize*zsize,
-     (AT *)accum_grid->data,
-     charge_grid->data);
-
-  cudaCheck(cudaGetLastError());
+  if (typeid(AT) != typeid(CT)) {
+    // Reduce charge data back to a float/double value
+    nthread.x = 512;
+    nthread.y = 1;
+    nthread.z = 1;
+    nblock.x = (nfftx*nffty*nfftz - 1)/nthread.x + 1;
+    nblock.y = 1;
+    nblock.z = 1;
+    reduce_force<AT, CT> <<< nblock, nthread, 0, stream >>>
+      (xsize*ysize*zsize,
+       (AT *)accum_grid->data,
+       charge_grid->data);
+    cudaCheck(cudaGetLastError());
+  }
 
 }
 
@@ -3977,6 +3982,12 @@ void CudaPMERecip<AT, CT, CT2>::calc_prefac() {
 //
 template class CudaPMERecip<long long int, float, float2>;
 template class CudaPMERecip<int, float, float2>;
+template class CudaPMERecip<float, float, float2>;
+
+template void CudaPMERecip<float, float, float2>::gather_force<float>(const float4 *xyzq, const int ncoord,
+                    const double* recip,
+                    const int stride, float* force);
+
 template void CudaPMERecip<int, float, float2>::gather_force<float>(const float4 *xyzq, const int ncoord,
 								    const double* recip,
 								    const int stride, float* force);
