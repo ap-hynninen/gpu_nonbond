@@ -283,7 +283,7 @@ void test4() {
   //  PMErecip.gather_force(ncoord, recip, bspline, force.stride, force.data);
   PMErecip.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
 
-  tol = 3.3e-4;
+  tol = 3.4e-4;
   if (!force_comp.compare(force, tol, max_diff)) {
     std::cout<<"force comparison FAILED"<<std::endl;
   } else {

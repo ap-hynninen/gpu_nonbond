@@ -459,13 +459,12 @@ spread_charge_ortho(const float4 *xyzq, const int ncoord,
           AT* data) {
 
   // Shared memory use:
-  // order = 4: 2048 bytes
-  // order = 6: 2816 bytes
-  // order = 8: 3584 bytes
+  // order = 4: 1920 bytes
+  // order = 6: 2688 bytes
+  // order = 8: 3456 bytes
   __shared__ int sh_ix[32];
   __shared__ int sh_iy[32];
   __shared__ int sh_iz[32];
-  __shared__ float sh_q[32];
   __shared__ float sh_thetax[order*32];
   __shared__ float sh_thetay[order*32];
   __shared__ float sh_thetaz[order*32];
@@ -481,8 +480,6 @@ spread_charge_ortho(const float4 *xyzq, const int ncoord,
     float y = xyzqi.y;
     float z = xyzqi.z;
     float q = xyzqi.w;
-
-    sh_q[threadIdx.x] = q;
 
     float w;
 
@@ -509,7 +506,7 @@ spread_charge_ortho(const float4 *xyzq, const int ncoord,
 
     calc_one_theta<float, order>(wx, theta);
 #pragma unroll
-    for (int i=0;i < order;i++) sh_thetax[threadIdx.x*order + i] = theta[i];
+    for (int i=0;i < order;i++) sh_thetax[threadIdx.x*order + i] = q*theta[i];
 
     calc_one_theta<float, order>(wy, theta);
 #pragma unroll
@@ -539,7 +536,6 @@ spread_charge_ortho(const float4 *xyzq, const int ncoord,
     int x = sh_ix[i] + x0;
     int y = sh_iy[i] + y0;
     int z = sh_iz[i] + z0;
-    float q = sh_q[i];
       
     if (x >= nfftx) x -= nfftx;
     if (y >= nffty) y -= nffty;
@@ -552,7 +548,7 @@ spread_charge_ortho(const float4 *xyzq, const int ncoord,
     // NOTE: We use 7*32=224 threads to do this
     // Calculate interpolated charge value and store it to global memory
     if (tid < order*order*order)
-      write_grid<AT>(q*sh_thetax[i*order+x0]*sh_thetay[i*order+y0]*sh_thetaz[i*order+z0], ind, data);
+      write_grid<AT>(sh_thetax[i*order+x0]*sh_thetay[i*order+y0]*sh_thetaz[i*order+z0], ind, data);
   }
 
 }
