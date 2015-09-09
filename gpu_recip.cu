@@ -8,6 +8,7 @@
 
 void test4();
 void test6();
+void test8();
 
 int numnode = 1;
 int mynode = 0;
@@ -51,8 +52,8 @@ int main(int argc, char *argv[]) {
   */
   
   test4();
-
   test6();
+  test8();
 
   //#ifdef USE_MPI
   //  stop_mpi();
@@ -521,5 +522,131 @@ void test6() {
   } else {
     std::cout<<"force comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
   }
+
+}
+
+//
+// Test the code using data in test_data/ -directory
+//
+void test8() {
+
+  // Settings for the data:
+  const double boxx = 62.23;
+  const double boxy = 62.23;
+  const double boxz = 62.23;
+  const double kappa = 0.320;
+  const int ncoord = 23558;
+  const int nfftx = 64;
+  const int nffty = 64;
+  const int nfftz = 64;
+  const int order = 8;
+  const FFTtype fft_type = BOX;
+  // const double energy_comp = 0.5951144996E+03;
+  // const double virial_comp[9] = {-0.5314776507E+03, 0.5670623182E+01, -0.6175456643E+01,
+  //        0.5670623182E+01, -0.5086150173E+03, -0.1026251692E+00,
+  //        -0.6175456643E+01, -0.1026251692E+00, -0.5606459148E+03};
+
+  // Setup reciprocal vectors
+  double recip[9];
+  for (int i=0;i < 9;i++) recip[i] = 0;
+  recip[0] = 1.0/boxx;
+  recip[4] = 1.0/boxy;
+  recip[8] = 1.0/boxz;
+
+  // Load comparison data
+  // Matrix3d<float> q(nfftx, nffty, nfftz, "test_data/q_real_double.txt");
+  // Matrix3d<float2> q_xfft(nfftx/2+1, nffty, nfftz, "test_data/q_comp1_double.txt");
+  // Matrix3d<float2> q_zfft(nfftz, nfftx/2+1, nffty, "test_data/q_comp5_double.txt");
+  // Matrix3d<float2> q_zfft_summed(nfftz, nfftx/2+1, nffty, "test_data/q_comp6_double.txt");
+  // Matrix3d<float2> q_comp7(nfftz, nfftx/2+1, nffty, "test_data/q_comp7_double.txt");
+  // Matrix3d<float2> q_comp9(nffty, nfftz, nfftx/2+1, "test_data/q_comp9_double.txt");
+  // Matrix3d<float2> q_comp10(nfftx/2+1, nffty, nfftz, "test_data/q_comp10_double.txt");
+  // Matrix3d<float> q_solved(nfftx, nffty, nfftz, "test_data/q_real2_double.txt");
+
+  // Force<float> force_comp("test_data/force_recip_6.txt");
+  Force<float> force(ncoord);
+
+  CudaEnergyVirial energyVirial;
+
+  // Load coordinates
+  XYZQ xyzq("test_data/xyzq.txt");
+
+  // Create Bspline and CudaPMERecip objects
+  CudaPMERecip<int, float, float2> PMErecip(nfftx, nffty, nfftz, order, fft_type, numnode, mynode,
+              energyVirial, "recip", "self");
+
+  double tol = 1.0e-5;
+  double max_diff;
+
+  PMErecip.print_info();
+
+  // Warm up
+  //PMErecip.spread_charge(xyzq.ncoord, bspline);
+  //PMErecip.clear_energy_virial();
+  energyVirial.clear();
+  PMErecip.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
+  PMErecip.r2c_fft();
+  PMErecip.scalar_sum(recip, kappa, true, true);
+  PMErecip.c2r_fft();
+  //PMErecip.gather_force(ncoord, recip, bspline, force.stride, force.data);
+  PMErecip.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
+
+  double energy, virial[9];
+  //PMErecip.get_energy_virial(kappa, true, true, energy, energy_self, virial);
+  energyVirial.copyToHost();
+  cudaCheck(cudaDeviceSynchronize());
+  energy = energyVirial.getEnergy("recip");
+  energyVirial.getVirial(virial);
+
+  // tol = 1.3e-3;
+  // max_diff = fabs(energy_comp - energy);
+  // if (isnan(energy) || max_diff > tol) {
+  //   std::cout<< "energy comparison FAILED" << std::endl;
+  //   std::cout<< "energy_comp = " << energy_comp << std::endl;
+  //   std::cout<< "energy      = " << energy << std::endl;
+  //   return;
+  // } else {
+  //   std::cout<< "energy comparison OK (tolerance " << tol << " max difference "
+  //      << max_diff << ")" << std::endl;
+  // }
+  // tol = 2.0e-3;
+  // max_diff = 0.0;
+  // bool vir_nan = false;
+  // for (int i=0;i < 9;i++) {
+  //   max_diff = max(max_diff, fabs(virial_comp[i] - virial[i]));
+  //   vir_nan = vir_nan | isnan(virial[i]);
+  // }
+  // if (max_diff > tol) {
+  //   std::cout<< "virial comparison FAILED" << std::endl;
+  //   std::cout<< "virial_comp | virial" << std::endl;
+  //   for (int i=0;i < 9;i++) {
+  //     std::cout << virial_comp[i] << " " << virial[i] << std::endl;
+  //   }
+  //   return;
+  // } else {
+  //   std::cout<< "virial comparison OK (tolerance " << tol << " max difference "
+  //      << max_diff << ")" << std::endl;
+  // }
+
+  // Run
+  PMErecip.spread_charge(xyzq.xyzq, xyzq.ncoord, recip);
+
+  // tol = 0.002;
+  PMErecip.r2c_fft();
+
+  // tol = 1.0e-6;
+  PMErecip.scalar_sum(recip, kappa, false, false);
+
+  // tol = 1.0e-5;
+  PMErecip.c2r_fft();
+  // Calculate forces
+  PMErecip.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
+
+  // tol = 3.6e-4;
+  // if (!force_comp.compare(force, tol, max_diff)) {
+  //   std::cout<<"force comparison FAILED"<<std::endl;
+  // } else {
+  //   std::cout<<"force comparison OK (tolerance " << tol << " max difference " << max_diff << ")" << std::endl;
+  // }
 
 }
