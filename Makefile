@@ -150,10 +150,16 @@ GENCODE_SM20  := -gencode arch=compute_20,code=sm_20
 GENCODE_SM30  := -gencode arch=compute_30,code=sm_30
 GENCODE_SM35  := -gencode arch=compute_35,code=sm_35
 GENCODE_SM50  := -gencode arch=compute_50,code=sm_50
+# See if CUDA compiler supports compute 5.0, also disable 5.0 for Titan
+ifeq ($(OS),titan)
+# Titan, K20x GPUs
+GENCODE_FLAGS := $(GENCODE_SM35)
+else
+# Some other system
 GENCODE_FLAGS := $(GENCODE_SM30) $(GENCODE_SM35)
-# See if CUDA compiler supports compute 5.0
 ifneq ($(shell nvcc --help|grep compute_50|wc -l), 0)
 GENCODE_FLAGS += $(GENCODE_SM50)
+endif
 endif
 endif
 

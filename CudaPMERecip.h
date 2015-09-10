@@ -149,6 +149,12 @@ private:
   std::string strRecip;
   std::string strSelf;
   
+#ifdef USE_NEW_SPREAD
+  int* coordIndGrid;
+  int coordIndOverflow_len;
+  int* coordIndOverflow;
+#endif
+
   void init(int x0, int x1, int y0, int y1, int z0, int z1, int order, 
 	  bool y_land_locked, bool z_land_locked);
 
@@ -168,7 +174,7 @@ private:
 
   void set_stream(cudaStream_t stream);
 
-  void spread_charge(const int ncoord, const Bspline<CT> &bspline);
+  // void spread_charge(const int ncoord, const Bspline<CT> &bspline);
   void spread_charge(const float4 *xyzq, const int ncoord, const double *recip);
 
   void scalar_sum(const double* recip, const double kappa,
@@ -176,8 +182,8 @@ private:
 
   void calc_self_energy(const float4 *xyzq, const int ncoord, const double kappa);
 
-  void gather_force(const int ncoord, const double* recip, const Bspline<CT> &bspline,
-		    const int stride, CT* force);
+  // void gather_force(const int ncoord, const double* recip, const Bspline<CT> &bspline,
+		//     const int stride, CT* force);
   
   template <typename FT>
     void gather_force(const float4 *xyzq, const int ncoord, const double* recip,

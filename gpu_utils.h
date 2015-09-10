@@ -182,6 +182,10 @@ long long int roundCTtoAT<long long int, float>(float a) {return lliroundf(a*FOR
 
 template <>
 __forceinline__ __device__
+int roundCTtoAT<int, float>(float a) {return iroundf(a*FORCE_SCALE_I);}
+
+template <>
+__forceinline__ __device__
 long long int roundCTtoAT<long long int, double>(double a) {return lliroundd(a*FORCE_SCALE);}
 
   // ----------------------------------------------------------------------------------------------

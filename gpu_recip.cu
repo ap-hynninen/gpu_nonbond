@@ -143,7 +143,7 @@ void test4() {
   cudaCheck(cudaDeviceSynchronize());
   energy = energyVirial.getEnergy("recip");
   energyVirial.getVirial(virial);
-  tol = 1.2e-3;
+  tol = 2.0e-3;
   max_diff = fabs(energy_comp - energy);
   if (isnan(energy) || max_diff > tol) {
     std::cout<< "energy comparison FAILED" << std::endl;
@@ -154,7 +154,7 @@ void test4() {
     std::cout<< "energy comparison OK (tolerance " << tol << " max difference "
 	     << max_diff << ")" << std::endl;
   }
-  tol = 2.0e-3;
+  tol = 4.0e-3;
   max_diff = 0.0;
   bool vir_nan = false;
   for (int i=0;i < 9;i++) {
@@ -283,7 +283,7 @@ void test4() {
   //  PMErecip.gather_force(ncoord, recip, bspline, force.stride, force.data);
   PMErecip.gather_force(xyzq.xyzq, xyzq.ncoord, recip, force.stride(), force.xyz());
 
-  tol = 3.4e-4;
+  tol = 1.0e-3;
   if (!force_comp.compare(force, tol, max_diff)) {
     std::cout<<"force comparison FAILED"<<std::endl;
   } else {
